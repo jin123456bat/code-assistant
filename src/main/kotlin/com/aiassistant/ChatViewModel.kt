@@ -78,7 +78,15 @@ class ChatViewModel(
         val a = agent
         if (a != null) {
             a.run(content, apiKey) { finalText ->
-                messages.add(AgentMessage("assistant", finalText))
+                // 在 EDT 上落地最终文本，并清空 streamingContent，
+                // 否则 messages 与 streamingContent 会同时含同一份内容 → 重复渲染。
+                runOnEdt {
+                    if (finalText.isNotEmpty()) {
+                        messages.add(AgentMessage("assistant", finalText))
+                    }
+                    streamingContent = ""
+                    onMessagesChanged?.invoke()
+                }
             }
         }
     }
