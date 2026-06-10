@@ -126,13 +126,13 @@ class ChatToolWindow(private val project: Project) {
     /** 上次重算气泡时的 viewport 宽度，用于仅在宽度真正变化时重算（避免无谓重排）。 */
     private var lastViewportWidth = -1
 
-    /** 对当前所有气泡按其记录的 fraction 重新测量尺寸（viewport 就绪/变化后修正宽度）。 */
+    /**
+     * viewport 就绪/变化后让所有气泡重测尺寸。
+     * 气泡是自测量组件（[com.aiassistant.ui.ChatBubble]），尺寸在其
+     * getPreferredSize/getMaximumSize 中按当前 viewport 宽度实时计算，
+     * 因此这里只需触发一次布局失效即可，无需手动重算/冻结。
+     */
     private fun refitAllBubbles() {
-        bubbleSizeConstraints.forEach { (bubble, content) ->
-            val fraction = (bubble.getClientProperty(com.aiassistant.ui.BubbleFactory.FRACTION_KEY) as? Double)
-                ?: com.aiassistant.ui.BubbleFactory.AI_FRACTION
-            bubbleFactory.refit(bubble, content, fraction)
-        }
         conversationContainer.revalidate()
         conversationContainer.repaint()
     }
@@ -657,8 +657,7 @@ class ChatToolWindow(private val project: Project) {
                 lingmaSubmitBtn.toolTipText = if (streaming) "停止" else "发送 (Enter)"
                 if (!streaming) {
                     lingmaSubmitBtn.foreground = JBColor(0x888888, 0xAAAAAA)
-                    // 流式结束，做一次最终布局修正
-                    bubbleSizeConstraints.forEach { (b, c) -> bubbleFactory.fitWidth(b, c) }
+                    // 流式结束，触发一次布局失效；自测量气泡会按最终内容/宽度重测。
                     conversationContainer.revalidate()
                     conversationContainer.repaint()
                 }
@@ -931,7 +930,7 @@ class ChatToolWindow(private val project: Project) {
             if (contentPane is JPanel) {
                 val heightChanged = markdownRenderer.updateInPlace(contentPane, viewModel.streamingContent)
                 if (heightChanged) {
-                    bubbleFactory.fitWidth(streamingBubble!!, contentPane)
+                    // 自测量气泡：失效后按新内容自动重测尺寸，无需手动 fitWidth。
                     streamingBubble!!.revalidate()
                 }
                 streamingBubble!!.repaint()

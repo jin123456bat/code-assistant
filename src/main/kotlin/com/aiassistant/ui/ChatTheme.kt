@@ -51,6 +51,14 @@ object ChatTheme {
     const val RADIUS = 14
     const val RADIUS_TIGHT = 5
 
+    // ---- 气泡宽度约束 ----
+    /** 气泡内容绝对宽度上限（逻辑 px，交给 JBUI.scale 缩放）。 */
+    const val ABS_CAP = 560
+    /** 用户气泡最大宽度占可用宽度比例。 */
+    const val USER_FRACTION = 0.80
+    /** AI 气泡最大宽度占可用宽度比例。 */
+    const val AI_FRACTION = 1.0
+
     // ---- 字体 ----
     val bodyFont: Font get() = JBFont.regular()
     val metaFont: Font get() = JBFont.small()
