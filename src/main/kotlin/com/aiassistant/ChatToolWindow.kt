@@ -77,6 +77,8 @@ class ChatToolWindowFactory : ToolWindowFactory {
     override fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {
         val chatWindow = ChatToolWindow(project)
         val content = toolWindow.contentManager.factory.createContent(chatWindow.panel, "", false)
+        // 工具窗关闭/项目关闭时清理 handler 与 agent，避免泄漏
+        content.setDisposer(com.intellij.openapi.Disposable { chatWindow.dispose() })
         toolWindow.contentManager.addContent(content)
     }
 }
@@ -115,6 +117,19 @@ class ChatToolWindow(private val project: Project) {
     }
 
     private val viewModel = ChatViewModel()
+
+    /** 本窗口注册到 AskUserBridge 的 handler 引用，dispose 时据此安全解绑。 */
+    private var askUserHandler: ((String, List<String>, Boolean, CountDownLatch, AtomicReference<String>) -> Unit)? = null
+
+    /** 工具窗关闭时调用：解绑全局 handler，停止 agent，避免回调打到失效 UI / 线程泄漏。 */
+    fun dispose() {
+        if (askUserHandler != null && AskUserBridge.handler === askUserHandler) {
+            AskUserBridge.handler = null
+        }
+        askUserHandler = null
+        viewModel.stopGeneration()
+        instances.remove(project, this)
+    }
 
     // ---- conversation header ----
     private val newSessionBtn = JLabel("+").apply {
@@ -512,10 +527,14 @@ class ChatToolWindow(private val project: Project) {
         // v3: 注册内置工具+Skills（同步安全），首条消息即可调用
         viewModel.initialize(project)
 
-        // M5-A: 注册 ask_user 选择卡 handler（EDT 上执行；multiple=true 时多选模式）
-        AskUserBridge.handler = { question, options, multiple, latch, result ->
-            showSelectionCard(question, options, multiple, latch, result)
-        }
+        // M5-A: 注册 ask_user 选择卡 handler（EDT 上执行；multiple=true 时多选模式）。
+        // 保存引用，dispose() 时仅在仍是自己注册的 handler 时清空，避免泄露到失效 UI。
+        val myAskUserHandler: (String, List<String>, Boolean, CountDownLatch, AtomicReference<String>) -> Unit =
+            { question, options, multiple, latch, result ->
+                showSelectionCard(question, options, multiple, latch, result)
+            }
+        askUserHandler = myAskUserHandler
+        AskUserBridge.handler = myAskUserHandler
 
         // MCP 延迟加载（需 COMPONENTS_LOADED 之后）
         ApplicationManager.getApplication().invokeLater {
@@ -824,18 +843,16 @@ class ChatToolWindow(private val project: Project) {
                     createMessageBubble(AgentMessage("assistant", viewModel.streamingContent))
                 )
             }
-            // 思考/执行中指示器：agent 运行期间持续显示，避免 currentToolName 在
-            // null 间隙（思考↔执行切换）导致指示器闪烁。
-            val thinking = viewModel.currentToolName
-            if (thinking != null) {
-                if (thinking.contains("分析") || thinking.contains("思考")) {
-                    conversationContainer.add(createThinkingBubble(thinking))
-                } else {
-                    conversationContainer.add(createToolRunningBubble(thinking))
+            // 思考/执行中指示器：用 activity 状态单点驱动（取代字符串嗅探），
+            // 仅在尚未开始输出（streamingContent 为空）时显示，避免与正文重叠。
+            if (viewModel.streamingContent.isEmpty()) {
+                when (val act = viewModel.activity) {
+                    is ChatViewModel.Activity.RunningTool ->
+                        conversationContainer.add(createToolRunningBubble(act.toolName))
+                    ChatViewModel.Activity.Thinking ->
+                        conversationContainer.add(createThinkingBubble("思考中..."))
+                    ChatViewModel.Activity.Idle -> { /* 无指示器 */ }
                 }
-            } else if (viewModel.isStreaming && viewModel.streamingContent.isEmpty()) {
-                // 运行中但暂无具体状态文字、且尚未开始输出 → 稳定显示"思考中"兜底
-                conversationContainer.add(createThinkingBubble("思考中..."))
             }
         } else {
             val hintPanel = JPanel(GridBagLayout())

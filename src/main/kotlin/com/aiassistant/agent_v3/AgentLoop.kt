@@ -27,8 +27,11 @@ class AgentLoop(
     }
 
     val ctx = AgentContext(project)
-    private var cancelled = false
+    @Volatile private var cancelled = false
     private var model: String = AppSettingsService.getInstance().getModel()
+
+    /** 当前正在等待用户确认的 latch（用于 stop() 时解除阻塞，避免背景线程挂起）。 */
+    @Volatile private var pendingConfirmLatch: CountDownLatch? = null
 
     var onMessage: ((AgentMessage) -> Unit)? = null
     var onStreaming: ((String) -> Unit)? = null
@@ -111,11 +114,21 @@ class AgentLoop(
                             val approved = if (tc.name in SAFE_TOOLS || tc.name in AppSettingsService.getInstance().getToolWhitelist()) {
                                 true
                             } else {
-                                // 内联确认：通过回调 + CountDownLatch 等待用户操作
+                                // 内联确认：通过回调 + CountDownLatch 等待用户操作。
+                                // 持有 latch 引用，使 stop() 能解除等待；带超时兜底防永久挂起。
                                 val latch = CountDownLatch(1)
                                 val userChoice = AtomicBoolean(false)
+                                pendingConfirmLatch = latch
                                 onConfirmTool?.invoke(tc.name, tc.arguments, latch, userChoice)
-                                try { latch.await() } catch (_: InterruptedException) {}
+                                try {
+                                    latch.await(10, java.util.concurrent.TimeUnit.MINUTES)
+                                } catch (_: InterruptedException) {
+                                    Thread.currentThread().interrupt()
+                                } finally {
+                                    pendingConfirmLatch = null
+                                }
+                                // 等待期间被取消 → 视为未授权，跳出
+                                if (cancelled) break
                                 userChoice.get()
                             }
                             val toolResult = if (approved) {
@@ -165,7 +178,12 @@ class AgentLoop(
         }.start()
     }
 
-    fun stop() { cancelled = true; sseClient.cancel() }
+    fun stop() {
+        cancelled = true
+        sseClient.cancel()
+        // 解除可能正卡在用户确认上的背景线程，避免挂起到超时
+        pendingConfirmLatch?.countDown()
+    }
 
     // ---- Anthropic API ----
 
