@@ -4,6 +4,7 @@ import com.aiassistant.agent_v3.AgentMessage
 import com.aiassistant.mcp.McpManager
 import com.aiassistant.ui.BubbleFactory
 import com.aiassistant.ui.ChatTheme
+import com.aiassistant.ui.PlanBar
 import com.aiassistant.ui.ToolRowFactory
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.fileChooser.FileChooser
@@ -115,7 +116,7 @@ class ChatToolWindow(private val project: Project) {
         toolTipText = "新会话"
         border = JBUI.Borders.empty(2, 6, 2, 6)
         addMouseListener(object : MouseAdapter() {
-            override fun mouseClicked(e: MouseEvent) { viewModel.clearConversation(); rebuildConversation() }
+            override fun mouseClicked(e: MouseEvent) { viewModel.clearConversation(); planBar.updatePlan(null); rebuildConversation() }
             override fun mouseEntered(e: MouseEvent) { foreground = JBColor(0x2674B4, 0x5A9FD4) }
             override fun mouseExited(e: MouseEvent) { foreground = JBColor(0x888888, 0x999999) }
         })
@@ -461,9 +462,26 @@ class ChatToolWindow(private val project: Project) {
     private var lastAutoInsertedHash: Int = 0
     private var lastAutoInsertTime: Long = 0
 
+    // ---- plan bar（置顶，不随消息滚动）----
+    private val planBar = PlanBar().also { it.updatePlan(null) }
+
+    /**
+     * conversationPanel 布局：
+     *   NORTH  → northStack（conversationHeader + planBar，纵向堆叠）
+     *   CENTER → conversationScrollPane（消息列表，可滚动）
+     *
+     * planBar 位于 northStack 内，因此它固定在滚动区域之上，不会随消息滚动。
+     */
+    private val northStack = JPanel().apply {
+        layout = BoxLayout(this, BoxLayout.Y_AXIS)
+        isOpaque = false
+        add(conversationHeader)
+        add(planBar)
+    }
+
     private val conversationPanel = JPanel(BorderLayout()).apply {
         isOpaque = false
-        add(conversationHeader, BorderLayout.NORTH)
+        add(northStack, BorderLayout.NORTH)
         add(conversationScrollPane, BorderLayout.CENTER)
     }
 
@@ -595,6 +613,9 @@ class ChatToolWindow(private val project: Project) {
             ApplicationManager.getApplication().invokeLater {
                 showConfirmationBar(name, args, latch, result)
             }
+        }
+        viewModel.onPlanUpdate = { plan ->
+            ApplicationManager.getApplication().invokeLater { planBar.updatePlan(plan) }
         }
     }
 
