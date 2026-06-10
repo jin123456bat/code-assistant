@@ -10,6 +10,44 @@ import javax.swing.*
 import javax.swing.border.AbstractBorder
 
 /**
+ * 盲文帧 spinner 标签。
+ *
+ * 通过 addNotify/removeNotify 管理 Timer 生命周期：
+ *  - addNotify()：组件加入层级时启动 Timer
+ *  - removeNotify()：组件从层级移除时停止 Timer（防止 rebuild 循环导致 Timer 泄漏）
+ */
+private class BrailleSpinnerLabel(color: Color) : JLabel() {
+
+    private val frames = arrayOf("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
+    private var frameIndex = 0
+    private val timer = Timer(90) {
+        frameIndex = (frameIndex + 1) % frames.size
+        text = frames[frameIndex]
+    }
+
+    init {
+        font = ChatTheme.metaFont
+        foreground = color
+        text = frames[0]
+        // 固定宽度，防止盲文字符宽度变化引起抖动
+        val w = preferredSize.width.coerceAtLeast(14)
+        minimumSize = Dimension(w, preferredSize.height)
+        preferredSize = Dimension(w, preferredSize.height)
+        maximumSize = Dimension(w, preferredSize.height)
+    }
+
+    override fun addNotify() {
+        super.addNotify()
+        if (!timer.isRunning) timer.start()
+    }
+
+    override fun removeNotify() {
+        timer.stop()
+        super.removeNotify()
+    }
+}
+
+/**
  * 工具/思考行工厂 — 单色折叠行，替代彩色气泡。
  *
  * 设计规范：
@@ -69,11 +107,24 @@ class ToolRowFactory {
     }
 
     /**
-     * 工具结果行：默认折叠，摘要 "结果 · <toolName>"；
-     * 展开显示 message.content（超 2000 chars 截断）在 codeBg 面板中。
+     * 工具结果行：
+     * - 失败时（content 以 "错误:" / "错误：" / "Error:" 开头）渲染红色错误卡。
+     * - 成功时默认折叠，摘要 "结果 · <toolName>"；展开显示 content（超 2000 chars 截断）。
      */
     fun toolResultRow(message: AgentMessage): JPanel {
         val toolName = message.toolName ?: "tool"
+
+        // 检测失败前缀（中文全角/半角冒号 + 英文 Error:）
+        val contentTrimmed = message.content.trimStart()
+        val isError = contentTrimmed.startsWith("错误:") ||
+                contentTrimmed.startsWith("错误：") ||
+                contentTrimmed.startsWith("Error:")
+
+        if (isError) {
+            return errorCardRow(toolName, contentTrimmed)
+        }
+
+        // ---- 正常折叠结果行 ----
         val resultText = message.content.let {
             if (it.length > 2000) it.take(2000) + "\n… (已截断)" else it
         }
@@ -137,12 +188,63 @@ class ToolRowFactory {
         return outerRow
     }
 
-    /** 执行中行：静态，不可折叠 */
+    /**
+     * 错误卡：带红色左栏 + "✕ <toolName> 失败" 标题 + 错误详情（等宽软换行）。
+     * 仅当 toolResultRow 检测到失败前缀时调用。
+     */
+    private fun errorCardRow(toolName: String, errorContent: String): JPanel {
+        val outerRow = outerRow()
+
+        // 错误卡容器：红色左栏边框，浅红背景
+        val card = JPanel(BorderLayout()).apply {
+            background = ChatTheme.errorCardBg
+            border = LeftBarBorder(ChatTheme.error, 3, 7)
+        }
+
+        // 标题行
+        val headerRow = compactRow(opaque = false)
+        val titleLabel = JLabel("✕ $toolName 失败").apply {
+            font = ChatTheme.metaFont.deriveFont(Font.BOLD)
+            foreground = ChatTheme.error
+        }
+        headerRow.add(titleLabel)
+        headerRow.add(Box.createHorizontalGlue())
+        card.add(headerRow, BorderLayout.NORTH)
+
+        // 错误详情区（等宽软换行，codeBg 面板）
+        val textArea = JTextArea(errorContent).apply {
+            isEditable = false
+            lineWrap = true
+            wrapStyleWord = true
+            font = ChatTheme.codeFont
+            background = ChatTheme.codeBg
+            foreground = ChatTheme.error
+            border = JBUI.Borders.empty(4, 6)
+        }
+        val codePanel = JPanel(BorderLayout()).apply {
+            background = ChatTheme.codeBg
+            border = BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(1, 0, 0, 0, ChatTheme.codeBorder),
+                JBUI.Borders.empty(0, 0)
+            )
+            add(textArea, BorderLayout.CENTER)
+        }
+        card.add(codePanel, BorderLayout.CENTER)
+
+        outerRow.add(card)
+        outerRow.add(Box.createHorizontalGlue())
+        return outerRow
+    }
+
+    /** 执行中行：带动态盲文 spinner，不可折叠 */
     fun runningRow(toolName: String): JPanel {
         val outerRow = outerRow()
         val row = compactRow()
         row.add(hGap(2))
-        // 使用 toolFg 文字颜色，区别于结果行
+        // 动画 spinner：addNotify 启动 Timer，removeNotify 停止（无泄漏）
+        val spinner = BrailleSpinnerLabel(ChatTheme.toolBar)
+        row.add(spinner)
+        row.add(hGap(4))
         val label = JLabel("执行中 · $toolName").apply {
             font = ChatTheme.metaFont
             foreground = ChatTheme.toolFg

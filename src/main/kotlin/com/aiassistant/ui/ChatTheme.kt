@@ -40,6 +40,7 @@ object ChatTheme {
     val diffAddFg = JBColor(0x2E7D32, 0x7BBD86)
     val danger = JBColor(0xD98A3D, 0xD98A3D)
     val error = JBColor(0xB5503E, 0xE08A72)
+    val errorCardBg = JBColor(Color(181, 80, 62, 15), Color(224, 138, 114, 25))
     val doneCheck = JBColor(0x5AA86A, 0x5AA86A)
 
     // ---- 间距（逻辑 px，交给 JBUI.Borders/scale 再缩放）----
