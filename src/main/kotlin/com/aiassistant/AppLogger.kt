@@ -11,6 +11,18 @@ object AppLogger {
 
     private val LOG = Logger.getInstance("#plugins.ai-assistant")
 
+    fun info(message: String) {
+        LOG.info(message)
+    }
+
+    fun warn(message: String) {
+        LOG.warn(message)
+    }
+
+    fun error(message: String) {
+        LOG.error(message)
+    }
+
     fun requestStarted(url: String, tokenCount: Int) {
         LOG.info("Request started: endpoint=${sanitizeUrl(url)}, estimatedTokens=$tokenCount")
     }

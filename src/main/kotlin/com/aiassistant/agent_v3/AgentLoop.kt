@@ -70,7 +70,7 @@ class AgentLoop(
                     val plan = Planner.generatePlan(userMessage)
                     ctx.currentPlan = plan
                     edt { onPlanUpdate?.invoke(plan) }
-                    edt { onMessage?.invoke(AgentMessage("assistant", Planner.buildPlanSummary(plan))) }
+                    // 计划已由 PlanBar 置顶显示，不再作为文本消息重复输出
                 }
 
                 history.add(AnthropicMessage("user", userMessage))
@@ -246,6 +246,7 @@ class AgentLoop(
         synchronized(done) { try { done.wait(120_000) } catch (_: InterruptedException) {} }
         if (!hasResponse) {
             val detail = errorDetail ?: "无响应 — 请检查 API Key 和网络连接"
+            AppLogger.requestFailed(-1, detail)
             edt { onError?.invoke("API 调用失败: $detail") }
             return null
         }

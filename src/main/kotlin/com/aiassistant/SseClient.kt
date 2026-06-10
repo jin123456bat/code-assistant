@@ -14,7 +14,7 @@ open class SseClient {
 
     companion object {
         private const val CONNECT_TIMEOUT_MS = 10_000
-        private const val READ_TIMEOUT_MS = 30_000
+        private const val READ_TIMEOUT_MS = 120_000  // V4 Pro 思考模式可能需要较长时间
     }
 
     private var connection: HttpURLConnection? = null
@@ -28,9 +28,13 @@ open class SseClient {
         callback: SseCallback
     ) {
         cancelled = false
+        val startTime = System.currentTimeMillis()
         Thread {
             try {
                 val uri = URI.create(url)
+                val maskedKey = if (apiKey.length > 8) apiKey.take(4) + "..." + apiKey.takeLast(4) else "***"
+                AppLogger.info("SSE 连接开始: url=${uri.host}, apiKey=$maskedKey, bodySize=${requestBody.length}")
+
                 connection = (uri.toURL().openConnection() as HttpURLConnection).apply {
                     requestMethod = "POST"
                     connectTimeout = CONNECT_TIMEOUT_MS
@@ -54,9 +58,11 @@ open class SseClient {
                     val errorBody = connection!!.errorStream?.let {
                         BufferedReader(InputStreamReader(it)).readText()
                     } ?: ""
+                    AppLogger.requestFailed(statusCode, errorBody)
                     callback.onError(statusCode, errorBody)
                     return@Thread
                 }
+                AppLogger.info("SSE 连接成功: status=$statusCode, latency=${System.currentTimeMillis() - startTime}ms")
 
                 reader = BufferedReader(InputStreamReader(connection!!.inputStream))
                 val currentData = StringBuilder()
@@ -80,6 +86,7 @@ open class SseClient {
                 }
             } catch (e: Exception) {
                 if (!cancelled) {
+                    AppLogger.requestFailed(0, "${e.javaClass.simpleName}: ${e.message}")
                     callback.onError(0, e.message ?: "Connection failed")
                 }
             } finally {
