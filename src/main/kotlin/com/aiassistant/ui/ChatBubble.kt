@@ -55,14 +55,19 @@ class ChatBubble(
     /** 当前内容区可用最大宽度（像素），随 viewport 实时变化。 */
     private fun contentWidthBudget(): Int {
         val avail = availableWidth()
-        val budget = if (avail > 10) {
-            minOf(JBUI.scale(ChatTheme.ABS_CAP), (avail * widthFraction).toInt())
-        } else {
+        if (avail <= 10) {
             // viewport 尚未就绪：保守兜底（宁可偏窄，绝不超窗被裁）。
             // 待 viewport 就绪后一次 revalidate 即自我修正——本组件无冻结值。
-            JBUI.scale(280)
+            return maxOf(JBUI.scale(280) - horizontalPad(), JBUI.scale(40))
         }
-        return maxOf(budget - horizontalPad() - JBUI.scale(8), JBUI.scale(40))
+        // AI (fraction >= 1.0)：全宽，不设 ABS_CAP 上限。
+        // 用户 (fraction < 1.0)：按比例，受 ABS_CAP 兜底限制。
+        val cap = if (widthFraction >= 1.0) {
+            avail
+        } else {
+            minOf(JBUI.scale(ChatTheme.ABS_CAP), (avail * widthFraction).toInt())
+        }
+        return maxOf(cap - horizontalPad(), JBUI.scale(40))
     }
 
     override fun getPreferredSize(): Dimension {

@@ -173,7 +173,10 @@ class ChatToolWindow(private val project: Project) {
     // ---- conversation area ----
     private val conversationContainer = JPanel().apply {
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
-        border = JBUI.Borders.empty(4, 10, 8, 10)
+        // 左/右仅 4px 容器边距（旧值 10px 让 AI 气泡左边距过大），
+        // 气泡内部由 ChatBubble 的 PAD_BUBBLE_H=12px 自行控制文字缩进，
+        // 不再叠加容器级大间距。
+        border = JBUI.Borders.empty(4, 4, 8, 4)
     }
     private val conversationScrollPane = JBScrollPane(
         conversationContainer,
@@ -1001,6 +1004,7 @@ class ChatToolWindow(private val project: Project) {
         val panel = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.X_AXIS)
             isOpaque = false
+            alignmentX = Component.LEFT_ALIGNMENT
             border = JBUI.Borders.empty(2, 0)
         }
         val label = JLabel(text).apply {

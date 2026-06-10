@@ -332,10 +332,11 @@ class ToolRowFactory {
 
     // ---- 私有工具方法 ----
 
-    /** 外层行面板：X 轴 BoxLayout，不透明，统一间距 */
+    /** 外层行面板：X 轴 BoxLayout，不透明，统一间距，左对齐 */
     private fun outerRow(): JPanel = JPanel().apply {
         layout = BoxLayout(this, BoxLayout.X_AXIS)
         isOpaque = false
+        alignmentX = Component.LEFT_ALIGNMENT
         border = JBUI.Borders.empty(1, 0)
     }
 
