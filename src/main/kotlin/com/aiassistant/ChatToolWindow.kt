@@ -3,6 +3,8 @@ package com.aiassistant
 import com.aiassistant.agent_v3.AgentMessage
 import com.aiassistant.mcp.McpManager
 import com.aiassistant.ui.BubbleFactory
+import com.aiassistant.ui.ChatTheme
+import com.aiassistant.ui.ToolRowFactory
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.fileChooser.FileChooser
 import com.intellij.openapi.fileChooser.FileChooserDescriptor
@@ -717,6 +719,7 @@ class ChatToolWindow(private val project: Project) {
 
     private val markdownRenderer = MarkdownRenderer()
     private val bubbleFactory = BubbleFactory(conversationScrollPane)
+    private val toolRowFactory = ToolRowFactory()
 
     /** 流式更新时原地替换 JTextPane 文本，避免 remove/add 触发布局震荡 */
     private fun updateStreamingBubble() {
@@ -798,78 +801,18 @@ class ChatToolWindow(private val project: Project) {
     }
 
     /**
-     * 工具调用气泡 — 显示 AI 正在调用什么工具
+     * 工具调用行 — 委托给 ToolRowFactory（单色折叠行，替代紫色气泡）
      */
     private fun createToolCallBubble(message: AgentMessage): JPanel {
-        val panel = JPanel().apply {
-            layout = BoxLayout(this, BoxLayout.X_AXIS)
-            isOpaque = false
-            border = JBUI.Borders.empty(2, 0)
-        }
-        val bubble = JPanel(BorderLayout()).apply {
-            background = JBColor(0xF3E5F5, 0x2D2435)
-            border = BorderFactory.createCompoundBorder(
-                roundedBorder(JBColor(0xCE93D8, 0x563D5C)),
-                JBUI.Borders.empty(4, 8)
-            )
-        }
-        val toolCalls = message.toolCalls ?: emptyList()
-        val headerLabel = JLabel("工具调用 · ${toolCalls.size}").apply {
-            font = SMALL_FONT
-            foreground = JBColor(0x7B1FA2, 0xCE93D8)
-        }
-        val body = JPanel().apply {
-            layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            background = bubble.background
-        }
-        for (tc in toolCalls) {
-            val argsPreview = tc.arguments.take(100).let { if (tc.arguments.length > 100) "$it..." else it }
-            body.add(JLabel("<html><b>${tc.name}</b> <span style='color:#888'>$argsPreview</span></html>").apply {
-                font = SMALL_FONT
-            })
-        }
-        bubble.add(headerLabel, BorderLayout.NORTH)
-        bubble.add(body, BorderLayout.CENTER)
-        panel.add(bubble)
-        panel.add(Box.createHorizontalGlue())
-        return panel
+        return toolRowFactory.toolCallRow(message)
     }
 
+    /** 工具结果行 — 委托给 ToolRowFactory（默认折叠，替代绿色气泡） */
     private fun createToolResultBubble(message: AgentMessage): JPanel {
-        val panel = JPanel().apply {
-            layout = BoxLayout(this, BoxLayout.X_AXIS)
-            isOpaque = false
-            border = JBUI.Borders.empty(2, 0)
-        }
-        val toolName = message.toolName ?: "tool"
-        val bubble = JPanel(BorderLayout()).apply {
-            background = JBColor(0xE8F5E9, 0x1B3A1C)
-            border = BorderFactory.createCompoundBorder(
-                roundedBorder(JBColor(0xA5D6A7, 0x3C5A3C)),
-                JBUI.Borders.empty(4, 8)
-            )
-        }
-        val headerLabel = JLabel("结果 · $toolName").apply {
-            font = SMALL_FONT
-            foreground = JBColor(0x2E7D32, 0x81C784)
-        }
-        val resultText = message.content.let {
-            if (it.length > 2000) it.take(2000) + "\n... (已截断)" else it
-        }
-        val contentPane = JTextArea(resultText).apply {
-            isEditable = false; lineWrap = true; wrapStyleWord = true
-            font = Font(Font.MONOSPACED, Font.PLAIN, 12)
-            background = bubble.background; border = null
-            foreground = JBColor(0x333333, 0xCCCCCC)
-        }
-        bubble.add(headerLabel, BorderLayout.NORTH)
-        bubble.add(contentPane, BorderLayout.CENTER)
-        panel.add(bubble)
-        panel.add(Box.createHorizontalGlue())
-        return panel
+        return toolRowFactory.toolResultRow(message)
     }
 
-    /** 思考中轻量指示器 */
+    /** 思考中轻量指示器 — textMuted 斜体 */
     private fun createThinkingBubble(text: String): JPanel {
         val panel = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.X_AXIS)
@@ -877,8 +820,8 @@ class ChatToolWindow(private val project: Project) {
             border = JBUI.Borders.empty(2, 0)
         }
         val label = JLabel(text).apply {
-            font = Font(Font.SANS_SERIF, Font.ITALIC, 11)
-            foreground = JBColor(0x999999, 0x888888)
+            font = ChatTheme.metaFont.deriveFont(java.awt.Font.ITALIC)
+            foreground = ChatTheme.textMuted
             border = JBUI.Borders.empty(2, 4)
         }
         panel.add(label)
@@ -886,115 +829,14 @@ class ChatToolWindow(private val project: Project) {
         return panel
     }
 
-    /** 可折叠的思考内容气泡 */
+    /** 可折叠的思考内容行 — 委托给 ToolRowFactory（替代薰衣草色气泡） */
     private fun createCollapsibleThinkingBubble(content: String): JPanel {
-        val panel = JPanel().apply {
-            layout = BoxLayout(this, BoxLayout.X_AXIS)
-            isOpaque = false
-            border = JBUI.Borders.empty(2, 0, 2, 0)
-        }
-        val bubble = JPanel(BorderLayout()).apply {
-            background = JBColor(0xF5F0FF, 0x2A2530)
-            border = BorderFactory.createCompoundBorder(
-                roundedBorder(JBColor(0xD5CCE0, 0x4A4055)),
-                JBUI.Borders.empty(4, 10)
-            )
-        }
-        // 折叠时显示前两行
-        val firstTwoLines = content.lines().take(2).joinToString(" ").take(100)
-            .let { if (content.length > 100) "$it..." else it }
-        val collapsed = AtomicBoolean(true)
-        val headerLabel = JLabel(firstTwoLines).apply {
-            font = Font(Font.SANS_SERIF, Font.PLAIN, 11)
-            foreground = JBColor(0x999999, 0x888888)
-            cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
-            toolTipText = "点击展开思考过程"
-            addMouseListener(object : MouseAdapter() {
-                override fun mouseClicked(e: MouseEvent) {
-                    collapsed.set(!collapsed.get())
-                    bubble.removeAll()
-                    buildThinkingContent(bubble, content, collapsed.get())
-                    bubble.revalidate()
-                    bubble.repaint()
-                }
-            })
-        }
-        buildThinkingContent(bubble, content, true)
-        panel.add(bubble)
-        panel.add(Box.createHorizontalGlue())
-        return panel
+        return toolRowFactory.thinkingRow(content)
     }
 
-    private fun buildThinkingContent(bubble: JPanel, content: String, collapsed: Boolean) {
-        if (collapsed) {
-            val firstTwoLines = content.lines().take(2).joinToString(" ").take(100)
-                .let { if (content.length > 100) "$it..." else it }
-            bubble.add(JLabel(firstTwoLines).apply {
-                font = SMALL_FONT
-                foreground = JBColor(0x999999, 0x888888)
-                cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
-                toolTipText = "点击展开思考过程"
-                addMouseListener(object : MouseAdapter() {
-                    override fun mouseClicked(e: MouseEvent) {
-                        val c = (bubble.getClientProperty("collapsed") as? Boolean) ?: true
-                        bubble.putClientProperty("collapsed", !c)
-                        bubble.removeAll()
-                        buildThinkingContent(bubble, content, !c)
-                        bubble.revalidate()
-                        bubble.repaint()
-                    }
-                })
-            }, BorderLayout.NORTH)
-        } else {
-            // 展开后灰色切换提示
-            bubble.add(JLabel("收起").apply {
-                font = Font(Font.SANS_SERIF, Font.PLAIN, 10)
-                foreground = JBColor(0x999999, 0x888888)
-                cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
-                addMouseListener(object : MouseAdapter() {
-                    override fun mouseClicked(e: MouseEvent) {
-                        bubble.putClientProperty("collapsed", true)
-                        bubble.removeAll()
-                        buildThinkingContent(bubble, content, true)
-                        bubble.revalidate()
-                        bubble.repaint()
-                    }
-                })
-            }, BorderLayout.NORTH)
-            val textArea = JTextArea(content).apply {
-                isEditable = false; lineWrap = true; wrapStyleWord = true
-                font = BODY_FONT
-                background = bubble.background; border = null
-                foreground = JBColor(0x333333, 0xCCCCCC)
-            }
-            bubble.add(textArea, BorderLayout.CENTER)
-        }
-    }
-
-    /**
-     * 工具执行中指示器气泡
-     */
+    /** 工具执行中行 — 委托给 ToolRowFactory（替代黄色气泡） */
     private fun createToolRunningBubble(toolName: String): JPanel {
-        val panel = JPanel().apply {
-            layout = BoxLayout(this, BoxLayout.X_AXIS)
-            isOpaque = false
-            border = JBUI.Borders.empty(2, 0, 2, 0)
-        }
-        val bubble = JPanel(BorderLayout()).apply {
-            background = JBColor(0xFFF8E1, 0x3C3214)
-            border = BorderFactory.createCompoundBorder(
-                roundedBorder(JBColor(0xFFE082, 0x5C4A1C)),
-                JBUI.Borders.empty(6, 10)
-            )
-        }
-        val label = JLabel("执行中 · $toolName").apply {
-            font = SMALL_FONT
-            foreground = JBColor(0xE65100, 0xFFB74D)
-        }
-        bubble.add(label, BorderLayout.CENTER)
-        panel.add(bubble)
-        panel.add(Box.createHorizontalGlue())
-        return panel
+        return toolRowFactory.runningRow(toolName)
     }
 
     private fun sendMessage() {
