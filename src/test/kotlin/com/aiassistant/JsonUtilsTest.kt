@@ -38,4 +38,29 @@ class JsonUtilsTest {
         val unescaped = JsonUtils.unescapeJson(escaped)
         assertEquals(original, unescaped)
     }
+
+    @Test
+    fun `literal backslash-n should not become newline`() {
+        // JSON 字面值 "\\n" 表示「反斜杠 + 字母 n」，反转义应得到 \n 两个字符，
+        // 而不是一个换行符（旧链式 replace 实现的 bug）。
+        assertEquals("\\n", JsonUtils.unescapeJson("\\\\n"))
+    }
+
+    @Test
+    fun `windows path backslashes preserved`() {
+        // "C:\\new" (JSON) → C:\new
+        assertEquals("C:\\new", JsonUtils.unescapeJson("C:\\\\new"))
+    }
+
+    @Test
+    fun `unicode escape decoded`() {
+        // 你好 → 你好
+        assertEquals("你好", JsonUtils.unescapeJson("\\u4f60\\u597d"))
+    }
+
+    @Test
+    fun `escape then unescape roundtrip with backslash`() {
+        val original = "path C:\\dir\\file regex \\d+ tab\there"
+        assertEquals(original, JsonUtils.unescapeJson(JsonUtils.escapeJson(original)))
+    }
 }

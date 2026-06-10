@@ -733,12 +733,27 @@ class ChatToolWindow(private val project: Project) {
             val basePath = project.basePath ?: return null
             val oldContent: String = try {
                 val file = File(basePath, relativePath)
+                // 路径穿越防护：规范化后必须仍在项目目录内，否则拒绝读取（降级无 diff）。
+                // 与 WriteFileTool 的写入校验保持一致，防止 diff 预览泄露项目外文件。
+                val normalizedBase = File(basePath).canonicalPath
+                val normalizedTarget = file.canonicalPath
+                if (normalizedTarget != normalizedBase &&
+                    !normalizedTarget.startsWith(normalizedBase + File.separator)
+                ) {
+                    return null
+                }
                 if (file.exists() && file.isFile) file.readText(Charsets.UTF_8) else ""
             } catch (_: Exception) {
                 ""
             }
 
-            // ---- 4. 计算 diff ----
+            // ---- 4. 计算 diff（大文件防护：行数过多时跳过 LCS，避免 O(N*M) DP OOM） ----
+            val oldLines = oldContent.count { it == '\n' } + 1
+            val newLines = newContent.count { it == '\n' } + 1
+            if (oldLines.toLong() * newLines > 4_000_000L) {
+                // 退化：不做精细 diff，仅提示规模，避免冻结 EDT
+                return null
+            }
             SimpleDiff.diff(oldContent, newContent)
         } catch (_: Exception) {
             // 任何解析/IO 异常均安全降级

@@ -9,8 +9,6 @@ import java.awt.*
 import java.awt.datatransfer.StringSelection
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
-import java.util.Timer
-import java.util.TimerTask
 import javax.swing.*
 import javax.swing.text.html.HTMLEditorKit
 
@@ -389,15 +387,14 @@ class MarkdownRenderer {
         private fun showCopiedFeedback(btn: JLabel) {
             btn.text = "已复制"
             btn.foreground = ChatTheme.doneCheck
-            // 1.5 秒后恢复
-            Timer().schedule(object : TimerTask() {
-                override fun run() {
-                    SwingUtilities.invokeLater {
-                        btn.text = "复制"
-                        btn.foreground = ChatTheme.textSecondary
-                    }
-                }
-            }, 1500)
+            // 1.5 秒后恢复。用 javax.swing.Timer（单 EDT 线程、回调在 EDT），
+            // 而非 java.util.Timer —— 后者每次 new 都会泄漏一个不回收的后台线程。
+            val swingTimer = javax.swing.Timer(1500) {
+                btn.text = "复制"
+                btn.foreground = ChatTheme.textSecondary
+            }
+            swingTimer.isRepeats = false
+            swingTimer.start()
         }
     }
 }
