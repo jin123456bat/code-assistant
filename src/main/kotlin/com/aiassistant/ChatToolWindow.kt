@@ -2,10 +2,13 @@ package com.aiassistant
 
 import com.aiassistant.agent_v3.AgentMessage
 import com.aiassistant.mcp.McpManager
+import com.aiassistant.shared.JsonUtils
 import com.aiassistant.ui.BubbleFactory
 import com.aiassistant.ui.ChatTheme
+import com.aiassistant.ui.DiffLine
 import com.aiassistant.ui.PermissionCard
 import com.aiassistant.ui.PlanBar
+import com.aiassistant.ui.SimpleDiff
 import com.aiassistant.ui.ToolRowFactory
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.fileChooser.FileChooser
@@ -622,6 +625,13 @@ class ChatToolWindow(private val project: Project) {
 
     /** 内联工具权限确认卡 — 选项列表风格（M3-A），确认后卡片保留并展示已选状态 */
     private fun showConfirmationBar(name: String, args: String, latch: CountDownLatch, userChoice: AtomicBoolean) {
+        // 仅 write_file 需要计算 diff，其余工具 diffLines = null
+        val diffLines: List<DiffLine>? = if (name == "write_file") {
+            computeWriteFileDiff(args)
+        } else {
+            null
+        }
+
         val card = PermissionCard.build(
             toolName = name,
             args = args,
@@ -637,12 +647,101 @@ class ChatToolWindow(private val project: Project) {
             onReject = {
                 userChoice.set(false)
                 latch.countDown()
-            }
+            },
+            diffLines = diffLines
         )
         conversationContainer.add(card, conversationContainer.componentCount - 1)
         conversationContainer.revalidate()
         conversationContainer.repaint()
         scrollToBottom(force = true)
+    }
+
+    /**
+     * 解析 write_file 的 args JSON，读取旧文件，计算行级 diff。
+     *
+     * WriteFileTool 的参数：path（文件路径，相对项目根），content（文件内容）。
+     * args 是原始 JSON 字符串，如：{"path":"src/Foo.kt","content":"line1\nline2"}
+     *
+     * content 值可能包含嵌入的换行转义（\n），使用 JsonUtils.unescapeJson 还原。
+     * 任何异常均被吞掉，返回 null 使卡片降级为无 diff 模式。
+     */
+    private fun computeWriteFileDiff(args: String): List<DiffLine>? {
+        return try {
+            // ---- 1. 提取 path 字段 ----
+            // 匹配 "path":"value" 中的 value（不含转义引号）
+            val pathRegex = Regex(""""path"\s*:\s*"((?:[^"\\]|\\.)*)"""")
+            val relativePath = pathRegex.find(args)?.groupValues?.get(1)
+                ?.let { JsonUtils.unescapeJson(it) }
+                ?: return null   // 找不到 path → 降级
+
+            // ---- 2. 提取 content 字段 ----
+            // content 值可能很长，且包含 \n 等转义序列。
+            // 策略：找到 "content": 之后的第一个非转义结束引号。
+            val newContent = extractJsonStringValue(args, "content") ?: return null
+
+            // ---- 3. 读取旧文件（若不存在视为空文件） ----
+            val basePath = project.basePath ?: return null
+            val oldContent: String = try {
+                val file = File(basePath, relativePath)
+                if (file.exists() && file.isFile) file.readText(Charsets.UTF_8) else ""
+            } catch (_: Exception) {
+                ""
+            }
+
+            // ---- 4. 计算 diff ----
+            SimpleDiff.diff(oldContent, newContent)
+        } catch (_: Exception) {
+            // 任何解析/IO 异常均安全降级
+            null
+        }
+    }
+
+    /**
+     * 从 JSON 字符串中提取指定 key 的字符串值，并使用 JsonUtils.unescapeJson 还原转义。
+     *
+     * 简单实现：找到 `"key":` 后，扫描第一个 `"` 到第一个未转义的 `"` 之间的内容。
+     * 不依赖完整 JSON 解析器，但可处理常见的 \n \t \" \\ 转义序列。
+     *
+     * @return 还原后的字符串，若未找到返回 null
+     */
+    private fun extractJsonStringValue(json: String, key: String): String? {
+        // 找 "key": 的起始位置（key 本身也可能被转义，但 path/content 均为纯 ASCII）
+        val keyPattern = "\"$key\""
+        val keyStart = json.indexOf(keyPattern)
+        if (keyStart < 0) return null
+
+        // 跳过 key + 冒号 + 可能的空白
+        var pos = keyStart + keyPattern.length
+        while (pos < json.length && json[pos] in " \t\r\n") pos++
+        if (pos >= json.length || json[pos] != ':') return null
+        pos++ // 跳过 ':'
+        while (pos < json.length && json[pos] in " \t\r\n") pos++
+        if (pos >= json.length || json[pos] != '"') return null
+        pos++ // 跳过开头 '"'
+
+        // 扫描字符串值直到未转义的 '"'
+        val sb = StringBuilder()
+        while (pos < json.length) {
+            val ch = json[pos]
+            when {
+                ch == '\\' && pos + 1 < json.length -> {
+                    // 保留原始转义序列，由 unescapeJson 统一处理
+                    sb.append('\\')
+                    sb.append(json[pos + 1])
+                    pos += 2
+                }
+                ch == '"' -> {
+                    // 字符串结束
+                    pos++
+                    break
+                }
+                else -> {
+                    sb.append(ch)
+                    pos++
+                }
+            }
+        }
+        return JsonUtils.unescapeJson(sb.toString())
     }
 
     private fun rebuildConversation() {

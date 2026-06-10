@@ -7,6 +7,9 @@ import java.awt.event.MouseEvent
 import javax.swing.*
 import javax.swing.border.AbstractBorder
 
+/** diff 预览最多展示的行数，超出后折叠显示省略提示 */
+private const val DIFF_PREVIEW_MAX_LINES = 40
+
 /**
  * 权限确认选项列表卡片（M3-A）。
  *
@@ -49,7 +52,8 @@ object PermissionCard {
         args: String,
         onAllowOnce: () -> Unit,
         onAlwaysAllow: () -> Unit,
-        onReject: () -> Unit
+        onReject: () -> Unit,
+        diffLines: List<DiffLine>? = null
     ): JPanel {
         // 危险变体：execute_command 使用 orange 样式
         val isDanger = toolName == "execute_command"
@@ -115,7 +119,19 @@ object PermissionCard {
         }
 
         headerRow.add(Box.createHorizontalGlue())
-        card.add(headerRow, BorderLayout.NORTH)
+
+        // 北区：头部行（若有 diff 则用纵向堆叠面板包裹头部 + diff 区）
+        if (diffLines != null && diffLines.isNotEmpty()) {
+            val northPanel = JPanel().apply {
+                layout = BoxLayout(this, BoxLayout.Y_AXIS)
+                isOpaque = false
+            }
+            northPanel.add(headerRow)
+            northPanel.add(buildDiffBlock(diffLines))
+            card.add(northPanel, BorderLayout.NORTH)
+        } else {
+            card.add(headerRow, BorderLayout.NORTH)
+        }
 
         // ---- 选项列表 ----
         val optionList = JPanel().apply {
@@ -332,6 +348,61 @@ object PermissionCard {
         card.add(confirmedRow, BorderLayout.CENTER)
         card.revalidate()
         card.repaint()
+    }
+
+    // ---- diff 预览块 ----
+
+    /**
+     * 构建行级 diff 预览面板。
+     *
+     * - 单色 codeBg 背景，等宽字体
+     * - ADD 行前缀 "+ "，颜色 diffAddFg
+     * - DEL 行前缀 "- "，颜色 diffDelFg
+     * - CTX 行前缀 "  "，颜色 textMuted
+     * - 超过 DIFF_PREVIEW_MAX_LINES 行时末尾显示省略提示
+     */
+    private fun buildDiffBlock(diffLines: List<DiffLine>): JPanel {
+        val panel = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            isOpaque = true
+            background = ChatTheme.codeBg
+            border = JBUI.Borders.empty(6, 10, 6, 10)
+            alignmentX = Component.LEFT_ALIGNMENT
+        }
+
+        val displayLines = if (diffLines.size > DIFF_PREVIEW_MAX_LINES) {
+            diffLines.take(DIFF_PREVIEW_MAX_LINES)
+        } else {
+            diffLines
+        }
+
+        for (line in displayLines) {
+            val (prefix, color) = when (line.kind) {
+                DiffKind.ADD -> "+ " to ChatTheme.diffAddFg
+                DiffKind.DEL -> "- " to ChatTheme.diffDelFg
+                DiffKind.CTX -> "  " to ChatTheme.textMuted
+            }
+            // 每行文字截断以避免超宽
+            val text = (prefix + line.text).take(200)
+            val label = JLabel(text).apply {
+                font = ChatTheme.codeFont.deriveFont(ChatTheme.metaFont.size.toFloat())
+                foreground = color
+                alignmentX = Component.LEFT_ALIGNMENT
+            }
+            panel.add(label)
+        }
+
+        // 若有省略行，显示提示
+        if (diffLines.size > DIFF_PREVIEW_MAX_LINES) {
+            val omitted = diffLines.size - DIFF_PREVIEW_MAX_LINES
+            panel.add(JLabel("… (省略 $omitted 行)").apply {
+                font = ChatTheme.metaFont
+                foreground = ChatTheme.textMuted
+                alignmentX = Component.LEFT_ALIGNMENT
+            })
+        }
+
+        return panel
     }
 
     // ---- 卡片圆角边框 ----
