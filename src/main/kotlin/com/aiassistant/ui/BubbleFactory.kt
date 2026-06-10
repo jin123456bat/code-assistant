@@ -47,7 +47,7 @@ class BubbleFactory(private val scrollPane: JBScrollPane) {
     }
 
     /** 行容器：X 轴 BoxLayout，承载左右对齐 + glue。 */
-    fun rowPanel(): JPanel = JPanel().apply {
+    private fun rowPanel(): JPanel = JPanel().apply {
         layout = BoxLayout(this, BoxLayout.X_AXIS)
         isOpaque = false
         border = JBUI.Borders.empty(2, 0)

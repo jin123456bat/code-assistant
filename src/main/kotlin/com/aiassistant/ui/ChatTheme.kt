@@ -2,7 +2,6 @@ package com.aiassistant.ui
 
 import com.intellij.ui.JBColor
 import com.intellij.util.ui.JBFont
-import com.intellij.util.ui.JBUI
 import java.awt.Color
 import java.awt.Font
 

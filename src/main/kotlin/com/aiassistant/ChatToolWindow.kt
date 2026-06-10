@@ -2,6 +2,7 @@ package com.aiassistant
 
 import com.aiassistant.agent_v3.AgentMessage
 import com.aiassistant.mcp.McpManager
+import com.aiassistant.ui.BubbleFactory
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.fileChooser.FileChooser
 import com.intellij.openapi.fileChooser.FileChooserDescriptor
@@ -455,7 +456,6 @@ class ChatToolWindow(private val project: Project) {
     private var streamingBubble: JPanel? = null
     private var streamingContentPane: JComponent? = null
     // 自动引用去重
-    @Volatile private var suppressResize = false
     private var lastAutoInsertedHash: Int = 0
     private var lastAutoInsertTime: Long = 0
 
@@ -566,13 +566,10 @@ class ChatToolWindow(private val project: Project) {
                 lingmaSubmitBtn.toolTipText = if (streaming) "停止" else "发送 (Enter)"
                 if (!streaming) {
                     lingmaSubmitBtn.foreground = JBColor(0x888888, 0xAAAAAA)
-                    suppressResize = false
                     // 流式结束，做一次最终布局修正
                     bubbleSizeConstraints.forEach { (b, c) -> bubbleFactory.fitWidth(b, c) }
                     conversationContainer.revalidate()
                     conversationContainer.repaint()
-                } else {
-                    suppressResize = true
                 }
             }
         }
@@ -719,7 +716,7 @@ class ChatToolWindow(private val project: Project) {
     }
 
     private val markdownRenderer = MarkdownRenderer()
-    private val bubbleFactory = com.aiassistant.ui.BubbleFactory(conversationScrollPane)
+    private val bubbleFactory = BubbleFactory(conversationScrollPane)
 
     /** 流式更新时原地替换 JTextPane 文本，避免 remove/add 触发布局震荡 */
     private fun updateStreamingBubble() {
