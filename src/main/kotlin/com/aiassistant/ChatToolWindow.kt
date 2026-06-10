@@ -61,6 +61,7 @@ import javax.swing.BoxLayout
 import javax.swing.DefaultListModel
 import javax.swing.JComponent
 import javax.swing.JLabel
+import javax.swing.JMenuItem
 import javax.swing.JPanel
 import javax.swing.JPopupMenu
 import javax.swing.JTextArea
@@ -154,6 +155,12 @@ class ChatToolWindow(private val project: Project) {
     }
 
     private var projectFilesCache: List<String> = emptyList()
+
+    /** DocumentListener 内修改文档时防止递归触发补全逻辑的重入标志 */
+    private val inputListenerGuard = AtomicBoolean(false)
+
+    /** 斜杠命令弹出菜单（懒初始化） */
+    private var slashCommandPopup: JPopupMenu? = null
 
     // ---- input area ----
     private val inputArea = JTextArea(3, 20).apply {
@@ -526,6 +533,9 @@ class ChatToolWindow(private val project: Project) {
         bindViewModel()
         addRefreshListener { checkEmptyState() }
         ApplicationManager.getApplication().invokeLater { checkEmptyState() }
+
+        // M5-B: 输入框 / 与 @ 补全菜单
+        setupInputCompletions()
 
         // 延迟注册编辑器选区监听，避免在 IDE 启动早期阶段（COMPONENTS_LOADED 之前）访问消息总线
         ApplicationManager.getApplication().invokeLater {
@@ -942,6 +952,141 @@ class ChatToolWindow(private val project: Project) {
     /** 工具执行中行 — 委托给 ToolRowFactory（替代黄色气泡） */
     private fun createToolRunningBubble(toolName: String): JPanel {
         return toolRowFactory.runningRow(toolName)
+    }
+
+    // ---- M5-B: 输入框补全菜单（/ 命令 + @ 文件引用）----
+
+    /**
+     * 为 inputArea 挂载 DocumentListener，实现：
+     *  - 输入框为空（或纯空白）时输入 `/` → 显示斜杠命令菜单
+     *  - 在行首或空白符后输入 `@` → 打开文件选择器
+     *
+     * 使用 [inputListenerGuard]（AtomicBoolean）防止在 invokeLater 内修改文档时触发递归。
+     * 触发条件（只在以下情况响应，不劫持句中的 / 或 @）：
+     *  - `/`：输入后整个文本 trim 后恰好等于 "/"（即输入框实际上只有这一个字符）
+     *  - `@`：新插入的字符为 `@`，且其前一位是行首/空白（或位于文本起始）
+     */
+    private fun setupInputCompletions() {
+        inputArea.document.addDocumentListener(object : DocumentListener {
+            override fun insertUpdate(e: DocumentEvent) = checkTrigger(e)
+            override fun removeUpdate(e: DocumentEvent) = Unit
+            override fun changedUpdate(e: DocumentEvent) = Unit
+
+            private fun checkTrigger(e: DocumentEvent) {
+                // 重入保护：若当前正在 invokeLater 内修改文档，直接跳过
+                if (inputListenerGuard.get()) return
+
+                // 只关心单字符插入（避免粘贴大段文本时误触）
+                if (e.length != 1) return
+
+                val text = try { inputArea.text } catch (_: Exception) { return }
+                val insertPos = e.offset
+                val insertedChar = try { e.document.getText(insertPos, 1) } catch (_: Exception) { return }
+
+                when (insertedChar) {
+                    "/" -> {
+                        // 仅当输入框此时只含一个 "/" 字符（trim 后）时才弹出命令菜单
+                        if (text.trim() == "/") {
+                            SwingUtilities.invokeLater { showSlashCommandMenu() }
+                        }
+                    }
+                    "@" -> {
+                        // 仅当 @ 出现在行首或空白之后（即合理的文件引用触发位置）
+                        val beforeAt = if (insertPos > 0) {
+                            try { e.document.getText(insertPos - 1, 1) } catch (_: Exception) { " " }
+                        } else {
+                            " " // 位于文本最开头，视为空白后
+                        }
+                        if (beforeAt.isBlank()) {
+                            SwingUtilities.invokeLater {
+                                // 移除触发字符 @ 以获得更干净的体验，再打开文件选择器
+                                inputListenerGuard.set(true)
+                                try {
+                                    // 找到并删除刚插入的 @（用最新 text 重新定位）
+                                    val currentText = inputArea.text
+                                    val atIdx = currentText.lastIndexOf('@')
+                                    if (atIdx >= 0) {
+                                        inputArea.document.remove(atIdx, 1)
+                                    }
+                                } catch (_: Exception) {
+                                } finally {
+                                    inputListenerGuard.set(false)
+                                }
+                                showFilePicker()
+                            }
+                        }
+                    }
+                }
+            }
+        })
+    }
+
+    /**
+     * 显示斜杠命令弹出菜单。
+     *
+     * 支持的命令（均绑定到现有真实操作）：
+     *  - `/new`   — 新会话：清空对话 + 重建视图
+     *  - `/stop`  — 停止生成：调用 viewModel.stopGeneration()
+     *  - `/clear` — 清空输入：清除 inputArea 文本
+     *
+     * 弹出位置：紧贴 inputPanel 上方左对齐。
+     * 键盘：Up/Down 选项，Enter 确认，Esc 关闭。
+     * 选择后：先清除输入框中的 "/"，再执行对应操作。
+     */
+    private fun showSlashCommandMenu() {
+        // 若当前正在流式输出，/stop 以外的命令通常无害，但仍按正常菜单展示
+        val popup = JPopupMenu()
+
+        data class Cmd(val name: String, val desc: String, val action: () -> Unit)
+        val commands = listOf(
+            Cmd("/new",   "新会话") {
+                viewModel.clearConversation()
+                planBar.updatePlan(null)
+                rebuildConversation()
+            },
+            Cmd("/stop",  "停止生成") {
+                viewModel.stopGeneration()
+            },
+            Cmd("/clear", "清空输入") {
+                // 输入框已在 executeCommand 中清空，此处无需重复
+            }
+        )
+
+        /** 清除输入框中的触发字符并执行命令 */
+        fun executeCommand(cmd: Cmd) {
+            popup.isVisible = false
+            inputListenerGuard.set(true)
+            try {
+                inputArea.text = ""
+            } finally {
+                inputListenerGuard.set(false)
+            }
+            cmd.action()
+        }
+
+        for (cmd in commands) {
+            val item = JMenuItem().apply {
+                // 命令名用等宽字体，描述用普通字体，通过 HTML 排版
+                text = "<html><tt style='font-size:12pt'>${cmd.name}</tt>" +
+                        "&nbsp;&nbsp;<span style='color:gray;font-size:10pt'>${cmd.desc}</span></html>"
+                addActionListener { executeCommand(cmd) }
+            }
+            popup.add(item)
+        }
+
+        // 键盘支持：Esc 关闭
+        popup.addKeyListener(object : KeyAdapter() {
+            override fun keyPressed(e: KeyEvent) {
+                if (e.keyCode == KeyEvent.VK_ESCAPE) popup.isVisible = false
+            }
+        })
+
+        // 定位：显示在 inputPanel 正上方
+        val popupHeight = popup.preferredSize.height
+            .coerceAtLeast(commands.size * 32 + 8) // 估算高度（首次 preferredSize 可能为 0）
+        popup.show(inputPanel, 0, -popupHeight)
+
+        slashCommandPopup = popup
     }
 
     private fun sendMessage() {
