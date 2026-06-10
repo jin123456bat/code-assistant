@@ -20,7 +20,8 @@ class ToolRegistryV3 {
     fun registerBuiltIn() {
         listOf(
             ReadFileTool(), WriteFileTool(), SearchCodeTool(), ListDirectoryTool(),
-            ExecuteCommandTool(), GitDiffTool(), GitLogTool(), GitStatusTool()
+            ExecuteCommandTool(), GitDiffTool(), GitLogTool(), GitStatusTool(),
+            AskUserTool()
         ).forEach { tools[it.name] = it }
         invalidateCache()
     }

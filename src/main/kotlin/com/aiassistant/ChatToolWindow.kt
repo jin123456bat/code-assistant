@@ -3,11 +3,13 @@ package com.aiassistant
 import com.aiassistant.agent_v3.AgentMessage
 import com.aiassistant.mcp.McpManager
 import com.aiassistant.shared.JsonUtils
+import com.aiassistant.ui.AskUserBridge
 import com.aiassistant.ui.BubbleFactory
 import com.aiassistant.ui.ChatTheme
 import com.aiassistant.ui.DiffLine
 import com.aiassistant.ui.PermissionCard
 import com.aiassistant.ui.PlanBar
+import com.aiassistant.ui.SelectionCard
 import com.aiassistant.ui.SimpleDiff
 import com.aiassistant.ui.ToolRowFactory
 import com.intellij.openapi.application.ApplicationManager
@@ -50,6 +52,7 @@ import java.util.Base64
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import javax.imageio.ImageIO
 import javax.swing.*
 import javax.swing.BorderFactory
@@ -501,6 +504,12 @@ class ChatToolWindow(private val project: Project) {
         register(project, this)
         // v3: 注册内置工具+Skills（同步安全），首条消息即可调用
         viewModel.initialize(project)
+
+        // M5-A: 注册 ask_user 选择卡 handler（EDT 上执行）
+        AskUserBridge.handler = { question, options, latch, result ->
+            showSelectionCard(question, options, latch, result)
+        }
+
         // MCP 延迟加载（需 COMPONENTS_LOADED 之后）
         ApplicationManager.getApplication().invokeLater {
             val mcpManager = McpManager(project)
@@ -649,6 +658,32 @@ class ChatToolWindow(private val project: Project) {
                 latch.countDown()
             },
             diffLines = diffLines
+        )
+        conversationContainer.add(card, conversationContainer.componentCount - 1)
+        conversationContainer.revalidate()
+        conversationContainer.repaint()
+        scrollToBottom(force = true)
+    }
+
+    /**
+     * ask_user 工具选择卡（M5-A）。
+     *
+     * 在 EDT 上调用：构建 [SelectionCard] 并插入会话区。
+     * 用户点击后回调会 set result + countDown，工具背景线程随即解除阻塞。
+     */
+    private fun showSelectionCard(
+        question: String,
+        options: List<String>,
+        latch: CountDownLatch,
+        result: AtomicReference<String>
+    ) {
+        val card = SelectionCard.build(
+            question = question,
+            options = options,
+            onChosen = { chosen ->
+                result.set(chosen)
+                latch.countDown()
+            }
         )
         conversationContainer.add(card, conversationContainer.componentCount - 1)
         conversationContainer.revalidate()
