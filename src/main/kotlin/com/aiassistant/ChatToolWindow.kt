@@ -70,6 +70,8 @@ import javax.swing.ScrollPaneConstants
 import javax.swing.SwingConstants
 import javax.swing.SwingUtilities
 import javax.swing.TransferHandler
+import java.awt.event.ComponentAdapter
+import java.awt.event.ComponentEvent
 import javax.swing.event.DocumentEvent
 import javax.swing.event.DocumentListener
 
@@ -120,6 +122,20 @@ class ChatToolWindow(private val project: Project) {
 
     /** 本窗口注册到 AskUserBridge 的 handler 引用，dispose 时据此安全解绑。 */
     private var askUserHandler: ((String, List<String>, Boolean, CountDownLatch, AtomicReference<String>) -> Unit)? = null
+
+    /** 上次重算气泡时的 viewport 宽度，用于仅在宽度真正变化时重算（避免无谓重排）。 */
+    private var lastViewportWidth = -1
+
+    /** 对当前所有气泡按其记录的 fraction 重新测量尺寸（viewport 就绪/变化后修正宽度）。 */
+    private fun refitAllBubbles() {
+        bubbleSizeConstraints.forEach { (bubble, content) ->
+            val fraction = (bubble.getClientProperty(com.aiassistant.ui.BubbleFactory.FRACTION_KEY) as? Double)
+                ?: com.aiassistant.ui.BubbleFactory.AI_FRACTION
+            bubbleFactory.refit(bubble, content, fraction)
+        }
+        conversationContainer.revalidate()
+        conversationContainer.repaint()
+    }
 
     /** 工具窗关闭时调用：解绑全局 handler，停止 agent，避免回调打到失效 UI / 线程泄漏。 */
     fun dispose() {
@@ -552,6 +568,19 @@ class ChatToolWindow(private val project: Project) {
         bindViewModel()
         addRefreshListener { checkEmptyState() }
         ApplicationManager.getApplication().invokeLater { checkEmptyState() }
+
+        // viewport 宽度变化时重算气泡：仅在宽度真正改变时触发。这样首次 viewport
+        // 未就绪导致的错误宽度会在就绪后被修正（防止气泡超出窗口被裁），
+        // 拖窗口也能正确换行。hug content 测量已正确，重算不会让短气泡乱变。
+        conversationScrollPane.addComponentListener(object : ComponentAdapter() {
+            override fun componentResized(e: ComponentEvent) {
+                val w = conversationScrollPane.viewport.width
+                if (w > 10 && w != lastViewportWidth) {
+                    lastViewportWidth = w
+                    ApplicationManager.getApplication().invokeLater { refitAllBubbles() }
+                }
+            }
+        })
 
         // M5-B: 输入框 / 与 @ 补全菜单
         setupInputCompletions()

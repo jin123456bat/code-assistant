@@ -6,6 +6,7 @@ import com.intellij.ui.components.JBScrollPane
 import com.intellij.util.ui.JBUI
 import java.awt.*
 import javax.swing.*
+import javax.swing.text.html.HTMLEditorKit
 
 /**
  * 用户/AI 气泡工厂：单一强调色、hug content、固定间距、真圆角。
@@ -23,6 +24,8 @@ class BubbleFactory(private val scrollPane: JBScrollPane) {
         const val ABS_CAP = 560
         const val USER_FRACTION = 0.80   // 用户气泡最大 80% 宽
         const val AI_FRACTION = 1.0      // AI 气泡最大 100% 宽
+        /** bubble.clientProperty 中记录其宽度占比，供 viewport 变化时重算用。 */
+        const val FRACTION_KEY = "bubble.fraction"
 
         /** 递归查找容器中第一个 JTextPane 后代（用于测量 markdown 容器内容宽度）。 */
         fun findFirstTextPane(component: JComponent): JTextPane? {
@@ -38,14 +41,22 @@ class BubbleFactory(private val scrollPane: JBScrollPane) {
     }
 
     fun userBubble(message: AgentMessage): Triple<JPanel, JPanel, JComponent> {
-        val content = JTextArea(message.content).apply {
+        // 用户气泡也用 JTextPane（与 AI 同一渲染路径）：HTML 视图测高可靠，
+        // 不会出现 JTextArea 单行高度偏小导致的文字纵向裁切。
+        val fg = String.format("#%06X", ChatTheme.userFg.rgb and 0xFFFFFF)
+        val esc = htmlEscape(message.content)
+        val content = JTextPane().apply {
             isEditable = false
-            font = ChatTheme.bodyFont
+            contentType = "text/html"
+            editorKit = HTMLEditorKit()
             isOpaque = false
-            foreground = ChatTheme.userFg
-            border = null; margin = Insets(0, 0, 0, 0)
+            border = null
+            text = "<html><body style='margin:0;padding:0;font-family:sans-serif;" +
+                "font-size:13px;color:$fg'>$esc</body></html>"
+            caretPosition = 0
         }
         val bubble = roundedBubble(ChatTheme.userBg, null)
+        bubble.putClientProperty(FRACTION_KEY, USER_FRACTION)
         bubble.add(content, BorderLayout.CENTER)
         fitWidth(bubble, content, USER_FRACTION)
         val row = rowPanel().apply {
@@ -59,6 +70,7 @@ class BubbleFactory(private val scrollPane: JBScrollPane) {
     fun assistantBubble(message: AgentMessage): Triple<JPanel, JPanel, JComponent> {
         val content = MarkdownRenderer().render(message.content).apply { isOpaque = false }
         val bubble = roundedBubble(ChatTheme.aiBg, ChatTheme.aiBorder)
+        bubble.putClientProperty(FRACTION_KEY, AI_FRACTION)
         bubble.add(content, BorderLayout.CENTER)
         fitWidth(bubble, content, AI_FRACTION)
         val row = rowPanel().apply {
@@ -68,6 +80,11 @@ class BubbleFactory(private val scrollPane: JBScrollPane) {
         lockRowHeight(row, bubble)
         return Triple(row, bubble, content)
     }
+
+    /** 转义纯文本为 HTML，换行转 <br>。 */
+    private fun htmlEscape(text: String): String =
+        text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            .replace("\n", "<br>")
 
     /** 行容器：X 轴 BoxLayout，左对齐顶部，承载左右对齐 + glue。 */
     private fun rowPanel(): JPanel = JPanel().apply {
@@ -121,8 +138,14 @@ class BubbleFactory(private val scrollPane: JBScrollPane) {
      * 要求 content 已经 add 进 bubble。
      */
     fun fitWidth(bubble: JPanel, contentPane: JComponent, fraction: Double = AI_FRACTION) {
-        val viewportWidth = scrollPane.viewport.width
-        val maxWidth = BubbleMetrics.maxBubbleWidth(viewportWidth, JBUI.scale(ABS_CAP), fraction) - JBUI.scale(20)
+        val avail = effectiveWidth()
+        val maxWidth = if (avail > 10) {
+            minOf(JBUI.scale(ABS_CAP), (avail * fraction).toInt()) - JBUI.scale(20)
+        } else {
+            // viewport 尚未就绪：用保守兜底（宁可偏窄，绝不超出窗口被裁），
+            // 待 viewport 就绪后由 refit() 修正到正确宽度。
+            JBUI.scale(280)
+        }
         val padW = JBUI.scale(ChatTheme.PAD_BUBBLE_H) * 2   // 气泡左右内边距
         val contentMaxWidth = maxWidth - padW
 
@@ -134,6 +157,24 @@ class BubbleFactory(private val scrollPane: JBScrollPane) {
         val bubbleH = actualH + JBUI.scale(ChatTheme.PAD_BUBBLE_V) * 2
         bubble.preferredSize = Dimension(bubbleW, bubbleH)
         bubble.maximumSize = Dimension(bubbleW, bubbleH)
+    }
+
+    /** 可用宽度：优先 viewport，其次 scrollPane 自身宽（减边距），都不可用返回 0。 */
+    private fun effectiveWidth(): Int {
+        val vw = scrollPane.viewport.width
+        if (vw > 10) return vw
+        val sw = scrollPane.width
+        if (sw > 40) return sw - JBUI.scale(20)
+        return 0
+    }
+
+    /**
+     * 重新测量并约束气泡尺寸（含行高）。供 viewport 尺寸变化时修正用。
+     * 通过 bubble 的父容器（row）重新锁定行高。
+     */
+    fun refit(bubble: JPanel, contentPane: JComponent, fraction: Double) {
+        fitWidth(bubble, contentPane, fraction)
+        (bubble.parent as? JPanel)?.let { row -> lockRowHeight(row, bubble) }
     }
 
     /** 测量内容在给定最大宽度下的真实 (宽, 高)。 */

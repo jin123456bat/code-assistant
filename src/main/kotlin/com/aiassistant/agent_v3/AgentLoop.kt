@@ -269,12 +269,21 @@ class AgentLoop(
             return null
         }
 
-        // 输出思考过程到对话
-        if (thinkingBuffer.isNotEmpty()) {
-            edt { onMessage?.invoke(AgentMessage("thinking", thinkingBuffer.toString())) }
+        val finalText = textBuffer.toString()
+        val thinking = thinkingBuffer.toString()
+
+        // DeepSeek V4 行为：简单回复时可能把全部内容放进 thinking、正式 text 为空。
+        // 若这是最终回复轮（无工具调用）且 text 为空但 thinking 非空，
+        // 则把 thinking 当作正式回复返回（正常气泡显示），而不是折叠成"思考过程"后丢失结果。
+        if (toolCalls.isEmpty() && finalText.isEmpty() && thinking.isNotEmpty()) {
+            return Pair(thinking, toolCalls)
         }
 
-        return Pair(textBuffer.toString(), toolCalls)
+        // 否则：thinking 作为可折叠推理过程单独显示，text 作为回复
+        if (thinking.isNotEmpty()) {
+            edt { onMessage?.invoke(AgentMessage("thinking", thinking)) }
+        }
+        return Pair(finalText, toolCalls)
     }
 
     private fun parseParams(json: String): Map<String, String> {
