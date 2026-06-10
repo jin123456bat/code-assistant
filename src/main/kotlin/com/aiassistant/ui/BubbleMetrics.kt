@@ -17,4 +17,15 @@ object BubbleMetrics {
         if (viewportWidth <= 10) return absCap
         return minOf(absCap, (viewportWidth * RATIO).toInt())
     }
+
+    /**
+     * 按角色占比计算气泡最大宽度上限。
+     * @param viewportWidth 滚动视口宽度；≤10 视为未就绪，退回 absCap。
+     * @param absCap 绝对上限。
+     * @param fraction viewport 占比（用户 0.8、AI 1.0）。
+     */
+    fun maxBubbleWidth(viewportWidth: Int, absCap: Int, fraction: Double): Int {
+        if (viewportWidth <= 10) return absCap
+        return minOf(absCap, (viewportWidth * fraction).toInt())
+    }
 }

@@ -809,7 +809,8 @@ class ChatToolWindow(private val project: Project) {
                     createMessageBubble(AgentMessage("assistant", viewModel.streamingContent))
                 )
             }
-            // 思考/执行中指示器
+            // 思考/执行中指示器：agent 运行期间持续显示，避免 currentToolName 在
+            // null 间隙（思考↔执行切换）导致指示器闪烁。
             val thinking = viewModel.currentToolName
             if (thinking != null) {
                 if (thinking.contains("分析") || thinking.contains("思考")) {
@@ -817,6 +818,9 @@ class ChatToolWindow(private val project: Project) {
                 } else {
                     conversationContainer.add(createToolRunningBubble(thinking))
                 }
+            } else if (viewModel.isStreaming && viewModel.streamingContent.isEmpty()) {
+                // 运行中但暂无具体状态文字、且尚未开始输出 → 稳定显示"思考中"兜底
+                conversationContainer.add(createThinkingBubble("思考中..."))
             }
         } else {
             val hintPanel = JPanel(GridBagLayout())

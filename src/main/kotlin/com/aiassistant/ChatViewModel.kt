@@ -60,7 +60,7 @@ class ChatViewModel(
         a.onPlanUpdate = { plan -> runOnEdt { currentPlan = plan; onPlanUpdate?.invoke(plan); onMessagesChanged?.invoke() } }
         a.onError = { msg -> runOnEdt { onError?.invoke(msg) } }
         a.onStateChange = { streaming -> runOnEdt { isStreaming = streaming; onStreamingStateChanged?.invoke(streaming) } }
-        a.onThinking = { text -> runOnEdt { currentToolName = text } }
+        a.onThinking = { text -> runOnEdt { currentToolName = text; onMessagesChanged?.invoke() } }
         a.onModelRouted = { model -> runOnEdt { currentModel = model } }
         a.onConfirmTool = { name, args, latch, result ->
             runOnEdt { onConfirmTool?.invoke(name, args, latch, result) }

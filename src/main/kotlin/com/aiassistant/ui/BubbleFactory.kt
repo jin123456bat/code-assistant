@@ -21,6 +21,8 @@ class BubbleFactory(private val scrollPane: JBScrollPane) {
 
     companion object {
         const val ABS_CAP = 560
+        const val USER_FRACTION = 0.80   // 用户气泡最大 80% 宽
+        const val AI_FRACTION = 1.0      // AI 气泡最大 100% 宽
 
         /** 递归查找容器中第一个 JTextPane 后代（用于测量 markdown 容器内容宽度）。 */
         fun findFirstTextPane(component: JComponent): JTextPane? {
@@ -37,7 +39,7 @@ class BubbleFactory(private val scrollPane: JBScrollPane) {
 
     fun userBubble(message: AgentMessage): Triple<JPanel, JPanel, JComponent> {
         val content = JTextArea(message.content).apply {
-            isEditable = false; lineWrap = true; wrapStyleWord = true
+            isEditable = false
             font = ChatTheme.bodyFont
             isOpaque = false
             foreground = ChatTheme.userFg
@@ -45,7 +47,7 @@ class BubbleFactory(private val scrollPane: JBScrollPane) {
         }
         val bubble = roundedBubble(ChatTheme.userBg, null)
         bubble.add(content, BorderLayout.CENTER)
-        fitWidth(bubble, content)
+        fitWidth(bubble, content, USER_FRACTION)
         val row = rowPanel().apply {
             add(Box.createHorizontalGlue())   // 用户气泡靠右
             add(bubble)
@@ -58,7 +60,7 @@ class BubbleFactory(private val scrollPane: JBScrollPane) {
         val content = MarkdownRenderer().render(message.content).apply { isOpaque = false }
         val bubble = roundedBubble(ChatTheme.aiBg, ChatTheme.aiBorder)
         bubble.add(content, BorderLayout.CENTER)
-        fitWidth(bubble, content)
+        fitWidth(bubble, content, AI_FRACTION)
         val row = rowPanel().apply {
             add(bubble)                        // AI 气泡靠左
             add(Box.createHorizontalGlue())
@@ -115,12 +117,12 @@ class BubbleFactory(private val scrollPane: JBScrollPane) {
 
     /**
      * 测量内容真实尺寸并约束 bubble 宽度，使气泡 hug content（不撑满）。
-     * 宽度上限来自 BubbleMetrics（不随窗口缩放重排）。
+     * 宽度上限 = viewport * fraction（用户 0.8 / AI 1.0），封顶 ABS_CAP。
      * 要求 content 已经 add 进 bubble。
      */
-    fun fitWidth(bubble: JPanel, contentPane: JComponent) {
+    fun fitWidth(bubble: JPanel, contentPane: JComponent, fraction: Double = AI_FRACTION) {
         val viewportWidth = scrollPane.viewport.width
-        val maxWidth = BubbleMetrics.maxBubbleWidth(viewportWidth, JBUI.scale(ABS_CAP)) - JBUI.scale(20)
+        val maxWidth = BubbleMetrics.maxBubbleWidth(viewportWidth, JBUI.scale(ABS_CAP), fraction) - JBUI.scale(20)
         val padW = JBUI.scale(ChatTheme.PAD_BUBBLE_H) * 2   // 气泡左右内边距
         val contentMaxWidth = maxWidth - padW
 
@@ -138,15 +140,22 @@ class BubbleFactory(private val scrollPane: JBScrollPane) {
     private fun measureContent(contentPane: JComponent, contentMaxWidth: Int): Pair<Int, Int> {
         when (contentPane) {
             is JTextArea -> {
-                // JTextArea 在 lineWrap=true 时 preferredSize.width 会贴近给定宽度，
-                // 无法反映"内容自然宽度"。改用 FontMetrics 实测最长行宽，实现真正 hug content。
-                val fm = contentPane.getFontMetrics(contentPane.font)
-                val naturalW = contentPane.text.split("\n").maxOf { fm.stringWidth(it) } + JBUI.scale(2)
-                val w = minOf(naturalW, contentMaxWidth)
-                // 用算出的宽度反求换行后高度
+                // 关键：先用 lineWrap=false 量内容自然宽度（对中文/CJK 准确，不裁字）。
+                // 自然宽 ≤ 上限 → 用自然宽、单行不换行；
+                // 自然宽 > 上限 → 锁定为上限并开启换行，按上限重新量高度。
+                contentPane.lineWrap = false
+                contentPane.wrapStyleWord = false
+                contentPane.size = Dimension(Short.MAX_VALUE.toInt(), Short.MAX_VALUE.toInt())
+                val naturalW = contentPane.preferredSize.width
+                val w = if (naturalW <= contentMaxWidth) maxOf(naturalW, JBUI.scale(12)) else contentMaxWidth
+                if (naturalW > contentMaxWidth) {
+                    contentPane.lineWrap = true
+                    contentPane.wrapStyleWord = true
+                }
+                // 用确定的宽度重新量高度，避免单行/换行下高度被低估导致文字纵向裁切
                 contentPane.size = Dimension(w, Short.MAX_VALUE.toInt())
                 val h = contentPane.preferredSize.height
-                return maxOf(w, JBUI.scale(12)) to h
+                return w to h
             }
             is JTextPane -> return measureTextPane(contentPane, contentMaxWidth)
             is JPanel -> {
