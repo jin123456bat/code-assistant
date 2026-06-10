@@ -6,25 +6,23 @@ import com.intellij.ui.components.JBScrollPane
 import com.intellij.util.ui.JBUI
 import java.awt.*
 import javax.swing.*
-import javax.swing.border.AbstractBorder
-import javax.swing.border.Border
 
 /**
- * 用户/AI 气泡工厂：单一强调色、hug content、固定间距。
- * 宽度上限取自 BubbleMetrics（不随窗口缩放反复重排——见 ChatToolWindow 接入）。
+ * 用户/AI 气泡工厂：单一强调色、hug content、固定间距、真圆角。
+ *
+ * 关键设计（修复历史 bug）：
+ * 1. 气泡用自绘圆角面板 [RoundedPanel]（isOpaque=false + paintComponent 填圆角），
+ *    避免 opaque JPanel 先填方形背景再描圆边导致的"方角实心块"。
+ * 2. row 与 bubble 都限制 maximumSize.height = 自身 preferredSize.height，
+ *    否则外层 Y_AXIS BoxLayout 会把每行纵向拉伸成大空盒。
+ * 3. fitWidth 在 content 已 add 进 bubble 之后调用，保证 HTML 视图测量可靠。
  */
 class BubbleFactory(private val scrollPane: JBScrollPane) {
 
     companion object {
         const val ABS_CAP = 560
 
-        /**
-         * 递归查找容器中第一个 JTextPane 后代。
-         * 用于 fitWidth 测量 markdown JPanel 容器的内容宽度。
-         *
-         * @param component 待搜索的根组件
-         * @return 第一个找到的 JTextPane，若无则返回 null
-         */
+        /** 递归查找容器中第一个 JTextPane 后代（用于测量 markdown 容器内容宽度）。 */
         fun findFirstTextPane(component: JComponent): JTextPane? {
             if (component is JTextPane) return component
             for (child in component.components) {
@@ -41,122 +39,149 @@ class BubbleFactory(private val scrollPane: JBScrollPane) {
         val content = JTextArea(message.content).apply {
             isEditable = false; lineWrap = true; wrapStyleWord = true
             font = ChatTheme.bodyFont
-            background = ChatTheme.userBg; foreground = ChatTheme.userFg
+            isOpaque = false
+            foreground = ChatTheme.userFg
             border = null; margin = Insets(0, 0, 0, 0)
         }
-        val bubble = bubblePanel(ChatTheme.userBg, ChatTheme.userBg)
-        fitWidth(bubble, content)
+        val bubble = roundedBubble(ChatTheme.userBg, null)
         bubble.add(content, BorderLayout.CENTER)
+        fitWidth(bubble, content)
         val row = rowPanel().apply {
-            add(Box.createHorizontalGlue())
+            add(Box.createHorizontalGlue())   // 用户气泡靠右
             add(bubble)
         }
+        lockRowHeight(row, bubble)
         return Triple(row, bubble, content)
     }
 
     fun assistantBubble(message: AgentMessage): Triple<JPanel, JPanel, JComponent> {
-        val bubble = bubblePanel(ChatTheme.aiBg, ChatTheme.aiBorder)
-        val content = MarkdownRenderer().render(message.content).apply { background = ChatTheme.aiBg }
-        fitWidth(bubble, content)
+        val content = MarkdownRenderer().render(message.content).apply { isOpaque = false }
+        val bubble = roundedBubble(ChatTheme.aiBg, ChatTheme.aiBorder)
         bubble.add(content, BorderLayout.CENTER)
+        fitWidth(bubble, content)
         val row = rowPanel().apply {
-            add(bubble)
+            add(bubble)                        // AI 气泡靠左
             add(Box.createHorizontalGlue())
         }
+        lockRowHeight(row, bubble)
         return Triple(row, bubble, content)
     }
 
-    /** 行容器：X 轴 BoxLayout，承载左右对齐 + glue。 */
+    /** 行容器：X 轴 BoxLayout，左对齐顶部，承载左右对齐 + glue。 */
     private fun rowPanel(): JPanel = JPanel().apply {
         layout = BoxLayout(this, BoxLayout.X_AXIS)
         isOpaque = false
-        border = JBUI.Borders.empty(2, 0)
+        alignmentX = Component.LEFT_ALIGNMENT
+        border = JBUI.Borders.empty(ChatTheme.GAP_BUBBLE / 2, 0)
     }
 
-    private fun bubblePanel(bg: Color, borderColor: Color): JPanel =
-        JPanel(BorderLayout()).apply {
-            background = bg
-            border = BorderFactory.createCompoundBorder(
-                roundedBorder(borderColor),
-                JBUI.Borders.empty(ChatTheme.PAD_BUBBLE_V, ChatTheme.PAD_BUBBLE_H)
-            )
-        }
+    /**
+     * 限制 row 的最大高度为其 preferredSize 高度，防止外层 Y_AXIS BoxLayout 纵向拉伸成空盒。
+     * 在 fitWidth 之后调用（此时 bubble/content 的 preferredSize 已确定）。
+     */
+    private fun lockRowHeight(row: JPanel, bubble: JPanel) {
+        val h = bubble.preferredSize.height
+        bubble.maximumSize = Dimension(bubble.maximumSize.width, h)
+        row.maximumSize = Dimension(Int.MAX_VALUE, h)
+        row.preferredSize = Dimension(row.preferredSize.width, h)
+    }
 
-    /** 宽度上限来源改为 BubbleMetrics；测量逻辑沿用原 constrainContentWidth。 */
+    /**
+     * 自绘圆角气泡面板：背景填圆角矩形，可选描边。
+     * isOpaque=false 让方形角落透出父背景，只有圆角区域被填充。
+     */
+    private fun roundedBubble(bg: Color, borderColor: Color?): JPanel {
+        val panel = object : JPanel(BorderLayout()) {
+            override fun paintComponent(g: Graphics) {
+                val g2 = g.create() as Graphics2D
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+                val arc = ChatTheme.RADIUS * 2
+                g2.color = bg
+                g2.fillRoundRect(0, 0, width, height, arc, arc)
+                if (borderColor != null) {
+                    g2.color = borderColor
+                    g2.stroke = BasicStroke(1f)
+                    g2.drawRoundRect(0, 0, width - 1, height - 1, arc, arc)
+                }
+                g2.dispose()
+                super.paintComponent(g)
+            }
+        }
+        panel.isOpaque = false
+        panel.border = JBUI.Borders.empty(ChatTheme.PAD_BUBBLE_V, ChatTheme.PAD_BUBBLE_H)
+        panel.alignmentY = Component.TOP_ALIGNMENT
+        return panel
+    }
+
+    /**
+     * 测量内容真实尺寸并约束 bubble 宽度，使气泡 hug content（不撑满）。
+     * 宽度上限来自 BubbleMetrics（不随窗口缩放重排）。
+     * 要求 content 已经 add 进 bubble。
+     */
     fun fitWidth(bubble: JPanel, contentPane: JComponent) {
         val viewportWidth = scrollPane.viewport.width
         val maxWidth = BubbleMetrics.maxBubbleWidth(viewportWidth, JBUI.scale(ABS_CAP)) - JBUI.scale(20)
-        val contentMaxWidth = maxWidth - JBUI.scale(24)
-        bubble.maximumSize = Dimension(maxWidth, Int.MAX_VALUE)
-        contentPane.maximumSize = Dimension(contentMaxWidth, Int.MAX_VALUE)
+        val padW = JBUI.scale(ChatTheme.PAD_BUBBLE_H) * 2   // 气泡左右内边距
+        val contentMaxWidth = maxWidth - padW
 
-        if (contentPane is JTextPane) {
-            contentPane.size = Dimension(contentMaxWidth, Short.MAX_VALUE.toInt())
-            val view = contentPane.ui.getRootView(contentPane)
-            view.setSize(contentMaxWidth.toFloat(), Short.MAX_VALUE.toFloat())
-            val actualHeight = view.getMinimumSpan(javax.swing.text.View.Y_AXIS).toInt()
-            val actualWidth = minOf(view.getPreferredSpan(javax.swing.text.View.X_AXIS).toInt() + JBUI.scale(12), contentMaxWidth)
-            contentPane.preferredSize = Dimension(actualWidth, maxOf(actualHeight + JBUI.scale(4), JBUI.scale(20)))
-            bubble.maximumSize = Dimension(actualWidth + JBUI.scale(24), Int.MAX_VALUE)
-        } else if (contentPane is JTextArea) {
-            contentPane.size = Dimension(contentMaxWidth, Short.MAX_VALUE.toInt())
-            val pref = contentPane.preferredSize
-            val fitW = minOf(pref.width + JBUI.scale(10), contentMaxWidth)
-            contentPane.preferredSize = Dimension(fitW, pref.height)
-            bubble.maximumSize = Dimension(fitW + JBUI.scale(24), Int.MAX_VALUE)
-        } else if (contentPane is JPanel) {
-            // markdown 容器（MarkdownRenderer.render() 返回的 BoxLayout Y_AXIS JPanel）
-            // 检查是否包含非文本子组件（即代码块 CodeBlockWrapper）
-            val hasNonTextChild = contentPane.components.any { child ->
-                child is JComponent && child !is JTextPane
+        val (actualW, actualH) = measureContent(contentPane, contentMaxWidth)
+
+        contentPane.preferredSize = Dimension(actualW, actualH)
+        contentPane.maximumSize = Dimension(actualW, actualH)
+        val bubbleW = actualW + padW
+        val bubbleH = actualH + JBUI.scale(ChatTheme.PAD_BUBBLE_V) * 2
+        bubble.preferredSize = Dimension(bubbleW, bubbleH)
+        bubble.maximumSize = Dimension(bubbleW, bubbleH)
+    }
+
+    /** 测量内容在给定最大宽度下的真实 (宽, 高)。 */
+    private fun measureContent(contentPane: JComponent, contentMaxWidth: Int): Pair<Int, Int> {
+        when (contentPane) {
+            is JTextArea -> {
+                // JTextArea 在 lineWrap=true 时 preferredSize.width 会贴近给定宽度，
+                // 无法反映"内容自然宽度"。改用 FontMetrics 实测最长行宽，实现真正 hug content。
+                val fm = contentPane.getFontMetrics(contentPane.font)
+                val naturalW = contentPane.text.split("\n").maxOf { fm.stringWidth(it) } + JBUI.scale(2)
+                val w = minOf(naturalW, contentMaxWidth)
+                // 用算出的宽度反求换行后高度
+                contentPane.size = Dimension(w, Short.MAX_VALUE.toInt())
+                val h = contentPane.preferredSize.height
+                return maxOf(w, JBUI.scale(12)) to h
             }
-
-            if (hasNonTextChild) {
-                // 有代码块子组件时，保守地给予完整宽度上限，避免代码内容被截断。
-                // 代码块本身带有水平滚动条，因此使用 contentMaxWidth 作为宽度是合理的。
-                contentPane.preferredSize = Dimension(contentMaxWidth, contentPane.preferredSize.height)
-                contentPane.maximumSize = Dimension(contentMaxWidth, Int.MAX_VALUE)
-                bubble.maximumSize = Dimension(contentMaxWidth + JBUI.scale(24), Int.MAX_VALUE)
-            } else {
-                // 纯文本路径（无代码块）：找到第一个 JTextPane 子孙，用与 JTextPane 分支
-                // 相同的 HTML 视图测量逻辑推算真实内容宽度，使气泡 hug content。
-                val innerPane = findFirstTextPane(contentPane)
-                if (innerPane != null) {
-                    innerPane.size = Dimension(contentMaxWidth, Short.MAX_VALUE.toInt())
-                    val view = innerPane.ui.getRootView(innerPane)
-                    view.setSize(contentMaxWidth.toFloat(), Short.MAX_VALUE.toFloat())
-                    val actualHeight = view.getMinimumSpan(javax.swing.text.View.Y_AXIS).toInt()
-                    val actualWidth = minOf(
-                        view.getPreferredSpan(javax.swing.text.View.X_AXIS).toInt() + JBUI.scale(12),
-                        contentMaxWidth
-                    )
-                    // 先设置内部 JTextPane 的 preferredSize，BoxLayout 以此布局
-                    innerPane.preferredSize = Dimension(actualWidth, maxOf(actualHeight + JBUI.scale(4), JBUI.scale(20)))
-                    // 强制容器收口：读取布局后的 preferredSize 高度（包含所有子组件间距），
-                    // 再将容器和气泡限制到同一宽度，确保 BorderLayout.CENTER 不拉伸
-                    contentPane.invalidate()
-                    val containerH = contentPane.preferredSize.height
-                    contentPane.preferredSize = Dimension(actualWidth, maxOf(containerH, innerPane.preferredSize.height))
-                    contentPane.maximumSize = Dimension(actualWidth, Int.MAX_VALUE)
-                    bubble.maximumSize = Dimension(actualWidth + JBUI.scale(24), Int.MAX_VALUE)
-                } else {
-                    // 容器内无 JTextPane（兜底）：退化为 contentMaxWidth
-                    contentPane.preferredSize = Dimension(contentMaxWidth, contentPane.preferredSize.height)
-                    contentPane.maximumSize = Dimension(contentMaxWidth, Int.MAX_VALUE)
-                    bubble.maximumSize = Dimension(contentMaxWidth + JBUI.scale(24), Int.MAX_VALUE)
+            is JTextPane -> return measureTextPane(contentPane, contentMaxWidth)
+            is JPanel -> {
+                // markdown 容器：含代码块时给满宽，纯文本时按内部 JTextPane hug
+                val hasNonText = contentPane.components.any { it is JComponent && it !is JTextPane }
+                if (hasNonText) {
+                    contentPane.size = Dimension(contentMaxWidth, Short.MAX_VALUE.toInt())
+                    return contentMaxWidth to contentPane.preferredSize.height
                 }
+                val inner = findFirstTextPane(contentPane)
+                    ?: return contentMaxWidth to contentPane.preferredSize.height
+                val (w, h) = measureTextPane(inner, contentMaxWidth)
+                inner.preferredSize = Dimension(w, h)
+                inner.maximumSize = Dimension(w, h)
+                contentPane.size = Dimension(w, Short.MAX_VALUE.toInt())
+                return w to maxOf(h, contentPane.preferredSize.height)
+            }
+            else -> {
+                contentPane.size = Dimension(contentMaxWidth, Short.MAX_VALUE.toInt())
+                val pref = contentPane.preferredSize
+                return minOf(pref.width, contentMaxWidth) to pref.height
             }
         }
     }
 
-    private fun roundedBorder(color: Color, thickness: Int = 1): Border = object : AbstractBorder() {
-        override fun paintBorder(c: Component, g: Graphics, x: Int, y: Int, w: Int, h: Int) {
-            val g2 = g.create() as Graphics2D
-            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
-            g2.color = color
-            g2.stroke = BasicStroke(thickness.toFloat())
-            g2.drawRoundRect(x, y, w - 1, h - 1, ChatTheme.RADIUS, ChatTheme.RADIUS)
-            g2.dispose()
-        }
+    /** 用 HTML 根视图测量 JTextPane 在给定宽度下的真实内容宽高。 */
+    private fun measureTextPane(pane: JTextPane, contentMaxWidth: Int): Pair<Int, Int> {
+        pane.size = Dimension(contentMaxWidth, Short.MAX_VALUE.toInt())
+        val view = pane.ui.getRootView(pane)
+        view.setSize(contentMaxWidth.toFloat(), Short.MAX_VALUE.toFloat())
+        val h = view.getMinimumSpan(javax.swing.text.View.Y_AXIS).toInt()
+        val w = minOf(
+            view.getPreferredSpan(javax.swing.text.View.X_AXIS).toInt() + JBUI.scale(4),
+            contentMaxWidth
+        )
+        return maxOf(w, JBUI.scale(20)) to maxOf(h + JBUI.scale(4), JBUI.scale(20))
     }
 }
