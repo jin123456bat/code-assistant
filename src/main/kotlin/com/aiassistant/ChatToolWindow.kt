@@ -29,8 +29,6 @@ import java.awt.GridBagLayout
 import java.awt.Image
 import java.awt.datatransfer.DataFlavor
 import java.awt.datatransfer.Transferable
-import java.awt.event.ComponentAdapter
-import java.awt.event.ComponentEvent
 import java.awt.event.FocusAdapter
 import java.awt.event.FocusEvent
 import java.awt.event.KeyAdapter
@@ -494,16 +492,6 @@ class ChatToolWindow(private val project: Project) {
         }
         bindViewModel()
         addRefreshListener { checkEmptyState() }
-        conversationScrollPane.addComponentListener(object : ComponentAdapter() {
-            override fun componentResized(e: ComponentEvent) {
-                if (suppressResize) return
-                ApplicationManager.getApplication().invokeLater {
-                    bubbleSizeConstraints.forEach { (bubble, content) -> constrainContentWidth(bubble, content) }
-                    conversationContainer.revalidate()
-                    conversationContainer.repaint()
-                }
-            }
-        })
         ApplicationManager.getApplication().invokeLater { checkEmptyState() }
 
         // 延迟注册编辑器选区监听，避免在 IDE 启动早期阶段（COMPONENTS_LOADED 之前）访问消息总线
@@ -580,7 +568,7 @@ class ChatToolWindow(private val project: Project) {
                     lingmaSubmitBtn.foreground = JBColor(0x888888, 0xAAAAAA)
                     suppressResize = false
                     // 流式结束，做一次最终布局修正
-                    bubbleSizeConstraints.forEach { (b, c) -> constrainContentWidth(b, c) }
+                    bubbleSizeConstraints.forEach { (b, c) -> bubbleFactory.fitWidth(b, c) }
                     conversationContainer.revalidate()
                     conversationContainer.repaint()
                 } else {
@@ -731,6 +719,7 @@ class ChatToolWindow(private val project: Project) {
     }
 
     private val markdownRenderer = MarkdownRenderer()
+    private val bubbleFactory = com.aiassistant.ui.BubbleFactory(conversationScrollPane)
 
     /** 流式更新时原地替换 JTextPane 文本，避免 remove/add 触发布局震荡 */
     private fun updateStreamingBubble() {
@@ -757,7 +746,7 @@ class ChatToolWindow(private val project: Project) {
             if (contentPane is JPanel) {
                 val heightChanged = markdownRenderer.updateInPlace(contentPane, viewModel.streamingContent)
                 if (heightChanged) {
-                    constrainContentWidth(streamingBubble!!, contentPane)
+                    bubbleFactory.fitWidth(streamingBubble!!, contentPane)
                     streamingBubble!!.revalidate()
                 }
                 streamingBubble!!.repaint()
@@ -800,52 +789,15 @@ class ChatToolWindow(private val project: Project) {
     private val SMALL_FONT = Font(Font.SANS_SERIF, Font.PLAIN, 11)
 
     private fun createUserBubble(message: AgentMessage): JPanel {
-        val panel = JPanel().apply {
-            layout = BoxLayout(this, BoxLayout.X_AXIS)
-            isOpaque = false
-            border = JBUI.Borders.empty(2, 0)
-        }
-        val contentPane = JTextArea(message.content).apply {
-            isEditable = false; lineWrap = true; wrapStyleWord = true
-            font = BODY_FONT
-            background = JBColor(0xE8F5FF, 0x28323C); border = null
-            margin = java.awt.Insets(0, 0, 0, 0)
-        }
-        val bubble = JPanel(BorderLayout()).apply {
-            background = contentPane.background
-            border = BorderFactory.createCompoundBorder(
-                roundedBorder(JBColor(0xB4D7FF, 0x3C4664)),
-                JBUI.Borders.empty(4, 8)
-            )
-        }
-        constrainContentWidth(bubble, contentPane)
-        bubbleSizeConstraints.add(Pair(bubble, contentPane))
-        bubble.add(contentPane, BorderLayout.CENTER)
-        panel.add(Box.createHorizontalGlue())
-        panel.add(bubble)
-        return panel
+        val (row, bubble, content) = bubbleFactory.userBubble(message)
+        bubbleSizeConstraints.add(Pair(bubble, content))
+        return row
     }
 
     private fun createAssistantBubble(message: AgentMessage): JPanel {
-        val panel = JPanel().apply {
-            layout = BoxLayout(this, BoxLayout.X_AXIS)
-            isOpaque = false
-            border = JBUI.Borders.empty(2, 0)
-        }
-        val bubble = JPanel(BorderLayout()).apply {
-            background = JBColor(0xF5F5F5, 0x37373C)
-            border = BorderFactory.createCompoundBorder(
-                roundedBorder(JBColor(0xDCDCDC, 0x41414B)),
-                JBUI.Borders.empty(4, 8)
-            )
-        }
-        val contentPane = MarkdownRenderer().render(message.content).apply { background = bubble.background }
-        constrainContentWidth(bubble, contentPane)
-        bubbleSizeConstraints.add(Pair(bubble, contentPane))
-        bubble.add(contentPane, BorderLayout.CENTER)
-        panel.add(bubble)
-        panel.add(Box.createHorizontalGlue())
-        return panel
+        val (row, bubble, content) = bubbleFactory.assistantBubble(message)
+        bubbleSizeConstraints.add(Pair(bubble, content))
+        return row
     }
 
     /**
@@ -1046,36 +998,6 @@ class ChatToolWindow(private val project: Project) {
         panel.add(bubble)
         panel.add(Box.createHorizontalGlue())
         return panel
-    }
-
-    private fun constrainContentWidth(bubble: JPanel, contentPane: JComponent) {
-        val viewportWidth = conversationScrollPane.viewport.width
-        val maxWidth = if (viewportWidth > 10) {
-            (viewportWidth * 0.88).toInt() - 20
-        } else {
-            600 // 兜底值，viewport 尚未就绪时使用
-        }
-        val contentMaxWidth = maxWidth - 24
-        bubble.maximumSize = Dimension(maxWidth, Int.MAX_VALUE)
-        contentPane.maximumSize = Dimension(contentMaxWidth, Int.MAX_VALUE)
-
-        if (contentPane is JTextPane) {
-            // AI 消息：HTML JTextPane
-            contentPane.size = Dimension(contentMaxWidth, Short.MAX_VALUE.toInt())
-            val view = contentPane.ui.getRootView(contentPane)
-            view.setSize(contentMaxWidth.toFloat(), Short.MAX_VALUE.toFloat())
-            val actualHeight = view.getMinimumSpan(javax.swing.text.View.Y_AXIS).toInt()
-            val actualWidth = minOf(view.getPreferredSpan(javax.swing.text.View.X_AXIS).toInt() + 12, contentMaxWidth)
-            contentPane.preferredSize = Dimension(actualWidth, maxOf(actualHeight + 4, 20))
-            bubble.maximumSize = Dimension(actualWidth + 24, Int.MAX_VALUE)
-        } else if (contentPane is JTextArea) {
-            // 用户消息：JTextArea
-            contentPane.size = Dimension(contentMaxWidth, Short.MAX_VALUE.toInt())
-            val pref = contentPane.preferredSize
-            val fitWidth = minOf(pref.width + 10, contentMaxWidth)
-            contentPane.preferredSize = Dimension(fitWidth, pref.height)
-            bubble.maximumSize = Dimension(fitWidth + 24, Int.MAX_VALUE)
-        }
     }
 
     private fun sendMessage() {
