@@ -4,6 +4,7 @@ import com.aiassistant.agent_v3.AgentMessage
 import com.aiassistant.mcp.McpManager
 import com.aiassistant.ui.BubbleFactory
 import com.aiassistant.ui.ChatTheme
+import com.aiassistant.ui.PermissionCard
 import com.aiassistant.ui.PlanBar
 import com.aiassistant.ui.ToolRowFactory
 import com.intellij.openapi.application.ApplicationManager
@@ -619,77 +620,26 @@ class ChatToolWindow(private val project: Project) {
         }
     }
 
-    /** 内联工具确认条 — 灰白背景，确认后留作执行记录 */
+    /** 内联工具权限确认卡 — 选项列表风格（M3-A），确认后卡片保留并展示已选状态 */
     private fun showConfirmationBar(name: String, args: String, latch: CountDownLatch, userChoice: AtomicBoolean) {
-        val argsPreview = args.take(200).let { if (args.length > 200) "$it..." else it }
-        val bar = JPanel(BorderLayout()).apply {
-            background = JBColor(0xEEEEEE, 0x3A3A3E)
-            border = BorderFactory.createCompoundBorder(
-                roundedBorder(JBColor(0xCCCCCC, 0x505050)),
-                JBUI.Borders.empty(6, 10)
-            )
-            maximumSize = Dimension(Int.MAX_VALUE, 40)
-        }
-        val infoLabel = JLabel("<html><b>$name</b> <span style='color:#888'>$argsPreview</span></html>").apply {
-            font = SMALL_FONT
-            foreground = JBColor(0x333333, 0xCCCCCC)
-        }
-        val btnPanel = JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0)).apply { isOpaque = false }
-        val alwaysBtn = JButton("始终允许").apply {
-            font = SMALL_FONT.deriveFont(Font.BOLD)
-            isFocusPainted = false
-            toolTipText = "允许执行并记住，以后不再询问"
-            addActionListener {
+        val card = PermissionCard.build(
+            toolName = name,
+            args = args,
+            onAllowOnce = {
+                userChoice.set(true)
+                latch.countDown()
+            },
+            onAlwaysAllow = {
                 AppSettingsService.getInstance().addToolToWhitelist(name)
                 userChoice.set(true)
                 latch.countDown()
-                btnPanel.removeAll()
-                btnPanel.add(JLabel("已加入白名单 ✓").apply {
-                    font = Font(Font.SANS_SERIF, Font.PLAIN, 11)
-                    foreground = JBColor(0x1B5E20, 0x4CAF50)
-                })
-                btnPanel.revalidate()
-                btnPanel.repaint()
-            }
-        }
-        val approveBtn = JButton("允许").apply {
-            font = SMALL_FONT
-            foreground = JBColor(0x2E7D32, 0x81C784)
-            isFocusPainted = false
-            addActionListener {
-                userChoice.set(true)
-                latch.countDown()
-                btnPanel.removeAll()
-                btnPanel.add(JLabel("已允许 ✓").apply {
-                    font = Font(Font.SANS_SERIF, Font.PLAIN, 11)
-                    foreground = JBColor(0x2E7D32, 0x81C784)
-                })
-                btnPanel.revalidate()
-                btnPanel.repaint()
-            }
-        }
-        val rejectBtn = JButton("拒绝").apply {
-            font = SMALL_FONT
-            foreground = JBColor(0xB00020, 0xFF8080)
-            isFocusPainted = false
-            addActionListener {
+            },
+            onReject = {
                 userChoice.set(false)
                 latch.countDown()
-                btnPanel.removeAll()
-                btnPanel.add(JLabel("已拒绝 ✗").apply {
-                    font = Font(Font.SANS_SERIF, Font.PLAIN, 11)
-                    foreground = JBColor(0xB00020, 0xFF8080)
-                })
-                btnPanel.revalidate()
-                btnPanel.repaint()
             }
-        }
-        btnPanel.add(alwaysBtn)
-        btnPanel.add(approveBtn)
-        btnPanel.add(rejectBtn)
-        bar.add(infoLabel, BorderLayout.CENTER)
-        bar.add(btnPanel, BorderLayout.EAST)
-        conversationContainer.add(bar, conversationContainer.componentCount - 1)
+        )
+        conversationContainer.add(card, conversationContainer.componentCount - 1)
         conversationContainer.revalidate()
         conversationContainer.repaint()
         scrollToBottom(force = true)
