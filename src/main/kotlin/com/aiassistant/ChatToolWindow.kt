@@ -512,9 +512,9 @@ class ChatToolWindow(private val project: Project) {
         // v3: 注册内置工具+Skills（同步安全），首条消息即可调用
         viewModel.initialize(project)
 
-        // M5-A: 注册 ask_user 选择卡 handler（EDT 上执行）
-        AskUserBridge.handler = { question, options, latch, result ->
-            showSelectionCard(question, options, latch, result)
+        // M5-A: 注册 ask_user 选择卡 handler（EDT 上执行；multiple=true 时多选模式）
+        AskUserBridge.handler = { question, options, multiple, latch, result ->
+            showSelectionCard(question, options, multiple, latch, result)
         }
 
         // MCP 延迟加载（需 COMPONENTS_LOADED 之后）
@@ -676,22 +676,27 @@ class ChatToolWindow(private val project: Project) {
     }
 
     /**
-     * ask_user 工具选择卡（M5-A）。
+     * ask_user 工具选择卡（M5-A / M5-B 多选扩展）。
      *
      * 在 EDT 上调用：构建 [SelectionCard] 并插入会话区。
-     * 用户点击后回调会 set result + countDown，工具背景线程随即解除阻塞。
+     * 用户点击/确认后回调会 set result + countDown，工具背景线程随即解除阻塞。
+     *
+     * @param multiple true = 多选模式（复选框 + 确认按钮）；false = 单选模式（点击即提交）
      */
     private fun showSelectionCard(
         question: String,
         options: List<String>,
+        multiple: Boolean,
         latch: CountDownLatch,
         result: AtomicReference<String>
     ) {
         val card = SelectionCard.build(
             question = question,
             options = options,
-            onChosen = { chosen ->
-                result.set(chosen)
+            multiSelect = multiple,
+            onConfirm = { choices ->
+                // 单选：choices 大小为 1；多选：choices 可为多项，用 ", " 连接
+                result.set(choices.joinToString(", "))
                 latch.countDown()
             }
         )
