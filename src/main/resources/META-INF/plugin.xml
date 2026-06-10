@@ -1,0 +1,76 @@
+<idea-plugin>
+    <id>com.aiassistant.phpstorm</id>
+    <name>Code Assistant</name>
+    <vendor email="dev@aiassistant.local" url="https://github.com/ai-assistant/phpstorm-plugin">Code Assistant</vendor>
+
+    <description><![CDATA[
+        Free, open-source AI coding agent for PhpStorm.
+        Powered by DeepSeek V4 models (deepseek-v4-flash / deepseek-v4-pro).
+        Bring your own API key.
+
+        Features:
+        - Agent mode: AI autonomously plans and executes tasks using built-in tools
+        - 8 built-in tools: search_code, read_file, write_file, list_directory, execute_command, git_diff, git_log, git_status
+        - MCP support: connect to Model Context Protocol servers for extended tools
+        - Skills engine: load custom skills from .claude/skills/**/SKILL.md
+        - Plan mode: auto-detect complex tasks, generate step-by-step plans
+        - Model router: auto-select flash/pro model based on task complexity
+        - Streaming chat with markdown rendering and syntax highlighting
+        - File references, auto code detection, image paste
+
+        To get started, register for a DeepSeek API key at platform.deepseek.com,
+        then configure it in Settings > Tools > Code Assistant.
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.modules.vcs</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <toolWindow
+            id="Code Assistant"
+            anchor="right"
+            icon="AllIcons.Actions.Annotate"
+            factoryClass="com.aiassistant.ChatToolWindowFactory"/>
+
+        <applicationConfigurable
+            parentId="tools"
+            instance="com.aiassistant.SettingsConfigurable"
+            id="com.aiassistant.settings"
+            displayName="Code Assistant"/>
+
+        <applicationService
+            serviceImplementation="com.aiassistant.AppSettingsService"/>
+
+        <postStartupActivity
+            implementation="com.aiassistant.actions.OpenAiToolWindowOnStartup"/>
+    </extensions>
+
+    <actions resource-bundle="messages.AiAssistantBundle">
+        <action
+            id="AiAssistant.OpenChat"
+            class="com.aiassistant.actions.OpenChatAction"
+            text="action.open.chat"
+            description="action.open.chat.desc">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+        </action>
+
+        <action
+            id="AiAssistant.GenerateCommit"
+            class="com.aiassistant.actions.GenerateCommitAction"
+            text="action.generate.commit"
+            description="action.generate.commit.desc"
+            icon="AllIcons.Actions.Annotate">
+            <add-to-group group-id="Vcs.MessageActionGroup" anchor="last"/>
+        </action>
+
+        <action
+            id="AiAssistant.SendToChat"
+            class="com.aiassistant.actions.SendToChatAction"
+            text="action.send.to.chat"
+            description="action.send.to.chat.desc"
+            icon="AllIcons.Actions.Annotate">
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <keyboard-shortcut keymap="$default" first-keystroke="control shift ENTER"/>
+        </action>
+    </actions>
+</idea-plugin>
