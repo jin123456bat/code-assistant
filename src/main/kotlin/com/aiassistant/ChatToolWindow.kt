@@ -506,6 +506,8 @@ class ChatToolWindow(private val project: Project) {
     // 流式气泡增量更新
     private var streamingBubble: JPanel? = null
     private var streamingContentPane: JComponent? = null
+    private var streamingThinkingRow: JPanel? = null
+    private var streamingThinkingTextArea: JTextArea? = null
     // 自动引用去重
     private var lastAutoInsertedHash: Int = 0
     private var lastAutoInsertTime: Long = 0
@@ -652,6 +654,9 @@ class ChatToolWindow(private val project: Project) {
         }
         viewModel.onStreamingUpdate = {
             ApplicationManager.getApplication().invokeLater { updateStreamingBubble() }
+        }
+        viewModel.onStreamingThinkingChanged = {
+            ApplicationManager.getApplication().invokeLater { updateStreamingThinking() }
         }
         viewModel.onStreamingStateChanged = { streaming ->
             ApplicationManager.getApplication().invokeLater {
@@ -860,23 +865,47 @@ class ChatToolWindow(private val project: Project) {
     }
 
     private fun rebuildConversation() {
+        val scLen = viewModel.streamingContent.length
+        val stLen = viewModel.streamingThinking.length
+        val msgRoles = viewModel.messages.filter { it.role != "system" }.joinToString(",") { "${it.role}(${it.content.length})" }
+        AppLogger.info("rebuildConversation scLen=$scLen stLen=$stLen msgs=[$msgRoles] streamingB=$streamingBubble streamingT=$streamingThinkingRow")
         conversationContainer.removeAll()
         bubbleSizeConstraints.clear()
         // 过滤掉 system 消息
         val displayMessages = viewModel.messages.filter { it.role != "system" }
-        val hasMessages = displayMessages.isNotEmpty() || viewModel.streamingContent.isNotEmpty()
+        val hasMessages = displayMessages.isNotEmpty() || viewModel.streamingContent.isNotEmpty() || viewModel.streamingThinking.isNotEmpty()
         if (hasMessages) {
             for (msg in displayMessages) {
                 conversationContainer.add(createMessageBubble(msg))
             }
+
+            // 记录当前 bubbleSizeConstraints 条目数，用于后面捕获流式 assistant 气泡引用
+            val bubbleCountBefore = bubbleSizeConstraints.size
+
+            // 流式思考行：重建并跟踪引用，供 updateStreamingThinking() 原地更新
+            if (viewModel.streamingThinking.isNotEmpty()) {
+                val row = toolRowFactory.thinkingRow(viewModel.streamingThinking, initiallyExpanded = true)
+                streamingThinkingRow = row
+                streamingThinkingTextArea = findDeepestTextArea(row)
+                conversationContainer.add(row)
+            }
+
+            // 流式 AI 回复气泡：重建并捕获 ChatBubble 引用，供 updateStreamingBubble() 原地更新
+            // createMessageBubble("assistant") → createAssistantBubble() 会自动把 (bubble, content)
+            // 追加到 bubbleSizeConstraints，我们从末尾取出即可
             if (viewModel.streamingContent.isNotEmpty()) {
                 conversationContainer.add(
                     createMessageBubble(AgentMessage("assistant", viewModel.streamingContent))
                 )
+                if (bubbleSizeConstraints.size > bubbleCountBefore) {
+                    val (b, c) = bubbleSizeConstraints.last()
+                    streamingBubble = b
+                    streamingContentPane = c
+                }
             }
-            // 思考/执行中指示器：用 activity 状态单点驱动（取代字符串嗅探），
-            // 仅在尚未开始输出（streamingContent 为空）时显示，避免与正文重叠。
-            if (viewModel.streamingContent.isEmpty()) {
+
+            // 思考/执行中指示器：仅在还没有产生任何流式输出时显示
+            if (viewModel.streamingContent.isEmpty() && viewModel.streamingThinking.isEmpty()) {
                 when (val act = viewModel.activity) {
                     is ChatViewModel.Activity.RunningTool ->
                         conversationContainer.add(createToolRunningBubble(act.toolName))
@@ -901,7 +930,6 @@ class ChatToolWindow(private val project: Project) {
         conversationContainer.revalidate()
         conversationContainer.repaint()
         scrollToBottom(force = true)
-        streamingBubble = null; streamingContentPane = null
     }
 
     private val markdownRenderer = MarkdownRenderer()
@@ -910,15 +938,30 @@ class ChatToolWindow(private val project: Project) {
 
     /** 流式更新时原地替换 JTextPane 文本，避免 remove/add 触发布局震荡 */
     private fun updateStreamingBubble() {
+        // 如果之前持有的 bubble 已被 rebuild 移除（parent 为 null），重置引用走创建路径
+        if (streamingBubble != null && streamingBubble!!.parent == null) {
+            streamingBubble = null; streamingContentPane = null
+        }
         if (streamingBubble == null) {
-            // 首次流式：移除 glue，添加流式气泡，再加 glue
+            // 首次流式：移除 glue，添加流式气泡，再加 glue。
+            // 如果已有 streaming thinking row 在容器中，assistant 气泡必须插入到它之后，
+            // 确保思考→回复的视觉顺序，避免中间出现空白。
             val glueCount = conversationContainer.components.count { it is Box.Filler }
             if (glueCount > 0) {
                 val lastGlue = conversationContainer.components.last { it is Box.Filler }
                 conversationContainer.remove(lastGlue)
             }
             val bubble = createAssistantBubble(AgentMessage("assistant", viewModel.streamingContent))
-            conversationContainer.add(bubble)
+            // 插入到 streaming thinking row 之后（如果存在），而不是无脑追加到末尾
+            val thinkIdx = streamingThinkingRow?.let { row ->
+                conversationContainer.components.indexOfFirst { it === row }.takeIf { it >= 0 }
+            }
+            if (thinkIdx != null) {
+                // 容器当前: [..., thinkingRow, ...]，assistant 插入到 thinkingRow 之后
+                conversationContainer.add(bubble, thinkIdx + 1)
+            } else {
+                conversationContainer.add(bubble)
+            }
             conversationContainer.add(Box.createVerticalGlue())
             val entry = bubbleSizeConstraints.lastOrNull()
             if (entry != null) {
@@ -941,6 +984,62 @@ class ChatToolWindow(private val project: Project) {
             // 只在用户已在底部时才跟随
             scrollToBottom(force = false)
         }
+    }
+
+    /** 流式思考原地更新：类似 updateStreamingBubble，避免每个 token 触发 removeAll 重建 */
+    private fun updateStreamingThinking() {
+        val content = viewModel.streamingThinking
+        // 如果之前持有的组件已被 rebuild 移除（parent 为 null），重置引用让创建路径重新走一遍
+        if (streamingThinkingRow != null && streamingThinkingRow!!.parent == null) {
+            streamingThinkingRow = null
+            streamingThinkingTextArea = null
+        }
+        if (content.isEmpty()) return
+        if (streamingThinkingRow == null) {
+            // 首次：创建思考行（已展开），移除 glue
+            val glueCount = conversationContainer.components.count { it is Box.Filler }
+            if (glueCount > 0) {
+                val lastGlue = conversationContainer.components.last { it is Box.Filler }
+                conversationContainer.remove(lastGlue)
+            }
+            val row = toolRowFactory.thinkingRow(content, initiallyExpanded = true)
+            streamingThinkingRow = row
+            streamingThinkingTextArea = findDeepestTextArea(row)
+            // 如果 assistant 流式气泡已在容器中，思考行应插入到它之前（思考→回复 的自然顺序）
+            val assistantIdx = streamingBubble?.let { b ->
+                conversationContainer.components.indexOfFirst { it === b }.takeIf { it >= 0 }
+            }
+            if (assistantIdx != null) {
+                conversationContainer.add(row, assistantIdx)
+            } else {
+                conversationContainer.add(row)
+            }
+            conversationContainer.add(Box.createVerticalGlue())
+            conversationContainer.revalidate()
+            scrollToBottom(force = true)
+        } else {
+            // 后续：原地更新 JTextArea 文本
+            val area = streamingThinkingTextArea
+            if (area != null) {
+                area.text = content
+                area.caretPosition = content.length  // 流式滚动到底部
+                streamingThinkingRow!!.revalidate()
+                streamingThinkingRow!!.repaint()
+            }
+            scrollToBottom(force = false)
+        }
+    }
+
+    /** 递归查找组件树中最深的 JTextArea（用于原地更新流式思考文本） */
+    private fun findDeepestTextArea(component: java.awt.Component): JTextArea? {
+        if (component is JTextArea) return component
+        if (component is java.awt.Container) {
+            for (child in component.components) {
+                val found = findDeepestTextArea(child)
+                if (found != null) return found
+            }
+        }
+        return null
     }
 
     private fun createMessageBubble(message: AgentMessage): JPanel {
@@ -1343,13 +1442,17 @@ class ChatToolWindow(private val project: Project) {
 
     /** 仅当用户已在底部附近时才自动滚动，避免打断浏览历史消息 */
     private fun scrollToBottom(force: Boolean = false) {
+        // 双重 invokeLater：确保 revalidate() 触发的 layout 在 EDT 上完成后再读 bar.maximum，
+        // 否则滚动基于旧布局高度，导致末尾内容被遮挡。
         SwingUtilities.invokeLater {
-            val bar = conversationScrollPane.verticalScrollBar
-            if (force) {
-                bar.value = bar.maximum
-            } else {
-                val atBottom = bar.value + bar.visibleAmount >= bar.maximum - 80
-                if (atBottom) bar.value = bar.maximum
+            SwingUtilities.invokeLater {
+                val bar = conversationScrollPane.verticalScrollBar
+                if (force) {
+                    bar.value = bar.maximum
+                } else {
+                    val atBottom = bar.value + bar.visibleAmount >= bar.maximum - 80
+                    if (atBottom) bar.value = bar.maximum
+                }
             }
         }
     }

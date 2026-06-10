@@ -72,7 +72,10 @@ class BubbleFactory(private val scrollPane: JBScrollPane) {
     }
 
     fun assistantBubble(message: AgentMessage): Triple<JPanel, JPanel, JComponent> {
-        val content = MarkdownRenderer().render(message.content).apply { isOpaque = false }
+        val content = MarkdownRenderer().render(message.content).apply {
+            isOpaque = true
+            background = ChatTheme.aiBg
+        }
         val bubble = ChatBubble(content, ChatTheme.aiBg, ChatTheme.aiBorder, ChatTheme.AI_FRACTION) { availableWidth() }
         val row = rowPanel().apply {
             add(bubble)                        // AI 气泡靠左

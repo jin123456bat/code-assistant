@@ -1,7 +1,6 @@
 package com.aiassistant.agent_v3
 
 import com.aiassistant.*
-import com.aiassistant.agent.ModelRouter
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
 import com.aiassistant.agent.AgentTool
@@ -24,6 +23,11 @@ class AgentLoop(
             "search_code", "read_file", "list_directory",
             "git_diff", "git_log", "git_status"
         )
+
+        /** create_plan 元工具的 input_schema（含嵌套 items，ToolParameter 无法表达） */
+        private const val CREATE_PLAN_SCHEMA = """{"type":"object","properties":{"title":{"type":"string","description":"计划标题"},"steps":{"type":"array","items":{"type":"object","properties":{"description":{"type":"string","description":"步骤描述"}},"required":["description"]}}},"required":["title","steps"],"additionalProperties":false}"""
+
+        private const val CREATE_PLAN_TOOL_JSON = """{"name":"create_plan","description":"为复杂任务创建执行计划。简单任务不要调用。","input_schema":$CREATE_PLAN_SCHEMA}"""
     }
 
     val ctx = AgentContext(project)
@@ -42,6 +46,8 @@ class AgentLoop(
     var onError: ((String) -> Unit)? = null
     var onStateChange: ((Boolean) -> Unit)? = null
     var onModelRouted: ((String) -> Unit)? = null
+    /** 思考过程实时流式回调 — 每个 ThinkingDelta 触发，参数为累积的思考文本 */
+    var onThinkingDelta: ((String) -> Unit)? = null
     /** 工具确认回调 — UI 层实现内联确认，通过 latch 通知结果 */
     var onConfirmTool: ((String, String, CountDownLatch, AtomicBoolean) -> Unit)? = null
 
@@ -56,7 +62,7 @@ class AgentLoop(
         ctx.systemPrompt = buildSystemPrompt()
     }
 
-    fun run(userMessage: String, apiKey: String, callback: (String) -> Unit) {
+    fun run(userMessage: String, apiKey: String, callback: (String, String) -> Unit) {
         cancelled = false
         onStateChange?.invoke(true)
         val history = mutableListOf<AnthropicMessage>()
@@ -68,17 +74,7 @@ class AgentLoop(
                 val toolNames = ctx.toolRegistry.getAll().joinToString(", ") { it.name }
                 edt { onMessage?.invoke(AgentMessage("system", "$toolCount 个工具已就绪: $toolNames")) }
 
-                // Plan mode
-                if (Planner.shouldPlan(userMessage)) {
-                    val plan = Planner.generatePlan(userMessage)
-                    ctx.currentPlan = plan
-                    edt { onPlanUpdate?.invoke(plan) }
-                    // 计划已由 PlanBar 置顶显示，不再作为文本消息重复输出
-                }
-
                 history.add(AnthropicMessage("user", userMessage))
-                model = ModelRouter.selectModel(userMessage)
-                edt { onModelRouted?.invoke(model) }
 
                 var loopCount = 0
                 var consecutiveFailures = 0
@@ -92,10 +88,14 @@ class AgentLoop(
                         break
                     }
 
-                    val (textContent, toolCalls) = result
+                    val (textContent, thinking, toolCalls) = result
                     edt { onThinking?.invoke(null) }
 
                     if (toolCalls.isNotEmpty()) {
+                        // 工具调用轮：thinking 先固化为消息，让用户在工具执行期间可查阅
+                        if (thinking.isNotEmpty()) {
+                            edt { onMessage?.invoke(AgentMessage("thinking", thinking)) }
+                        }
                         consecutiveFailures = 0
 
                         for (tc in toolCalls) {
@@ -108,6 +108,23 @@ class AgentLoop(
                                 }
                             } catch (_: Exception) {
                                 edt { onToolExecute?.invoke(tc.name, tc.arguments) }
+                            }
+
+                            // create_plan 元工具：LLM 自主决定是否创建执行计划
+                            if (tc.name == "create_plan") {
+                                val plan = parsePlanFromArgs(tc.arguments)
+                                ctx.currentPlan = plan
+                                edt { onPlanUpdate?.invoke(plan) }
+                                val planResult = "计划已创建，共${plan.steps.size}步。请从第一步开始执行。"
+                                history.add(AnthropicMessage(
+                                    "assistant", textContent, toolUseId = tc.id,
+                                    toolName = tc.name, toolInput = tc.arguments
+                                ))
+                                history.add(AnthropicMessage(
+                                    "user", planResult, toolCallId = tc.id
+                                ))
+                                edt { onToolResult?.invoke(tc.name, planResult) }
+                                continue
                             }
 
                             val params = parseParams(tc.arguments)
@@ -161,7 +178,7 @@ class AgentLoop(
 
                         if (consecutiveFailures >= MAX_FAILURES) break
                     } else {
-                        callback(textContent)
+                        callback(textContent, thinking)
                         break
                     }
 
@@ -191,8 +208,8 @@ class AgentLoop(
 
     private fun callAnthropic(
         apiKey: String, history: List<AnthropicMessage>
-    ): Pair<String, List<ToolCallResult>>? {
-        val toolsJson = ctx.toolRegistry.buildToolsJson()
+    ): Triple<String, String, List<ToolCallResult>>? {
+        val toolsJson = buildToolsJsonWithPlan()
         val requestBody = adapter.buildRequest(ctx.systemPrompt, history, toolsJson, modelOverride = model)
 
         val textBuffer = StringBuilder()
@@ -206,6 +223,8 @@ class AgentLoop(
         var hasResponse = false
         var errorDetail: String? = null
 
+        // SSE 事件序号（单次 callAnthropic 内自增），用于追踪 content_block 顺序
+        var sseSeq = 0
         sseClient.connect(
             url = adapter.endpoint, apiKey = apiKey, requestBody = requestBody,
             callback = object : SseCallback {
@@ -215,10 +234,13 @@ class AgentLoop(
                         val trimmed = line.trim()
                         if (trimmed.isEmpty()) continue
                         val event = adapter.parseSseEvent(trimmed) ?: continue
+                        sseSeq++
+                        val evName = event::class.simpleName ?: "?"
                         when (event) {
                             is ParsedEvent.TextDelta -> {
                                 hasResponse = true
                                 textBuffer.append(event.text)
+                                AppLogger.info("SSE#$sseSeq $evName text(${event.text.length}c) totalText=${textBuffer.length} → edt:onStreaming")
                                 edt { onStreaming?.invoke(textBuffer.toString()) }
                             }
                             is ParsedEvent.ToolUseStart -> {
@@ -227,12 +249,15 @@ class AgentLoop(
                                 currentToolId = event.id
                                 currentToolName = event.name
                                 currentToolInput.clear()
+                                AppLogger.info("SSE#$sseSeq $evName id=${event.id} name=${event.name}")
                             }
                             is ParsedEvent.InputJsonDelta -> {
                                 currentToolInput.append(event.partial)
                             }
                             is ParsedEvent.ContentBlockStop -> {
+                                AppLogger.info("SSE#$sseSeq $evName inToolUse=$inToolUse")
                                 if (inToolUse) {
+                                    AppLogger.info("SSE#$sseSeq toolCall: id=$currentToolId name=$currentToolName")
                                     toolCalls.add(ToolCallResult(
                                         currentToolId, currentToolName,
                                         currentToolInput.toString().ifEmpty { "{}" }
@@ -240,16 +265,19 @@ class AgentLoop(
                                     inToolUse = false
                                 }
                             }
-                            is ParsedEvent.MessageStart -> { hasResponse = true }
-                            is ParsedEvent.ThinkingStart -> { hasResponse = true }
+                            is ParsedEvent.MessageStart -> { hasResponse = true; AppLogger.info("SSE#$sseSeq $evName") }
+                            is ParsedEvent.ThinkingStart -> { hasResponse = true; AppLogger.info("SSE#$sseSeq $evName") }
                             is ParsedEvent.ThinkingDelta -> {
                                 thinkingBuffer.append(event.thinking)
+                                AppLogger.info("SSE#$sseSeq $evName thinking(${event.thinking.length}c) totalThinking=${thinkingBuffer.length} → edt:onThinkingDelta")
+                                edt { onThinkingDelta?.invoke(thinkingBuffer.toString()) }
                             }
                             is ParsedEvent.SignatureDelta -> {}
                             is ParsedEvent.MessageStop -> {
+                                AppLogger.info("SSE#$sseSeq $evName → done.notifyAll")
                                 synchronized(done) { done.notifyAll() }
                             }
-                            else -> {}
+                            else -> { AppLogger.info("SSE#$sseSeq $evName (unhandled)") }
                         }
                     }
                 }
@@ -272,18 +300,19 @@ class AgentLoop(
         val finalText = textBuffer.toString()
         val thinking = thinkingBuffer.toString()
 
+        AppLogger.info("callAnthropic 返回: finalText.length=${finalText.length} thinking.length=${thinking.length} toolCalls.size=${toolCalls.size}")
+
         // DeepSeek V4 行为：简单回复时可能把全部内容放进 thinking、正式 text 为空。
         // 若这是最终回复轮（无工具调用）且 text 为空但 thinking 非空，
         // 则把 thinking 当作正式回复返回（正常气泡显示），而不是折叠成"思考过程"后丢失结果。
         if (toolCalls.isEmpty() && finalText.isEmpty() && thinking.isNotEmpty()) {
-            return Pair(thinking, toolCalls)
+            AppLogger.info("callAnthropic: thinking 降级为 text（DeepSeek V4 behavior）")
+            return Triple(thinking, "", toolCalls)
         }
 
-        // 否则：thinking 作为可折叠推理过程单独显示，text 作为回复
-        if (thinking.isNotEmpty()) {
-            edt { onMessage?.invoke(AgentMessage("thinking", thinking)) }
-        }
-        return Pair(finalText, toolCalls)
+        // thinking 随返回值一起出去，由 run() 统一 dispatch，避免 callAnthropic 内部
+        // 单独 dispatch 导致 ChatViewModel 在 streamingContent 未清空时 rebuild（重复渲染同一份回复文本）。
+        return Triple(finalText, thinking, toolCalls)
     }
 
     private fun parseParams(json: String): Map<String, String> {
@@ -309,6 +338,10 @@ Path: ${project.basePath ?: "unknown"}
 ## Tools
 $toolList
 
+## Planning
+对于需要多步骤完成的复杂任务（如实现功能、重构代码、架构变更），你应该先调用 **create_plan** 工具创建执行计划。
+简单任务（读取文件、回答单个问题、一行修改）不要创建计划。
+
 ## Rules
 - Use tools to get real data; never guess
 - Read before edit; report results in Chinese
@@ -316,6 +349,32 @@ $toolList
 - For search: use search_code (not execute_command grep)
 - For commands: use execute_command
         """.trimIndent()
+    }
+
+    /** 将 create_plan 元工具拼接到 tools JSON 末尾（ToolRegistryV3 的 ToolParameter 无法表达嵌套 items 子结构） */
+    private fun buildToolsJsonWithPlan(): String {
+        val base = ctx.toolRegistry.buildToolsJson()  // "[...]"（已缓存，含 JsonUtils.escapeJson 保护）
+        val inner = base.removeSurrounding("[", "]")
+        return if (inner.isNotBlank()) "[$inner,$CREATE_PLAN_TOOL_JSON]" else "[$CREATE_PLAN_TOOL_JSON]"
+    }
+
+    /** 从 create_plan 的 JSON 参数中解析 Plan */
+    private fun parsePlanFromArgs(args: String): AgentContext.Plan {
+        val title = Regex(""""title"\s*:\s*"([^"]*)"""").find(args)?.groupValues?.get(1) ?: "执行计划"
+        val stepsJson = Regex(""""steps"\s*:\s*\[(.*?)\]""", RegexOption.DOT_MATCHES_ALL)
+            .find(args)?.groupValues?.get(1) ?: ""
+        val stepDescs = Regex(""""description"\s*:\s*"([^"]*)"""").findAll(stepsJson).map { it.groupValues[1] }.toList()
+        val steps = if (stepDescs.isNotEmpty()) {
+            stepDescs.mapIndexed { i, desc -> AgentContext.Step(index = i + 1, description = desc) }
+        } else {
+            listOf(
+                AgentContext.Step(1, "分析需求和现有代码"),
+                AgentContext.Step(2, "制定实现方案"),
+                AgentContext.Step(3, "逐步实现并测试"),
+                AgentContext.Step(4, "验证结果并总结")
+            )
+        }
+        return AgentContext.Plan(title = title, steps = steps)
     }
 
     private fun edt(action: () -> Unit) {

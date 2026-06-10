@@ -205,7 +205,7 @@ feat(新功能) | fix(修复) | chore(杂项) | docs(文档) | style(格式) | r
 
     fun getModel(): String {
         return com.intellij.ide.util.PropertiesComponent.getInstance()
-            .getValue(MODEL_KEY, "deepseek-v4-flash") ?: "deepseek-v4-flash"
+            .getValue(MODEL_KEY, "deepseek-v4-pro") ?: "deepseek-v4-pro"
     }
 
     fun setModel(model: String) {

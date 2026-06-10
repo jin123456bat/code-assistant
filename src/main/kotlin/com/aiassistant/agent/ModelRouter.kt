@@ -2,9 +2,11 @@ package com.aiassistant.agent
 
 /**
  * 模型路由：根据任务复杂度自动选择 deepseek-v4-flash 或 deepseek-v4-pro。
- * - v4-flash: 快速响应、工具调用、简单任务
- * - v4-pro: 复杂编码、大型重构、深度推理
+ *
+ * @deprecated 模型选择已简化为默认 deepseek-v4-flash，用户可在设置中手动切换。
+ * AgentLoop 不再调用 selectModel()。
  */
+@Deprecated("模型选择已简化为默认 deepseek-v4-flash，由用户在设置中切换")
 object ModelRouter {
 
     fun selectModel(userInput: String): String {

@@ -18,17 +18,24 @@ class AgentContext(val project: Project) {
     data class Step(
         val index: Int,
         val description: String,
-        val status: StepStatus = StepStatus.PENDING,
-        val result: String? = null
+        var status: StepStatus = StepStatus.PENDING,
+        var result: String? = null
     )
 
-    data class Plan(
+    class Plan(
         val title: String,
         val steps: List<Step>
     ) {
         fun progress(): String = "${steps.count { it.status == StepStatus.DONE }}/${steps.size}"
         fun isComplete(): Boolean = steps.all { it.status == StepStatus.DONE }
         fun nextPending(): Step? = steps.firstOrNull { it.status == StepStatus.PENDING }
+
+        fun updateStep(index: Int, status: StepStatus, result: String? = null) {
+            steps.find { it.index == index }?.let {
+                it.status = status
+                it.result = result
+            }
+        }
     }
 
     enum class StepStatus { PENDING, IN_PROGRESS, DONE, FAILED }

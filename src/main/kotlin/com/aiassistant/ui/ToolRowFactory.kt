@@ -1,6 +1,7 @@
 package com.aiassistant.ui
 
 import com.aiassistant.agent_v3.AgentMessage
+import com.intellij.openapi.editor.colors.EditorColorsManager
 import com.intellij.util.ui.JBUI
 import java.awt.*
 import java.awt.event.MouseAdapter
@@ -56,6 +57,13 @@ private class BrailleSpinnerLabel(color: Color) : JLabel() {
  * - 所有颜色取自 ChatTheme，不硬编码
  */
 class ToolRowFactory {
+
+    private val editorFontSize get() = runCatching { EditorColorsManager.getInstance().globalScheme.editorFontSize }.getOrDefault(14)
+    private val toolFont get() = Font(Font.SANS_SERIF, Font.PLAIN, editorFontSize - 1)
+    private val toolFontBold get() = toolFont.deriveFont(Font.BOLD)
+    private val toolCodeFont get() = Font(Font.MONOSPACED, Font.PLAIN, editorFontSize - 1)
+    private val thinkFont get() = Font(Font.SANS_SERIF, Font.PLAIN, editorFontSize - 2)
+    private val thinkFontItalic get() = thinkFont.deriveFont(Font.ITALIC)
 
     // ---- 公开 API ----
 
@@ -165,7 +173,7 @@ class ToolRowFactory {
                     isEditable = false
                     lineWrap = true
                     wrapStyleWord = true
-                    font = ChatTheme.codeFont
+                    font = toolCodeFont
                     background = ChatTheme.codeBg
                     foreground = ChatTheme.textSecondary
                     border = JBUI.Borders.empty(4, 6)
@@ -204,7 +212,7 @@ class ToolRowFactory {
         // 标题行
         val headerRow = compactRow(opaque = false)
         val titleLabel = JLabel("✕ $toolName 失败").apply {
-            font = ChatTheme.metaFont.deriveFont(Font.BOLD)
+            font = toolFontBold
             foreground = ChatTheme.error
         }
         headerRow.add(titleLabel)
@@ -216,7 +224,7 @@ class ToolRowFactory {
             isEditable = false
             lineWrap = true
             wrapStyleWord = true
-            font = ChatTheme.codeFont
+            font = toolCodeFont
             background = ChatTheme.codeBg
             foreground = ChatTheme.error
             border = JBUI.Borders.empty(4, 6)
@@ -246,7 +254,7 @@ class ToolRowFactory {
         row.add(spinner)
         row.add(hGap(4))
         val label = JLabel("执行中 · $toolName").apply {
-            font = ChatTheme.metaFont
+            font = toolFont
             foreground = ChatTheme.toolFg
         }
         row.add(label)
@@ -259,13 +267,14 @@ class ToolRowFactory {
     /**
      * 思考行：默认折叠（低调 textMuted 斜体，前 ~100 chars）；
      * 展开后用 bodyFont 显示全文。无彩色气泡背景。
+     * @param initiallyExpanded 流式展示时传 true，让用户实时看到思考过程
      */
-    fun thinkingRow(content: String): JPanel {
+    fun thinkingRow(content: String, initiallyExpanded: Boolean = false): JPanel {
         val summary = content.lines().take(2).joinToString(" ").take(100)
             .let { if (content.length > 100) "$it…" else it }
 
         val outerRow = outerRow()
-        val collapsed = AtomicBoolean(true)
+        val collapsed = AtomicBoolean(!initiallyExpanded)
 
         // 思考行使用更轻量的容器（不带左栏边框），通过颜色暗示
         val container = JPanel(BorderLayout()).apply {
@@ -285,13 +294,13 @@ class ToolRowFactory {
 
             if (isCollapsed) {
                 val lbl = JLabel(summary).apply {
-                    font = ChatTheme.metaFont.deriveFont(Font.ITALIC)
+                    font = thinkFontItalic
                     foreground = ChatTheme.textMuted
                 }
                 headerRow.add(lbl)
             } else {
                 val lbl = JLabel("思考过程").apply {
-                    font = ChatTheme.metaFont.deriveFont(Font.ITALIC)
+                    font = thinkFontItalic
                     foreground = ChatTheme.textMuted
                 }
                 headerRow.add(lbl)
@@ -315,7 +324,7 @@ class ToolRowFactory {
                     isEditable = false
                     lineWrap = true
                     wrapStyleWord = true
-                    font = ChatTheme.bodyFont
+                    font = thinkFont
                     isOpaque = false
                     border = JBUI.Borders.empty(4, 20, 4, 0)
                     foreground = ChatTheme.textSecondary
@@ -324,7 +333,7 @@ class ToolRowFactory {
             }
         }
 
-        rebuild(true)
+        rebuild(!initiallyExpanded)
         outerRow.add(container)
         outerRow.add(Box.createHorizontalGlue())
         return outerRow
@@ -360,7 +369,7 @@ class ToolRowFactory {
 
     /** 展开/收起箭头标签 */
     private fun arrowLabel(expanded: Boolean): JLabel = JLabel(if (expanded) "▾" else "▸").apply {
-        font = ChatTheme.metaFont
+        font = toolFont
         foreground = ChatTheme.toolFg
         // 宽度固定，防止切换时闪烁
         preferredSize = Dimension(10, preferredSize.height)
@@ -370,19 +379,19 @@ class ToolRowFactory {
 
     /** 工具名称标签：加粗，toolFg 颜色 */
     private fun toolNameLabel(name: String): JLabel = JLabel(name).apply {
-        font = ChatTheme.metaFont.deriveFont(Font.BOLD)
+        font = toolFontBold
         foreground = ChatTheme.toolFg
     }
 
     /** Args 预览标签：等宽，textMuted，单行截断 */
     private fun argsPreviewLabel(text: String): JLabel = JLabel(text).apply {
-        font = ChatTheme.codeFont.deriveFont(ChatTheme.metaFont.size.toFloat())
+        font = ChatTheme.codeFont.deriveFont(toolFont.size.toFloat())
         foreground = ChatTheme.textMuted
     }
 
     /** 右侧状态标签（如 "✓ 62 行"） */
     private fun statusLabel(text: String): JLabel = JLabel(text).apply {
-        font = ChatTheme.metaFont
+        font = toolFont
         foreground = ChatTheme.textMuted
         border = JBUI.Borders.empty(0, 0, 0, 4)
     }

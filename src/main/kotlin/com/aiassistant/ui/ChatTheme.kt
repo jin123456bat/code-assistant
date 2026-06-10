@@ -20,8 +20,8 @@ object ChatTheme {
     // ---- 气泡 ----
     val userBg = JBColor(0x3574F0, 0x2F5E8F)
     val userFg = JBColor(0xFFFFFF, 0xFFFFFF)
-    val aiBg = JBColor(0xF2F3F5, 0x313338)
-    val aiBorder = JBColor(0xE3E5E9, 0x3C3F44)
+    val aiBg = JBColor(0xF5F5F5, 0x37373C)
+    val aiBorder = JBColor(0xDCDCDC, 0x41414B)
 
     // ---- 工具（强调蓝，统一语义色）----
     val toolBar = JBColor(0x3574F0, 0x5C8FD6)

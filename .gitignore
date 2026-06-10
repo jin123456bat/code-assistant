@@ -1,7 +1,19 @@
+# Gradle / 构建产物
 .gradle/
 build/
+out/
+*.zip
+
+# IntelliJ IDEA / 项目配置
 .idea/
 *.iml
-out/
+
+# 本地配置（含本机路径 / 密钥，禁止提交）
 local.properties
-*.zip
+
+# 插件运行时数据（对话历史、粘贴图片、本地 MCP 配置）
+# 如需共享项目级 MCP 配置，可单独解除忽略：!.code-assistant/mcp.json
+.code-assistant/
+
+# 操作系统
+.DS_Store

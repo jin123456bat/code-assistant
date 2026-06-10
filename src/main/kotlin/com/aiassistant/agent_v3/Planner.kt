@@ -2,8 +2,12 @@ package com.aiassistant.agent_v3
 
 /**
  * 计划模式 — 自动检测复杂任务，生成并跟踪执行计划。
- * 触发条件：输入超过 200 字符，或包含"实现/重构/搭建/创建"等关键词。
+ *
+ * @deprecated 计划判定已改为 LLM 驱动（create_plan 元工具）。
+ * AgentLoop 不再调用 shouldPlan()/generatePlan()，改由 LLM 自主决定是否创建计划。
+ * buildPlanSummary() 保留供将来 UI 层使用。
  */
+@Deprecated("计划判定已改为 LLM 驱动（create_plan 元工具），此类仅保留供参考")
 object Planner {
 
     private val planKeywords = listOf(
@@ -18,7 +22,17 @@ object Planner {
         val trimmed = userInput.trim()
         if (trimmed.length > 200) return true
         val lower = trimmed.lowercase()
-        return planKeywords.any { lower.contains(it) }
+        return planKeywords.any { keyword ->
+            if (keyword[0].isLetter() && keyword[0].code < 0x4E00) {
+                // 英文关键词用自然语言边界匹配，避免文件名/路径中的子串误触发
+                // 例如 "build.gradle.kts" 中的 "build" 不应触发计划模式
+                val regex = Regex("(?<![\\w/.\\-])${Regex.escape(keyword)}(?![\\w/.\\-])")
+                regex.containsMatchIn(lower)
+            } else {
+                // 中文关键词：直接 contains（中文不存在嵌在英文单词中的问题）
+                lower.contains(keyword)
+            }
+        }
     }
 
     fun generatePlan(userInput: String): AgentContext.Plan {

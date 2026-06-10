@@ -19,6 +19,7 @@ class ChatViewModel(
 ) {
     @Volatile var messages = mutableListOf<AgentMessage>()
     @Volatile var streamingContent = ""
+    @Volatile var streamingThinking = ""
     @Volatile var isStreaming = false
     @Volatile var isRateLimited = false
     @Volatile var currentToolName: String? = null
@@ -43,6 +44,7 @@ class ChatViewModel(
 
     var onMessagesChanged: (() -> Unit)? = null
     var onStreamingUpdate: ((String) -> Unit)? = null
+    var onStreamingThinkingChanged: ((String) -> Unit)? = null
     var onStreamingStateChanged: ((Boolean) -> Unit)? = null
     var onError: ((String?) -> Unit)? = null
     var onRateLimitCountdown: ((Int) -> Unit)? = null
@@ -69,8 +71,19 @@ class ChatViewModel(
     }
 
     private fun setupCallbacks(a: AgentLoop) {
-        a.onMessage = { msg -> runOnEdt { messages.add(msg); onMessagesChanged?.invoke() } }
+        a.onMessage = { msg ->
+            runOnEdt {
+                AppLogger.info("EDT onMessage role=${msg.role} contentLen=${msg.content.length} streamingThinking.len=${streamingThinking.length} streamingContent.len=${streamingContent.length}")
+                messages.add(msg)
+                if (msg.role == "thinking") streamingThinking = ""
+                onMessagesChanged?.invoke()
+            }
+        }
         a.onStreaming = { text -> runOnEdt { streamingContent = text; onStreamingUpdate?.invoke(text) } }
+        a.onThinkingDelta = { text -> runOnEdt {
+            AppLogger.info("EDT onThinkingDelta thinking.len=${text.length} streamingContent.len=${streamingContent.length}")
+            streamingThinking = text; onStreamingThinkingChanged?.invoke(text)
+        } }
         a.onToolExecute = { name, args ->
             runOnEdt {
                 activity = Activity.RunningTool(name)
@@ -93,17 +106,18 @@ class ChatViewModel(
                 isStreaming = streaming
                 // 运行开始→思考中；结束→空闲
                 if (streaming) { if (activity == Activity.Idle) activity = Activity.Thinking }
-                else { activity = Activity.Idle; currentToolName = null }
+                else { activity = Activity.Idle; currentToolName = null; streamingThinking = "" }
                 onStreamingStateChanged?.invoke(streaming)
             }
         }
         a.onThinking = { text ->
             runOnEdt {
-                // 仅"思考中"语义更新状态；null（清空）不再直接清状态，避免 null 间隙闪烁
+                // 仅"思考中"语义更新状态；null（清空）不再直接清状态，避免 null 间隙闪烁。
+                // 不触发 onMessagesChanged，否则当前轮 streamingContent 还未清空时就 rebuild，
+                // 导致同一份 AI 回复先作为流式气泡渲染一次，又被 callback 的 messages 渲染一次（重复显示）。
                 if (text != null && text.contains("思考")) {
                     activity = Activity.Thinking
                 }
-                onMessagesChanged?.invoke()
             }
         }
         a.onModelRouted = { model -> runOnEdt { currentModel = model } }
@@ -115,6 +129,7 @@ class ChatViewModel(
     fun sendMessage(apiKey: String, content: String) {
         if (content.isBlank() || isStreaming || isRateLimited) return
         streamingContent = ""
+        streamingThinking = ""
         messages.add(AgentMessage("user", content))
         runOnEdt { onMessagesChanged?.invoke() }
         isStreaming = true
@@ -122,10 +137,15 @@ class ChatViewModel(
 
         val a = agent
         if (a != null) {
-            a.run(content, apiKey) { finalText ->
-                // 在 EDT 上落地最终文本，并清空 streamingContent，
-                // 否则 messages 与 streamingContent 会同时含同一份内容 → 重复渲染。
+            a.run(content, apiKey) { finalText, thinking ->
+                // thinking 与 assistant 消息在同一个 EDT 块中原子性地落地，
+                // 同时清空 streamingThinking/streamingContent，避免分两次 rebuild
+                // 导致 streamingContent 作为临时气泡重复渲染。
                 runOnEdt {
+                    if (thinking.isNotEmpty()) {
+                        messages.add(AgentMessage("thinking", thinking))
+                    }
+                    streamingThinking = ""
                     if (finalText.isNotEmpty()) {
                         messages.add(AgentMessage("assistant", finalText))
                     }
@@ -145,6 +165,7 @@ class ChatViewModel(
         agent?.stop()
         isStreaming = false
         streamingContent = ""
+        streamingThinking = ""
         runOnEdt { onStreamingStateChanged?.invoke(false) }
     }
 
@@ -152,6 +173,7 @@ class ChatViewModel(
         stopGeneration()
         messages.clear()
         streamingContent = ""
+        streamingThinking = ""
         currentPlan = null
         isRateLimited = false
         runOnEdt { onMessagesChanged?.invoke() }
