@@ -56,18 +56,18 @@ private class BrailleSpinnerLabel(color: Color) : JLabel() {
  * - 展开/收起采用 removeAll + rebuild + revalidate/repaint 模式
  * - 所有颜色取自 ChatTheme，不硬编码
  */
-class ToolRowFactory {
+class ToolRowFactory(private val availableWidth: () -> Int) {
 
     private val editorFontSize get() = runCatching { EditorColorsManager.getInstance().globalScheme.editorFontSize }.getOrDefault(14)
     private val toolFont get() = Font(Font.SANS_SERIF, Font.PLAIN, editorFontSize - 1)
     private val toolFontBold get() = toolFont.deriveFont(Font.BOLD)
     private val toolCodeFont get() = Font(Font.MONOSPACED, Font.PLAIN, editorFontSize - 1)
-    private val thinkFont get() = Font(Font.SANS_SERIF, Font.PLAIN, editorFontSize - 2)
+    private val thinkFont get() = Font(Font.SANS_SERIF, Font.PLAIN, editorFontSize - 1)
     private val thinkFontItalic get() = thinkFont.deriveFont(Font.ITALIC)
 
     // ---- 公开 API ----
 
-    /** 工具调用行：列出每个 toolCall 的 name + args 预览，紧凑不可折叠 */
+    /** 工具调用行：有文本内容时先显示文本，再列出每个 toolCall。紧凑不可折叠 */
     fun toolCallRow(message: AgentMessage): JPanel {
         val toolCalls = message.toolCalls ?: emptyList()
         val outerRow = outerRow()
@@ -84,11 +84,23 @@ class ToolRowFactory {
             return outerRow
         }
 
-        // 每个 toolCall 独立渲染为一行
         val container = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
             isOpaque = false
         }
+
+        // 工具调用前的部分文本：用 AI 气泡样式显示
+        if (message.content.isNotBlank()) {
+            val textRow = compactRow(opaque = false)
+            val textLabel = JLabel("<html><body style='width:100%'>${message.content.take(300).replace("\n", "<br>")}</body></html>").apply {
+                font = thinkFont
+                foreground = ChatTheme.textSecondary
+            }
+            textRow.add(textLabel)
+            textRow.add(Box.createHorizontalGlue())
+            container.add(textRow)
+        }
+
         for (tc in toolCalls) {
             val row = compactRow()
             // 箭头占位（工具调用行不可折叠，用静态 ▸）
@@ -268,8 +280,9 @@ class ToolRowFactory {
      * 思考行：默认折叠（低调 textMuted 斜体，前 ~100 chars）；
      * 展开后用 bodyFont 显示全文。无彩色气泡背景。
      * @param initiallyExpanded 流式展示时传 true，让用户实时看到思考过程
+     * @param streaming 流式接收中时传 true，展开标题显示"思考中..."
      */
-    fun thinkingRow(content: String, initiallyExpanded: Boolean = false): JPanel {
+    fun thinkingRow(content: String, initiallyExpanded: Boolean = false, streaming: Boolean = false): JPanel {
         val summary = content.lines().take(2).joinToString(" ").take(100)
             .let { if (content.length > 100) "$it…" else it }
 
@@ -299,7 +312,8 @@ class ToolRowFactory {
                 }
                 headerRow.add(lbl)
             } else {
-                val lbl = JLabel("思考过程").apply {
+                val title = if (streaming) "思考中..." else "思考过程"
+                val lbl = JLabel(title).apply {
                     font = thinkFontItalic
                     foreground = ChatTheme.textMuted
                 }
@@ -320,7 +334,15 @@ class ToolRowFactory {
             container.add(headerRow, BorderLayout.NORTH)
 
             if (!isCollapsed) {
-                val textArea = JTextArea(content).apply {
+                // 自测量 textArea：先按可用宽度设 size，再取换行后的真实高度。
+                // 与 ChatBubble 设计一致——getPreferredSize 在已知宽度的前提下计算高度。
+                val textArea = object : JTextArea(content) {
+                    override fun getPreferredSize(): Dimension {
+                        val w = availableWidth() - JBUI.scale(24)  // 扣除容器边框(4) + textArea 水平 padding(20)
+                        if (w > 10) size = Dimension(w, Short.MAX_VALUE.toInt())
+                        return super.getPreferredSize()
+                    }
+                }.apply {
                     isEditable = false
                     lineWrap = true
                     wrapStyleWord = true
@@ -342,7 +364,10 @@ class ToolRowFactory {
     // ---- 私有工具方法 ----
 
     /** 外层行面板：X 轴 BoxLayout，不透明，统一间距，左对齐 */
-    private fun outerRow(): JPanel = JPanel().apply {
+    /** 外层行面板：X 轴 BoxLayout，hug content 高度（同 ChatBubble 不拉伸策略） */
+    private fun outerRow(): JPanel = object : JPanel() {
+        override fun getMaximumSize(): Dimension = Dimension(Int.MAX_VALUE, preferredSize.height)
+    }.apply {
         layout = BoxLayout(this, BoxLayout.X_AXIS)
         isOpaque = false
         alignmentX = Component.LEFT_ALIGNMENT

@@ -2,9 +2,13 @@ package com.aiassistant.ui
 
 import com.aiassistant.MarkdownRenderer
 import com.aiassistant.agent_v3.AgentMessage
+import com.intellij.openapi.editor.colors.EditorColorsManager
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.util.ui.JBUI
 import java.awt.Component
+import java.awt.Dimension
+import javax.swing.Box
+import javax.swing.BoxLayout
 import javax.swing.JComponent
 import javax.swing.JPanel
 import javax.swing.JTextPane
@@ -16,13 +20,15 @@ import javax.swing.text.html.HTMLEditorKit
  * 尺寸策略已重构为「实时自测量」——见 [ChatBubble]。本工厂只负责：
  *  1. 构造内容组件（用户 HTML JTextPane / AI markdown 容器）；
  *  2. 包进自测量气泡 [ChatBubble]（尺寸由其 getPreferredSize/getMaximumSize 实时算）；
- *  3. 设置 alignmentX（BoxLayout.Y_AXIS 的 align-self，等价 CSS flex-end/flex-start）。
+ *  3. 放进左右对齐的 row（X_AXIS + glue）。
  *
  * 不再有 fitWidth / lockRowHeight / refit 等「构造期冻结尺寸」逻辑——
  * 那是用户消息裁字、AI 气泡错位的架构根因。viewport 变化时只需对容器
  * 调用 revalidate()，气泡会按新宽度自动重测。
  */
 class BubbleFactory(private val scrollPane: JBScrollPane) {
+
+    private val editorFontSize get() = runCatching { EditorColorsManager.getInstance().globalScheme.editorFontSize }.getOrDefault(14)
 
     companion object {
         /** 递归查找容器中第一个 JTextPane 后代（用于测量 markdown 容器内容宽度）。 */
@@ -58,13 +64,15 @@ class BubbleFactory(private val scrollPane: JBScrollPane) {
             isOpaque = false
             border = null
             text = "<html><body style='margin:0;padding:0;font-family:sans-serif;" +
-                "font-size:13px;color:$fg'>$esc</body></html>"
+                "font-size:${editorFontSize}px;color:$fg'>$esc</body></html>"
             caretPosition = 0
         }
         val bubble = ChatBubble(content, ChatTheme.userBg, null, ChatTheme.USER_FRACTION) { availableWidth() }
-        // alignmentX = RIGHT_ALIGNMENT → BoxLayout.Y_AXIS 的 align-self: flex-end
-        bubble.alignmentX = Component.RIGHT_ALIGNMENT
-        return Triple(bubble, bubble, content)
+        val row = rowPanel().apply {
+            add(Box.createHorizontalGlue())   // 用户气泡靠右
+            add(bubble)
+        }
+        return Triple(row, bubble, content)
     }
 
     fun assistantBubble(message: AgentMessage): Triple<JPanel, JPanel, JComponent> {
@@ -73,13 +81,25 @@ class BubbleFactory(private val scrollPane: JBScrollPane) {
             background = ChatTheme.aiBg
         }
         val bubble = ChatBubble(content, ChatTheme.aiBg, ChatTheme.aiBorder, ChatTheme.AI_FRACTION) { availableWidth() }
-        // alignmentX = LEFT_ALIGNMENT → BoxLayout.Y_AXIS 的 align-self: flex-start
-        bubble.alignmentX = Component.LEFT_ALIGNMENT
-        return Triple(bubble, bubble, content)
+        val row = rowPanel().apply {
+            add(bubble)                        // AI 气泡靠左
+            add(Box.createHorizontalGlue())
+        }
+        return Triple(row, bubble, content)
     }
 
     /** 转义纯文本为 HTML，换行转 <br>。 */
     private fun htmlEscape(text: String): String =
         text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
             .replace("\n", "<br>")
+
+    /** 行容器：X 轴 BoxLayout，宽度可拉伸（让 glue 推气泡对齐），高度 hug content */
+    private fun rowPanel(): JPanel = object : JPanel() {
+        override fun getMaximumSize(): Dimension = Dimension(Int.MAX_VALUE, preferredSize.height)
+    }.apply {
+        layout = BoxLayout(this, BoxLayout.X_AXIS)
+        isOpaque = false
+        alignmentX = Component.LEFT_ALIGNMENT
+        border = JBUI.Borders.empty(ChatTheme.GAP_BUBBLE / 2, 0)
+    }
 }

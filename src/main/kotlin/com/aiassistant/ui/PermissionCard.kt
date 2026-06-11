@@ -149,6 +149,7 @@ object PermissionCard {
             val isDefault: Boolean = false
         )
 
+        // 定义选项数据（危险变体只有两个选项）
         val options: List<OptionDef> = if (isDanger) {
             listOf(
                 OptionDef(
@@ -176,7 +177,7 @@ object PermissionCard {
                 ),
                 OptionDef(
                     primary = "允许，且不再询问 $toolName",
-                    sub = "加入白名单，后续自动放行",
+                    sub = "加入白名单，后续此工具自动放行",
                     action = onAlwaysAllow,
                     confirmedLabel = "已加入白名单 ✓"
                 ),
@@ -248,7 +249,7 @@ object PermissionCard {
             isOpaque = false
             border = JBUI.Borders.empty(4, 4, 4, 8)
             cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
-            maximumSize = Dimension(Int.MAX_VALUE, Int.MAX_VALUE)
+            maximumSize = Dimension(Int.MAX_VALUE, JBUI.scale(24))
             alignmentX = Component.LEFT_ALIGNMENT
         }
 
@@ -320,11 +321,10 @@ object PermissionCard {
     }
 
     /**
-     * 将卡片内容替换为"已确认"静态状态。
-     * 保留头部行，移除选项列表，插入确认标签。
+     * 将选项列表替换为确认结果标签，保留头部和 diff 区。
+     * 卡片不消失，可供用户回看授权记录。
      */
     private fun showConfirmedState(card: JPanel, label: String, isRejected: Boolean) {
-        // 移除 CENTER（选项列表）
         val centerComp = (card.layout as? BorderLayout)?.getLayoutComponent(BorderLayout.CENTER)
         if (centerComp != null) card.remove(centerComp)
 
@@ -340,7 +340,7 @@ object PermissionCard {
             border = JBUI.Borders.empty(4, 14, 6, 10)
         }
         confirmedRow.add(JLabel(label).apply {
-            font = ChatTheme.metaFont
+            font = ChatTheme.metaFont.deriveFont(Font.BOLD)
             foreground = confirmedColor
         })
         confirmedRow.add(Box.createHorizontalGlue())

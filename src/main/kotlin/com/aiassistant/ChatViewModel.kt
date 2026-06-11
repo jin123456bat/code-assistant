@@ -70,12 +70,26 @@ class ChatViewModel(
         agent?.ctx?.toolRegistry?.registerMcp(mcpTools)
     }
 
+    /** 添加 thinking 消息，若上一条也是 thinking 则合并，避免多个相邻思考行 */
+    private fun addThinkingMessage(content: String) {
+        val last = messages.lastOrNull()
+        if (last != null && last.role == "thinking") {
+            messages[messages.lastIndex] = AgentMessage("thinking", last.content + "\n" + content)
+        } else {
+            messages.add(AgentMessage("thinking", content))
+        }
+        streamingThinking = ""
+    }
+
     private fun setupCallbacks(a: AgentLoop) {
         a.onMessage = { msg ->
             runOnEdt {
                 AppLogger.info("EDT onMessage role=${msg.role} contentLen=${msg.content.length} streamingThinking.len=${streamingThinking.length} streamingContent.len=${streamingContent.length}")
-                messages.add(msg)
-                if (msg.role == "thinking") streamingThinking = ""
+                if (msg.role == "thinking") {
+                    addThinkingMessage(msg.content)
+                } else {
+                    messages.add(msg)
+                }
                 onMessagesChanged?.invoke()
             }
         }
@@ -143,13 +157,13 @@ class ChatViewModel(
                 // 导致 streamingContent 作为临时气泡重复渲染。
                 runOnEdt {
                     if (thinking.isNotEmpty()) {
-                        messages.add(AgentMessage("thinking", thinking))
+                        addThinkingMessage(thinking)
                     }
-                    streamingThinking = ""
                     if (finalText.isNotEmpty()) {
                         messages.add(AgentMessage("assistant", finalText))
                     }
                     streamingContent = ""
+                    activity = Activity.Idle  // 必须在 onMessagesChanged 之前重置，否则 rebuildConversation 会渲染"思考中..."
                     onMessagesChanged?.invoke()
                 }
             }

@@ -141,6 +141,9 @@ feat(新功能) | fix(修复) | chore(杂项) | docs(文档) | style(格式) | r
         return com.intellij.ide.util.PropertiesComponent.getInstance().getValue(PROMPT_KEY)
     }
 
+    /** 返回生效的 prompt：有自定义用自定义，否则用默认 */
+    fun getEffectivePrompt(): String = getPrompt() ?: DEFAULT_COMMIT_PROMPT
+
     fun setPrompt(prompt: String?) {
         if (prompt.isNullOrBlank()) {
             com.intellij.ide.util.PropertiesComponent.getInstance().unsetValue(PROMPT_KEY)
@@ -182,6 +185,13 @@ feat(新功能) | fix(修复) | chore(杂项) | docs(文档) | style(格式) | r
             .setValue(TOOL_WHITELIST_KEY, current.sorted().joinToString(","))
     }
 
+    fun removeToolFromWhitelist(tool: String) {
+        val current = getToolWhitelist().toMutableSet()
+        current.remove(tool.trim())
+        com.intellij.ide.util.PropertiesComponent.getInstance()
+            .setValue(TOOL_WHITELIST_KEY, current.sorted().joinToString(","))
+    }
+
     // ---- Command Whitelist ----
 
     fun getCommandWhitelist(): Set<String> {
@@ -205,7 +215,7 @@ feat(新功能) | fix(修复) | chore(杂项) | docs(文档) | style(格式) | r
 
     fun getModel(): String {
         return com.intellij.ide.util.PropertiesComponent.getInstance()
-            .getValue(MODEL_KEY, "deepseek-v4-pro") ?: "deepseek-v4-pro"
+            .getValue(MODEL_KEY, "deepseek-v4-pro")
     }
 
     fun setModel(model: String) {

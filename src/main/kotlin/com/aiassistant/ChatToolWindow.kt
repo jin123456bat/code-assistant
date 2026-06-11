@@ -652,18 +652,13 @@ class ChatToolWindow(private val project: Project) {
     }
 
     private fun bindViewModel() {
+        // ChatViewModel 回调已在 EDT 执行，不包 invokeLater 避免事件重排队导致重复渲染
         viewModel.onMessagesChanged = {
-            ApplicationManager.getApplication().invokeLater {
-                rebuildConversation()
-                checkEmptyState()
-            }
+            rebuildConversation()
+            checkEmptyState()
         }
-        viewModel.onStreamingUpdate = {
-            ApplicationManager.getApplication().invokeLater { updateStreamingBubble() }
-        }
-        viewModel.onStreamingThinkingChanged = {
-            ApplicationManager.getApplication().invokeLater { updateStreamingThinking() }
-        }
+        viewModel.onStreamingUpdate = { updateStreamingBubble() }
+        viewModel.onStreamingThinkingChanged = { updateStreamingThinking() }
         viewModel.onStreamingStateChanged = { streaming ->
             ApplicationManager.getApplication().invokeLater {
                 inputArea.isEnabled = !streaming
@@ -890,7 +885,7 @@ class ChatToolWindow(private val project: Project) {
 
             // 流式思考行：重建并跟踪引用，供 updateStreamingThinking() 原地更新
             if (viewModel.streamingThinking.isNotEmpty()) {
-                val row = toolRowFactory.thinkingRow(viewModel.streamingThinking, initiallyExpanded = true)
+                val row = toolRowFactory.thinkingRow(viewModel.streamingThinking, initiallyExpanded = true, streaming = true)
                 streamingThinkingRow = row
                 streamingThinkingTextArea = findDeepestTextArea(row)
                 conversationContainer.add(row)
@@ -910,14 +905,12 @@ class ChatToolWindow(private val project: Project) {
                 }
             }
 
-            // 思考/执行中指示器：仅在还没有产生任何流式输出时显示
+            // 执行中指示器：仅在没有流式输出时显示。思考中状态由 thinkingRow 标题"思考中..."表达
             if (viewModel.streamingContent.isEmpty() && viewModel.streamingThinking.isEmpty()) {
                 when (val act = viewModel.activity) {
                     is ChatViewModel.Activity.RunningTool ->
                         conversationContainer.add(createToolRunningBubble(act.toolName))
-                    ChatViewModel.Activity.Thinking ->
-                        conversationContainer.add(createThinkingBubble("思考中..."))
-                    ChatViewModel.Activity.Idle -> { /* 无指示器 */ }
+                    else -> { /* 无指示器 */ }
                 }
             }
         } else {
@@ -939,10 +932,13 @@ class ChatToolWindow(private val project: Project) {
 
     private val markdownRenderer = MarkdownRenderer()
     private val bubbleFactory = BubbleFactory(conversationScrollPane)
-    private val toolRowFactory = ToolRowFactory()
+    private val toolRowFactory = ToolRowFactory { conversationScrollPane.viewport.width }
 
     /** 流式更新时原地替换 JTextPane 文本，避免 remove/add 触发布局震荡 */
     private fun updateStreamingBubble() {
+        // 防护：双重 invokeLater 可能导致本方法在 completion 之后才执行（此时 streamingContent
+        // 已被清空、isStreaming 已置 false），若不加守卫会创建一个空白 AI 气泡形成重复渲染。
+        if (!viewModel.isStreaming || viewModel.streamingContent.isEmpty()) return
         // 如果之前持有的 bubble 已被 rebuild 移除（parent 为 null），重置引用走创建路径
         if (streamingBubble != null && streamingBubble!!.parent == null) {
             streamingBubble = null; streamingContentPane = null
@@ -985,6 +981,8 @@ class ChatToolWindow(private val project: Project) {
 
     /** 流式思考原地更新：类似 updateStreamingBubble，避免每个 token 触发 removeAll 重建 */
     private fun updateStreamingThinking() {
+        // 同 updateStreamingBubble：防护双重 invokeLater 导致的 completion 后执行
+        if (!viewModel.isStreaming) return
         val content = viewModel.streamingThinking
         // 如果之前持有的组件已被 rebuild 移除（parent 为 null），重置引用让创建路径重新走一遍
         if (streamingThinkingRow != null && streamingThinkingRow!!.parent == null) {
@@ -995,7 +993,7 @@ class ChatToolWindow(private val project: Project) {
         if (streamingThinkingRow == null) {
             // 首次：创建思考行（已展开）。
             // 如果 assistant 流式气泡已在容器中，思考行插入到它之前（思考→回复 的自然顺序）
-            val row = toolRowFactory.thinkingRow(content, initiallyExpanded = true)
+            val row = toolRowFactory.thinkingRow(content, initiallyExpanded = true, streaming = true)
             streamingThinkingRow = row
             streamingThinkingTextArea = findDeepestTextArea(row)
             val assistantIdx = streamingBubble?.let { b ->

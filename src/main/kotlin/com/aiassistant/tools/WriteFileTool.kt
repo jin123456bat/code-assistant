@@ -3,11 +3,8 @@ package com.aiassistant.tools
 import com.aiassistant.agent.AgentTool
 import com.aiassistant.agent.ToolParameter
 import com.aiassistant.agent.ToolResult
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.ui.Messages
 import java.io.File
-import java.util.concurrent.atomic.AtomicReference
 
 /**
  * 创建或覆写文件的工具（需用户确认）
@@ -32,29 +29,7 @@ class WriteFileTool : AgentTool {
             return ToolResult.err("安全限制：不能写入项目目录之外的文件")
         }
 
-        // 用户确认
-        val confirmed = AtomicReference<Boolean>(false)
-        ApplicationManager.getApplication().invokeAndWait {
-            val preview = content.take(500).let { if (content.length > 500) "$it..." else it }
-            val msg = """Agent 即将写入文件:
-
-文件: $relativePath
-行数: ${content.lines().size} 行
-大小: ${content.length} 字符
-
-内容预览:
-$preview
-
-是否允许此写入操作？"""
-            val choice = Messages.showYesNoDialog(
-                project, msg, "Code Assistant - 文件写入确认", Messages.getQuestionIcon()
-            )
-            confirmed.set(choice == Messages.YES)
-        }
-        if (!confirmed.get()) {
-            return ToolResult.err("用户拒绝写入文件: $relativePath")
-        }
-
+        // 确认由 AgentLoop.onConfirmTool → PermissionCard 统一处理，工具层不再弹窗
         return try {
             val file = File(normalizedPath)
             file.parentFile?.mkdirs()

@@ -255,9 +255,9 @@ class MarkdownRenderer {
                 p { margin: 4px 0; }
                 ul, ol { margin: 4px 0; }
                 li { margin: 2px 0; }
-                h1 { font-size: ${fontSize + 8}px; margin: 12px 0 4px 0; }
-                h2 { font-size: ${fontSize + 4}px; margin: 12px 0 4px 0; }
-                h3 { font-size: ${fontSize + 2}px; margin: 12px 0 4px 0; }
+                h1 { font-size: ${fontSize + 3}px; margin: 12px 0 4px 0; }
+                h2 { font-size: ${fontSize + 2}px; margin: 12px 0 4px 0; }
+                h3 { font-size: ${fontSize + 1}px; margin: 12px 0 4px 0; }
                 h4 { margin: 12px 0 4px 0; }
                 blockquote {
                     border-left: 3px solid $borderColor;

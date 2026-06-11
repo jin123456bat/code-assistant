@@ -92,9 +92,17 @@ class AgentLoop(
                     edt { onThinking?.invoke(null) }
 
                     if (toolCalls.isNotEmpty()) {
-                        // 工具调用轮：thinking 先固化为消息，让用户在工具执行期间可查阅
+                        // 工具调用轮：thinking + 部分文本 先固化为消息，让用户在工具执行期间可查阅
                         if (thinking.isNotEmpty()) {
                             edt { onMessage?.invoke(AgentMessage("thinking", thinking)) }
+                        }
+                        if (textContent.isNotEmpty()) {
+                            edt {
+                                onMessage?.invoke(AgentMessage("assistant", textContent, toolCalls = toolCalls.map { tc ->
+                                    ToolCallRequest(id = tc.id, name = tc.name, arguments = tc.arguments)
+                                }))
+                                onStreaming?.invoke("")
+                            }
                         }
                         consecutiveFailures = 0
 

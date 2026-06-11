@@ -10,6 +10,8 @@ import java.awt.BorderLayout
 import java.awt.Dimension
 import java.awt.GridBagConstraints
 import java.awt.GridBagLayout
+import javax.swing.Box
+import javax.swing.BoxLayout
 import javax.swing.JButton
 import javax.swing.JComboBox
 import javax.swing.JComponent
@@ -33,7 +35,65 @@ class SettingsConfigurable : Configurable {
     private val statusLabel = JBLabel().apply {
         foreground = JBColor(0x666666, 0x8C8C8C)
     }
+    // ---- whitelist ----
+    private val toolWhitelistPanel = JPanel()
+    private val commandWhitelistPanel = JPanel()
+    init {
+        toolWhitelistPanel.layout = BoxLayout(toolWhitelistPanel, BoxLayout.Y_AXIS)
+        commandWhitelistPanel.layout = BoxLayout(commandWhitelistPanel, BoxLayout.Y_AXIS)
+    }
     private val mainPanel = JPanel(BorderLayout())
+
+    private fun refreshWhitelistUI() {
+        val service = AppSettingsService.getInstance()
+        toolWhitelistPanel.removeAll()
+        val tools = service.getToolWhitelist().sorted()
+        if (tools.isEmpty()) {
+            toolWhitelistPanel.add(JLabel("  ${AiAssistantBundle.message("settings.whitelist.empty")}").apply {
+                foreground = JBColor(0x999999, 0x777777)
+            })
+        } else {
+            for (tool in tools) {
+                val row = JPanel().apply { layout = BoxLayout(this, BoxLayout.X_AXIS); isOpaque = false }
+                row.add(JLabel("  $tool"))
+                row.add(Box.createHorizontalGlue())
+                val removeBtn = JButton(AiAssistantBundle.message("settings.whitelist.remove")).apply {
+                    addActionListener {
+                        service.removeToolFromWhitelist(tool)
+                        refreshWhitelistUI()
+                    }
+                }
+                row.add(removeBtn)
+                toolWhitelistPanel.add(row)
+            }
+        }
+        toolWhitelistPanel.revalidate()
+        toolWhitelistPanel.repaint()
+
+        commandWhitelistPanel.removeAll()
+        val commands = service.getCommandWhitelist().sorted()
+        if (commands.isEmpty()) {
+            commandWhitelistPanel.add(JLabel("  ${AiAssistantBundle.message("settings.whitelist.empty")}").apply {
+                foreground = JBColor(0x999999, 0x777777)
+            })
+        } else {
+            for (cmd in commands) {
+                val row = JPanel().apply { layout = BoxLayout(this, BoxLayout.X_AXIS); isOpaque = false }
+                row.add(JLabel("  $cmd"))
+                row.add(Box.createHorizontalGlue())
+                val removeBtn = JButton(AiAssistantBundle.message("settings.whitelist.remove")).apply {
+                    addActionListener {
+                        service.removeCommandFromWhitelist(cmd)
+                        refreshWhitelistUI()
+                    }
+                }
+                row.add(removeBtn)
+                commandWhitelistPanel.add(row)
+            }
+        }
+        commandWhitelistPanel.revalidate()
+        commandWhitelistPanel.repaint()
+    }
 
     override fun getDisplayName(): String = AiAssistantBundle.message("settings.display.name")
 
@@ -97,11 +157,31 @@ class SettingsConfigurable : Configurable {
         gbc.fill = GridBagConstraints.HORIZONTAL
         contentPanel.add(statusLabel, gbc)
 
+        // ---- Whitelist section ----
+        gbc.gridy = 9; gbc.gridx = 0; gbc.gridwidth = 2; gbc.weighty = 0.0; gbc.fill = GridBagConstraints.HORIZONTAL
+        gbc.insets = JBUI.insets(16, 8, 4, 8)
+        contentPanel.add(JLabel("<html><b>${AiAssistantBundle.message("settings.whitelist.header")}</b></html>"), gbc)
+        gbc.insets = JBUI.insets(2, 8, 2, 8)
+        contentPanel.add(JLabel(AiAssistantBundle.message("settings.whitelist.desc")).apply {
+            foreground = JBColor(0x666666, 0x8C8C8C)
+        }, gbc)
+
+        gbc.gridy = 10; gbc.insets = JBUI.insets(4, 16, 2, 8)
+        contentPanel.add(JLabel(AiAssistantBundle.message("settings.whitelist.tool")), gbc)
+        gbc.gridy = 11; gbc.insets = JBUI.insets(0, 24, 4, 8)
+        contentPanel.add(toolWhitelistPanel, gbc)
+
+        gbc.gridy = 12; gbc.insets = JBUI.insets(4, 16, 2, 8)
+        contentPanel.add(JLabel(AiAssistantBundle.message("settings.whitelist.command")), gbc)
+        gbc.gridy = 13; gbc.insets = JBUI.insets(0, 24, 4, 8)
+        contentPanel.add(commandWhitelistPanel, gbc)
+
         // Filler
-        gbc.gridy = 9; gbc.weighty = 1.0; gbc.fill = GridBagConstraints.BOTH
+        gbc.gridy = 14; gbc.weighty = 1.0; gbc.fill = GridBagConstraints.BOTH
         contentPanel.add(JPanel(), gbc)
 
         mainPanel.add(contentPanel, BorderLayout.NORTH)
+        refreshWhitelistUI()
         return mainPanel
     }
 
@@ -113,7 +193,7 @@ class SettingsConfigurable : Configurable {
         val inputApiKey = String(apiKeyField.password)
         if (savedApiKey != inputApiKey) return true
 
-        val savedPrompt = service.getPrompt() ?: ""
+        val savedPrompt = service.getEffectivePrompt()
         val inputPrompt = promptArea.text.trim()
         if (savedPrompt != inputPrompt) return true
 
@@ -157,10 +237,11 @@ class SettingsConfigurable : Configurable {
         val service = AppSettingsService.getInstance()
         cachedApiKey = service.getApiKey() ?: ""
         apiKeyField.text = cachedApiKey
-        promptArea.text = service.getPrompt() ?: ""
+        promptArea.text = service.getEffectivePrompt()
         val savedModel = service.getModel()
         val idx = AppSettingsService.AVAILABLE_MODELS.indexOfFirst { it.first == savedModel }
         if (idx >= 0) modelCombo.selectedIndex = idx
         statusLabel.text = ""
+        refreshWhitelistUI()
     }
 }
