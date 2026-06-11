@@ -206,7 +206,7 @@ class MarkdownRenderer {
         contentType = "text/html"
         editorKit = HTMLEditorKit()
         border = JBUI.Borders.empty()
-        if (bg != null) background = bg
+        isOpaque = false  // 不画背景，由 ContentPanel 统一提供 aiBg
     }
 
     private fun buildStyledHtml(htmlBody: String, textPane: JTextPane): String {
@@ -235,7 +235,7 @@ class MarkdownRenderer {
                     font-family: $fontFamily, sans-serif;
                     font-size: ${fontSize}px;
                     color: #$fgHex;
-                    background-color: #$bgHex;
+                    background: transparent;
                     padding: 4px;
                     margin: 0;
                 }
