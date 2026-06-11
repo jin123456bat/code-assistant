@@ -3,6 +3,7 @@ package com.aiassistant
 import com.aiassistant.agent_v3.AgentMessage
 import com.aiassistant.mcp.McpManager
 import com.aiassistant.shared.JsonUtils
+import com.aiassistant.ui.ApprovalActions
 import com.aiassistant.ui.AskUserBridge
 import com.aiassistant.ui.BubbleFactory
 import com.aiassistant.ui.ChatTheme
@@ -690,7 +691,7 @@ class ChatToolWindow(private val project: Project) {
         }
         viewModel.onConfirmTool = { name, args, latch, result ->
             ApplicationManager.getApplication().invokeLater {
-                showConfirmationBar(name, args, latch, result)
+                rebuildConversation()  // 工具块内已自带审批按钮，只需刷新
             }
         }
         viewModel.onPlanUpdate = { plan ->
@@ -905,14 +906,8 @@ class ChatToolWindow(private val project: Project) {
                 }
             }
 
-            // 执行中指示器：仅在没有流式输出时显示。思考中状态由 thinkingRow 标题"思考中..."表达
-            if (viewModel.streamingContent.isEmpty() && viewModel.streamingThinking.isEmpty()) {
-                when (val act = viewModel.activity) {
-                    is ChatViewModel.Activity.RunningTool ->
-                        conversationContainer.add(createToolRunningBubble(act.toolName))
-                    else -> { /* 无指示器 */ }
-                }
-            }
+            // 状态指示器：执行中/思考中 已内化到对应块中（工具块"执行中..."、思考行"思考中..."）
+            // 不再需要独立指示器组件
         } else {
             val hintPanel = JPanel(GridBagLayout())
             hintPanel.add(
@@ -1034,11 +1029,13 @@ class ChatToolWindow(private val project: Project) {
     private fun createMessageBubble(message: AgentMessage): JPanel {
         return when (message.role) {
             "thinking" -> createCollapsibleThinkingBubble(message.content)
-            "tool" -> createToolResultBubble(message)
+            "tool" -> createToolResultBubble(message)    // 工具调用+结果，可折叠
             "user" -> createUserBubble(message)
             "assistant" -> {
                 if (message.toolCalls != null && message.toolCalls.isNotEmpty()) {
-                    createToolCallBubble(message)
+                    // 文本用 ChatBubble，工具调用仅展示不重复创建工具块
+                    // 真正的执行+结果由 onToolExecute/onToolResult → "tool" 消息处理
+                    createAssistantBubble(message)
                 } else {
                     createAssistantBubble(message)
                 }
@@ -1082,9 +1079,22 @@ class ChatToolWindow(private val project: Project) {
         return toolRowFactory.toolCallRow(message)
     }
 
-    /** 工具结果行 — 委托给 ToolRowFactory（默认折叠，替代绿色气泡） */
+    /** 工具结果行 — 委托给 ToolRowFactory（默认折叠），待审批时附加审批按钮 */
     private fun createToolResultBubble(message: AgentMessage): JPanel {
-        return toolRowFactory.toolResultRow(message)
+        val name = message.toolName ?: "tool"
+        // 仅当审批尚未完成时才显示按钮（latch 未被 countDown）
+        val state = if (message.approvalPending) viewModel.pendingApprovals[name] else null
+        val approvals: ApprovalActions? = if (state != null && state.latch.getCount() > 0) {
+            ApprovalActions(
+                onAllowOnce = { state.userChoice.set(true); state.latch.countDown() },
+                onAlwaysAllow = {
+                    AppSettingsService.getInstance().addToolToWhitelist(name)
+                    state.userChoice.set(true); state.latch.countDown()
+                },
+                onReject = { state.userChoice.set(false); state.latch.countDown() }
+            )
+        } else null
+        return toolRowFactory.toolResultRow(message, approvals)
     }
 
     /** 思考中轻量指示器 — textMuted 斜体，FlowLayout 自然左对齐无需 glue */

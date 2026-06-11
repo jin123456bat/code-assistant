@@ -42,11 +42,12 @@ class AgentContext(val project: Project) {
 }
 
 data class AgentMessage(
-    val role: String,     // system, user, assistant, tool
+    val role: String,     // system, user, assistant, tool, tool_call
     val content: String,
     val toolCallId: String? = null,
     val toolName: String? = null,
-    val toolCalls: List<ToolCallRequest>? = null
+    val toolCalls: List<ToolCallRequest>? = null,
+    val approvalPending: Boolean = false  // 待审批状态
 )
 
 data class ToolCallRequest(val id: String, val name: String, val arguments: String)

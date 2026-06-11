@@ -21,7 +21,9 @@ class ExecuteCommandTool : AgentTool {
     override fun execute(params: Map<String, String>, project: Project): ToolResult {
         val command = params["command"] ?: return ToolResult.err("缺少 command 参数")
         val basePath = project.basePath ?: return ToolResult.err("项目路径不可用")
-        val workingDir = params["working_dir"]?.let { File(basePath, it) } ?: File(basePath)
+        val workingDir = params["working_dir"]?.let { wd ->
+            if (File(wd).isAbsolute) File(wd) else File(basePath, wd)
+        } ?: File(basePath)
 
         if (!workingDir.exists()) return ToolResult.err("工作目录不存在: ${workingDir.path}")
 

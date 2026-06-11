@@ -128,7 +128,7 @@ class ChatBubble(
             // 2) 用确定宽度重新量高度，避免单行/换行下高度被低估导致纵向裁字。
             //    关键：用 getPreferredSpan（诚实渲染高），而非 getMinimumSpan（会偏小→裁字）。
             root.setSize(w.toFloat(), Short.MAX_VALUE.toFloat())
-            val h = ceil(root.getPreferredSpan(View.Y_AXIS).toDouble()).toInt() + JBUI.scale(2)
+            val h = ceil(root.getPreferredSpan(View.Y_AXIS).toDouble()).toInt() + JBUI.scale(4)
             return w to maxOf(h, JBUI.scale(20))
         }
 
@@ -161,7 +161,8 @@ class ChatBubble(
             // 以确定宽度排版后读真实高度（子组件换行高度依赖其被分配的宽度）。
             panel.setSize(targetW, Short.MAX_VALUE.toInt())
             panel.doLayout()
-            val h = panel.preferredSize.height
+            // +2px 缓冲防止流式过程中 HTML 换行高度被低估导致最后一两行被裁切
+            val h = panel.preferredSize.height + JBUI.scale(2)
             return targetW to maxOf(h, JBUI.scale(20))
         }
     }

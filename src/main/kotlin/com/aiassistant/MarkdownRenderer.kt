@@ -122,7 +122,12 @@ class MarkdownRenderer {
         textPane.text = buildStyledHtml(html, textPane)
         textPane.caretPosition = textPane.document.length
 
-        container.invalidate()
+        // 强制重新布局后测量，确保换行高度正确
+        val w = container.width
+        if (w > 10) {
+            container.setSize(w, Short.MAX_VALUE.toInt())
+            container.doLayout()
+        }
         val newHeight = container.preferredSize?.height ?: 0
         return kotlin.math.abs(newHeight - oldHeight) > 10
     }
@@ -233,7 +238,7 @@ class MarkdownRenderer {
             <html><head><style>
                 body {
                     font-family: $fontFamily, sans-serif;
-                    font-size: ${fontSize}px;
+                    font-size: ${fontSize - 1}px;
                     color: #$fgHex;
                     background: transparent;
                     padding: 4px;

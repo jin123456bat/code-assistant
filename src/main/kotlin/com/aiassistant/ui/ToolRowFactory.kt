@@ -10,6 +10,12 @@ import java.util.concurrent.atomic.AtomicBoolean
 import javax.swing.*
 import javax.swing.border.AbstractBorder
 
+data class ApprovalActions(
+    val onAllowOnce: () -> Unit,
+    val onAlwaysAllow: () -> Unit,
+    val onReject: () -> Unit
+)
+
 /**
  * 盲文帧 spinner 标签。
  *
@@ -27,6 +33,7 @@ private class BrailleSpinnerLabel(color: Color) : JLabel() {
     }
 
     init {
+        isOpaque = false; background = null
         font = ChatTheme.metaFont
         foreground = color
         text = frames[0]
@@ -66,6 +73,25 @@ class ToolRowFactory(private val availableWidth: () -> Int) {
     private val thinkFontItalic get() = thinkFont.deriveFont(Font.ITALIC)
 
     // ---- 公开 API ----
+
+    /** 单个工具调用行：name + args 预览，不可折叠 */
+    fun singleToolCallRow(name: String, args: String): JPanel {
+        val outerRow = outerRow()
+        val row = compactRow()
+        row.add(arrowLabel(false))
+        row.add(hGap(4))
+        row.add(toolNameLabel(name))
+        val argsPreview = args.replace('\n', ' ').replace('\r', ' ').take(120)
+            .let { if (args.length > 120) "$it…" else it }
+        if (argsPreview.isNotBlank()) {
+            row.add(hGap(6))
+            row.add(argsPreviewLabel(argsPreview))
+        }
+        row.add(Box.createHorizontalGlue())
+        outerRow.add(row)
+        outerRow.add(Box.createHorizontalGlue())
+        return outerRow
+    }
 
     /** 工具调用行：有文本内容时先显示文本，再列出每个 toolCall。紧凑不可折叠 */
     fun toolCallRow(message: AgentMessage): JPanel {
@@ -131,11 +157,12 @@ class ToolRowFactory(private val availableWidth: () -> Int) {
      * - 失败时（content 以 "错误:" / "错误：" / "Error:" 开头）渲染红色错误卡。
      * - 成功时默认折叠，摘要 "结果 · <toolName>"；展开显示 content（超 2000 chars 截断）。
      */
-    fun toolResultRow(message: AgentMessage): JPanel {
+    fun toolResultRow(message: AgentMessage, approvalActions: ApprovalActions? = null): JPanel {
         val toolName = message.toolName ?: "tool"
+        val rawContent = message.content
 
         // 检测失败前缀（中文全角/半角冒号 + 英文 Error:）
-        val contentTrimmed = message.content.trimStart()
+        val contentTrimmed = rawContent.trimStart()
         val isError = contentTrimmed.startsWith("错误:") ||
                 contentTrimmed.startsWith("错误：") ||
                 contentTrimmed.startsWith("Error:")
@@ -144,34 +171,91 @@ class ToolRowFactory(private val availableWidth: () -> Int) {
             return errorCardRow(toolName, contentTrimmed)
         }
 
-        // ---- 正常折叠结果行 ----
-        val resultText = message.content.let {
+        // 拆分 args 和 result（由 ChatViewModel 用 \n---\n 拼接）
+        val sep = "\n---\n"
+        val hasResult = rawContent.contains(sep)
+        val argsPart = if (hasResult) rawContent.substringBefore(sep) else rawContent
+        val resultPart = if (hasResult) rawContent.substringAfter(sep) else ""
+
+        // args 预览（截断 20 字符）
+        val argsPreview = argsPart.replace('\n', ' ').replace('\r', ' ').take(20)
+            .let { if (argsPart.length > 20) "$it…" else it }
+        val resultText = resultPart.let {
             if (it.length > 2000) it.take(2000) + "\n… (已截断)" else it
         }
-        // 估算行数：换行数 + 1，用于状态提示
-        val lineCount = message.content.count { it == '\n' } + 1
+        val lineCount = resultPart.count { it == '\n' } + 1
 
         val outerRow = outerRow()
         val collapsed = AtomicBoolean(true)
-
-        // bubble 是带左栏边框的容器
         val bubble = leftBarPanel()
 
         fun rebuild(isCollapsed: Boolean) {
             bubble.removeAll()
-            val headerRow = compactRow(opaque = false)
-            headerRow.background = null
-            headerRow.add(arrowLabel(!isCollapsed))
-            headerRow.add(hGap(4))
-            headerRow.add(toolNameLabel("结果 · $toolName"))
-            headerRow.add(Box.createHorizontalGlue())
-            if (isCollapsed) {
-                // 状态：行数
-                headerRow.add(statusLabel("✓ $lineCount 行"))
+
+            // 左侧信息：箭头/spinner + name + args
+            val infoPanel = JPanel().apply { layout = BoxLayout(this, BoxLayout.X_AXIS); isOpaque = false }
+            val running = !hasResult && approvalActions == null
+            if (running) {
+                infoPanel.add(BrailleSpinnerLabel(ChatTheme.toolBar))
+            } else {
+                infoPanel.add(arrowLabel(!isCollapsed))
             }
-            headerRow.cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+            infoPanel.add(hGap(4))
+            infoPanel.add(toolNameLabel(toolName))
+            infoPanel.add(hGap(6))
+            if (argsPreview.isNotBlank()) {
+                infoPanel.add(argsPreviewLabel(argsPreview))
+            }
+
+            // 右侧按钮/状态：不透明 toolBg，悬浮在 infoPanel 上方
+            val rightPanel = JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0)).apply {
+                isOpaque = true
+                background = ChatTheme.toolBg
+            }
+            if (approvalActions != null) {
+                listOf(
+                    Triple("允许", ChatTheme.toolFg, approvalActions.onAllowOnce),
+                    Triple("始终允许", ChatTheme.doneCheck, approvalActions.onAlwaysAllow),
+                    Triple("拒绝", ChatTheme.error, approvalActions.onReject)
+                ).forEach { (text, color, action) ->
+                    val lbl = JLabel(text).apply {
+                        isOpaque = false; background = null
+                        font = ChatTheme.metaFont
+                        foreground = color
+                        cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                        border = JBUI.Borders.empty(1, 5, 1, 5)
+                        addMouseListener(object : MouseAdapter() {
+                            override fun mouseClicked(e: MouseEvent?) { action() }
+                            override fun mouseEntered(e: MouseEvent?) { foreground = ChatTheme.textPrimary }
+                            override fun mouseExited(e: MouseEvent?) { foreground = color }
+                        })
+                    }
+                    rightPanel.add(lbl)
+                }
+            } else if (isCollapsed) {
+                rightPanel.isOpaque = false
+                val status = if (hasResult) "✓ $lineCount 行" else "执行中..."
+                val statusColor = if (hasResult) ChatTheme.textMuted else ChatTheme.toolFg
+                rightPanel.add(statusLabel(status).apply { foreground = statusColor })
+            }
+
+            // JLayeredPane: infoPanel 底层, rightPanel 顶层悬浮
+            val headerRow = JLayeredPane().apply { border = JBUI.Borders.empty(4, 8, 4, 4) }
+            headerRow.add(infoPanel, JLayeredPane.DEFAULT_LAYER)
+            headerRow.add(rightPanel, JLayeredPane.PALETTE_LAYER)
+            headerRow.addComponentListener(object : java.awt.event.ComponentAdapter() {
+                override fun componentResized(e: java.awt.event.ComponentEvent?) {
+                    val w = headerRow.width; val h = headerRow.height
+                    val rw = rightPanel.preferredSize.width
+                    rightPanel.setBounds(w - rw - 4, 0, rw, h)
+                    infoPanel.setBounds(0, 0, w - rw - 8, h)
+                }
+            })
+
+            headerRow.cursor = if (approvalActions == null) Cursor.getPredefinedCursor(Cursor.HAND_CURSOR) else Cursor.getDefaultCursor()
             headerRow.addMouseListener(object : MouseAdapter() {
                 override fun mouseClicked(e: MouseEvent) {
+                    if (approvalActions != null) return
                     collapsed.set(!collapsed.get())
                     rebuild(collapsed.get())
                     bubble.revalidate()
@@ -180,7 +264,7 @@ class ToolRowFactory(private val availableWidth: () -> Int) {
             })
             bubble.add(headerRow, BorderLayout.NORTH)
 
-            if (!isCollapsed) {
+            if (!isCollapsed && hasResult) {
                 val textArea = JTextArea(resultText).apply {
                     isEditable = false
                     lineWrap = true
@@ -371,7 +455,7 @@ class ToolRowFactory(private val availableWidth: () -> Int) {
         layout = BoxLayout(this, BoxLayout.X_AXIS)
         isOpaque = false
         alignmentX = Component.LEFT_ALIGNMENT
-        border = JBUI.Borders.empty(1, 0)
+        border = JBUI.Borders.empty(ChatTheme.GAP_BUBBLE / 2, 0)
     }
 
     /**

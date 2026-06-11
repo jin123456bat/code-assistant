@@ -21,7 +21,7 @@ class AgentLoop(
         /** 安全工具白名单 — 无需用户确认直接执行 */
         val SAFE_TOOLS = setOf(
             "search_code", "read_file", "list_directory",
-            "git_diff", "git_log", "git_status"
+            "git_diff", "git_log", "git_status", "web_search"
         )
 
         /** create_plan 元工具的 input_schema（含嵌套 items，ToolParameter 无法表达） */
@@ -98,9 +98,7 @@ class AgentLoop(
                         }
                         if (textContent.isNotEmpty()) {
                             edt {
-                                onMessage?.invoke(AgentMessage("assistant", textContent, toolCalls = toolCalls.map { tc ->
-                                    ToolCallRequest(id = tc.id, name = tc.name, arguments = tc.arguments)
-                                }))
+                                onMessage?.invoke(AgentMessage("assistant", textContent))
                                 onStreaming?.invoke("")
                             }
                         }

@@ -22,8 +22,10 @@ class WriteFileTool : AgentTool {
         val content = params["content"] ?: return ToolResult.err("缺少 content 参数")
         val basePath = project.basePath ?: return ToolResult.err("项目路径不可用")
 
+        // 支持绝对路径
+        val file = if (File(relativePath).isAbsolute) File(relativePath) else File(basePath, relativePath)
         // 安全检查：不允许写入系统目录
-        val normalizedPath = File(basePath, relativePath).canonicalPath
+        val normalizedPath = file.canonicalPath
         val normalizedBase = File(basePath).canonicalPath
         if (!normalizedPath.startsWith(normalizedBase)) {
             return ToolResult.err("安全限制：不能写入项目目录之外的文件")

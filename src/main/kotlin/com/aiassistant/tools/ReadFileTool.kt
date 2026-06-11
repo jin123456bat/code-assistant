@@ -21,9 +21,9 @@ class ReadFileTool : AgentTool {
     override fun execute(params: Map<String, String>, project: Project): ToolResult {
         val relativePath = params["path"] ?: return ToolResult.err("缺少 path 参数")
         val basePath = project.basePath ?: return ToolResult.err("项目路径不可用")
-        val file = File(basePath, relativePath)
+        val file = if (File(relativePath).isAbsolute) File(relativePath) else File(basePath, relativePath)
 
-        if (!file.exists()) return ToolResult.err("文件不存在: $relativePath")
+        if (!file.exists()) return ToolResult.err("文件不存在: ${file.absolutePath}")
         if (!file.isFile) return ToolResult.err("不是文件: $relativePath")
         if (file.length() > 1_000_000) return ToolResult.err("文件过大 (${file.length() / 1024}KB)，请用 offset/limit 分段读取")
 

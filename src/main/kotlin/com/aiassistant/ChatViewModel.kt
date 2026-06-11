@@ -13,6 +13,8 @@ import javax.swing.SwingUtilities
 /**
  * v3 UI 桥接 — 轻量 ViewModel，委托给 AgentLoop。
  */
+data class ApprovalState(val latch: java.util.concurrent.CountDownLatch, val userChoice: java.util.concurrent.atomic.AtomicBoolean)
+
 class ChatViewModel(
     private val sseClient: SseClient = SseClient(),
     private val anthropicAdapter: AnthropicAdapter = AnthropicAdapter()
@@ -23,6 +25,8 @@ class ChatViewModel(
     @Volatile var isStreaming = false
     @Volatile var isRateLimited = false
     @Volatile var currentToolName: String? = null
+    /** 待审批工具: toolName → ApprovalState */
+    @Volatile var pendingApprovals = mutableMapOf<String, ApprovalState>()
     /**
      * Agent 当前活动状态 —— 单点表达 UI 指示器该显示什么，
      * 取代以前用 currentToolName 一字段三义（工具名/思考文本/null）+ 字符串嗅探，
@@ -102,6 +106,7 @@ class ChatViewModel(
             runOnEdt {
                 activity = Activity.RunningTool(name)
                 currentToolName = name
+                messages.add(AgentMessage("tool", args, toolName = name))
                 onToolExecute?.invoke(name, args); onMessagesChanged?.invoke()
             }
         }
@@ -110,6 +115,14 @@ class ChatViewModel(
                 // 工具结束后 agent 仍在循环 → 回到"思考中"而非 Idle，避免指示器消失再出现的闪烁
                 activity = Activity.Thinking
                 currentToolName = null
+                // 找到对应的 tool 消息（由 onToolExecute 插入），追加结果并清除审批状态
+                val idx = messages.indexOfLast { it.role == "tool" && it.toolName == name }
+                if (idx >= 0) {
+                    messages[idx] = messages[idx].copy(content = messages[idx].content + "\n---\n" + result, approvalPending = false)
+                } else {
+                    messages.add(AgentMessage("tool", result, toolName = name))
+                }
+                pendingApprovals.remove(name)  // 审批已完成，清理状态
                 onToolResult?.invoke(name, result); onMessagesChanged?.invoke()
             }
         }
@@ -136,7 +149,13 @@ class ChatViewModel(
         }
         a.onModelRouted = { model -> runOnEdt { currentModel = model } }
         a.onConfirmTool = { name, args, latch, result ->
-            runOnEdt { onConfirmTool?.invoke(name, args, latch, result) }
+            runOnEdt {
+                pendingApprovals[name] = ApprovalState(latch, result)
+                // 标记 tool 消息为待审批
+                val idx = messages.indexOfLast { it.role == "tool" && it.toolName == name }
+                if (idx >= 0) messages[idx] = messages[idx].copy(approvalPending = true)
+                onConfirmTool?.invoke(name, args, latch, result)
+            }
         }
     }
 
@@ -190,6 +209,7 @@ class ChatViewModel(
         streamingThinking = ""
         currentPlan = null
         isRateLimited = false
+        pendingApprovals.clear()
         runOnEdt { onMessagesChanged?.invoke() }
     }
 }

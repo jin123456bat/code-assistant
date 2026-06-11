@@ -21,9 +21,14 @@ class ListDirectoryTool : AgentTool {
         val basePath = project.basePath ?: return ToolResult.err("项目路径不可用")
         val relativePath = params["path"] ?: ""
         val maxDepth = params["max_depth"]?.toIntOrNull() ?: 3
-        val targetDir = if (relativePath.isBlank()) File(basePath) else File(basePath, relativePath)
+        // 支持绝对路径（LLM 可能传完整路径）
+        val targetDir = when {
+            relativePath.isBlank() -> File(basePath)
+            File(relativePath).isAbsolute -> File(relativePath)
+            else -> File(basePath, relativePath)
+        }
 
-        if (!targetDir.exists()) return ToolResult.err("目录不存在: $relativePath")
+        if (!targetDir.exists()) return ToolResult.err("目录不存在: ${targetDir.absolutePath}")
         if (!targetDir.isDirectory) return ToolResult.err("不是目录: $relativePath")
 
         // 忽略的目录
