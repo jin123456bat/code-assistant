@@ -173,13 +173,19 @@ class ChatToolWindow(private val project: Project) {
     // ---- conversation area ----
     private val conversationContainer = JPanel().apply {
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
-        // 左/右仅 4px 容器边距（旧值 10px 让 AI 气泡左边距过大），
-        // 气泡内部由 ChatBubble 的 PAD_BUBBLE_H=12px 自行控制文字缩进，
-        // 不再叠加容器级大间距。
         border = JBUI.Borders.empty(4, 4, 8, 4)
     }
+    // 外套：BoxLayout.Y_AXIS 无 glue → 内容天然顶部对齐，同时拉伸子组件到满宽。
+    // 横向：BoxLayout 将唯一子组件 conversationContainer 拉伸到 wrapper 宽度（=视口宽），
+    //       确保内部 X_AXIS 行的水平 glue 有足够空间把气泡推到正确对侧。
+    // 纵向：无 glue → BoxLayout 只用子组件的 preferred 高度，多余空间留白在底部。
+    private val conversationWrapper = JPanel().apply {
+        layout = BoxLayout(this, BoxLayout.Y_AXIS)
+        isOpaque = false
+        add(conversationContainer)
+    }
     private val conversationScrollPane = JBScrollPane(
-        conversationContainer,
+        conversationWrapper,
         ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
         ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER
     ).apply {
@@ -926,7 +932,6 @@ class ChatToolWindow(private val project: Project) {
             )
             conversationContainer.add(hintPanel)
         }
-        conversationContainer.add(Box.createVerticalGlue())
         conversationContainer.revalidate()
         conversationContainer.repaint()
         scrollToBottom(force = true)
@@ -943,26 +948,18 @@ class ChatToolWindow(private val project: Project) {
             streamingBubble = null; streamingContentPane = null
         }
         if (streamingBubble == null) {
-            // 首次流式：移除 glue，添加流式气泡，再加 glue。
+            // 首次流式：添加流式 AI 气泡。
             // 如果已有 streaming thinking row 在容器中，assistant 气泡必须插入到它之后，
-            // 确保思考→回复的视觉顺序，避免中间出现空白。
-            val glueCount = conversationContainer.components.count { it is Box.Filler }
-            if (glueCount > 0) {
-                val lastGlue = conversationContainer.components.last { it is Box.Filler }
-                conversationContainer.remove(lastGlue)
-            }
+            // 确保思考→回复的自然视觉顺序。
             val bubble = createAssistantBubble(AgentMessage("assistant", viewModel.streamingContent))
-            // 插入到 streaming thinking row 之后（如果存在），而不是无脑追加到末尾
             val thinkIdx = streamingThinkingRow?.let { row ->
                 conversationContainer.components.indexOfFirst { it === row }.takeIf { it >= 0 }
             }
             if (thinkIdx != null) {
-                // 容器当前: [..., thinkingRow, ...]，assistant 插入到 thinkingRow 之后
                 conversationContainer.add(bubble, thinkIdx + 1)
             } else {
                 conversationContainer.add(bubble)
             }
-            conversationContainer.add(Box.createVerticalGlue())
             val entry = bubbleSizeConstraints.lastOrNull()
             if (entry != null) {
                 streamingBubble = entry.first
@@ -996,16 +993,11 @@ class ChatToolWindow(private val project: Project) {
         }
         if (content.isEmpty()) return
         if (streamingThinkingRow == null) {
-            // 首次：创建思考行（已展开），移除 glue
-            val glueCount = conversationContainer.components.count { it is Box.Filler }
-            if (glueCount > 0) {
-                val lastGlue = conversationContainer.components.last { it is Box.Filler }
-                conversationContainer.remove(lastGlue)
-            }
+            // 首次：创建思考行（已展开）。
+            // 如果 assistant 流式气泡已在容器中，思考行插入到它之前（思考→回复 的自然顺序）
             val row = toolRowFactory.thinkingRow(content, initiallyExpanded = true)
             streamingThinkingRow = row
             streamingThinkingTextArea = findDeepestTextArea(row)
-            // 如果 assistant 流式气泡已在容器中，思考行应插入到它之前（思考→回复 的自然顺序）
             val assistantIdx = streamingBubble?.let { b ->
                 conversationContainer.components.indexOfFirst { it === b }.takeIf { it >= 0 }
             }
@@ -1014,7 +1006,6 @@ class ChatToolWindow(private val project: Project) {
             } else {
                 conversationContainer.add(row)
             }
-            conversationContainer.add(Box.createVerticalGlue())
             conversationContainer.revalidate()
             scrollToBottom(force = true)
         } else {
@@ -1098,10 +1089,9 @@ class ChatToolWindow(private val project: Project) {
         return toolRowFactory.toolResultRow(message)
     }
 
-    /** 思考中轻量指示器 — textMuted 斜体 */
+    /** 思考中轻量指示器 — textMuted 斜体，FlowLayout 自然左对齐无需 glue */
     private fun createThinkingBubble(text: String): JPanel {
-        val panel = JPanel().apply {
-            layout = BoxLayout(this, BoxLayout.X_AXIS)
+        val panel = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
             isOpaque = false
             alignmentX = Component.LEFT_ALIGNMENT
             border = JBUI.Borders.empty(2, 0)
@@ -1112,7 +1102,6 @@ class ChatToolWindow(private val project: Project) {
             border = JBUI.Borders.empty(2, 4)
         }
         panel.add(label)
-        panel.add(Box.createHorizontalGlue())
         return panel
     }
 

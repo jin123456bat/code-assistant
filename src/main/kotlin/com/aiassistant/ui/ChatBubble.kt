@@ -22,7 +22,7 @@ import kotlin.math.ceil
  * 按 **当前** 可用宽度即时计算。Swing 每次布局都会调用这两个方法，
  * 那一刻 viewport 宽度一定是真实值，从结构上消除时序依赖：
  *  - getMaximumSize().width = hug 宽 → 气泡贴合内容、不被横向撑满
- *    → 外层 X_AXIS BoxLayout 的 glue 把它推到对应一侧（结构性对齐保证）。
+ *    → 父容器 BoxLayout.Y_AXIS 按 alignmentX 把它定位到对应一侧（align-self 等价）。
  *  - getMaximumSize().height = preferred 高 → 不被纵向拉伸成空盒。
  *  - getMinimumSize() = preferred → BoxLayout 不会压缩它 → 不裁字。
  *  - 高度用 getPreferredSpan(Y_AXIS)（诚实渲染高），而非 getMinimumSpan。
