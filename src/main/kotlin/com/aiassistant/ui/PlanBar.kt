@@ -46,14 +46,16 @@ class PlanBar : JPanel(BorderLayout()) {
      */
     fun updatePlan(plan: AgentContext.Plan?) {
         currentPlan = plan
-        if (plan == null || plan.steps.isEmpty()) {
+        if (plan == null || plan.steps.isEmpty() || plan.isComplete()) {
             isVisible = false
+            parent?.revalidate()
             revalidate()
             repaint()
             return
         }
         isVisible = true
         rebuild()
+        parent?.revalidate()
     }
 
     // ---- 私有构建 ----
@@ -125,8 +127,8 @@ class PlanBar : JPanel(BorderLayout()) {
             foreground = ChatTheme.textSecondary
         })
 
-        // "执行计划"标题
-        leftPanel.add(JLabel("执行计划").apply {
+        // 计划标题
+        leftPanel.add(JLabel(plan.title).apply {
             font = ChatTheme.metaFont.deriveFont(Font.BOLD)
             foreground = ChatTheme.textSecondary
         })

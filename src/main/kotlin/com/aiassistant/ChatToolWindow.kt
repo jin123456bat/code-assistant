@@ -694,9 +694,7 @@ class ChatToolWindow(private val project: Project) {
                 rebuildConversation()  // 工具块内已自带审批按钮，只需刷新
             }
         }
-        viewModel.onPlanUpdate = { plan ->
-            ApplicationManager.getApplication().invokeLater { planBar.updatePlan(plan) }
-        }
+        viewModel.onPlanUpdate = { plan -> planBar.updatePlan(plan) }
     }
 
     /** 内联工具权限确认卡 — 选项列表风格（M3-A），确认后卡片保留并展示已选状态 */

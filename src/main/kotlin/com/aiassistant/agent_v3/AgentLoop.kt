@@ -28,6 +28,10 @@ class AgentLoop(
         private const val CREATE_PLAN_SCHEMA = """{"type":"object","properties":{"title":{"type":"string","description":"计划标题"},"steps":{"type":"array","items":{"type":"object","properties":{"description":{"type":"string","description":"步骤描述"}},"required":["description"]}}},"required":["title","steps"],"additionalProperties":false}"""
 
         private const val CREATE_PLAN_TOOL_JSON = """{"name":"create_plan","description":"为复杂任务创建执行计划。简单任务不要调用。","input_schema":$CREATE_PLAN_SCHEMA}"""
+
+        private const val UPDATE_PLAN_STEP_SCHEMA = """{"type":"object","properties":{"index":{"type":"integer","description":"步骤序号（从1开始）"},"status":{"type":"string","enum":["in_progress","done","failed"],"description":"新状态"},"result":{"type":"string","description":"可选的结果摘要（done/failed 时使用）"}},"required":["index","status"]}"""
+
+        private const val UPDATE_PLAN_STEP_TOOL_JSON = """{"name":"update_plan_step","description":"更新执行计划中的步骤状态。在开始、完成或失败时调用。","input_schema":$UPDATE_PLAN_STEP_SCHEMA}"""
     }
 
     val ctx = AgentContext(project)
@@ -130,6 +134,30 @@ class AgentLoop(
                                     "user", planResult, toolCallId = tc.id
                                 ))
                                 edt { onToolResult?.invoke(tc.name, planResult) }
+                                continue
+                            }
+
+                            // update_plan_step 元工具：LLM 更新计划步骤状态
+                            if (tc.name == "update_plan_step") {
+                                val stepIndex = Regex(""""index"\s*:\s*(\d+)""").find(tc.arguments)?.groupValues?.get(1)?.toIntOrNull()
+                                val status = Regex(""""status"\s*:\s*"([^"]*)"""").find(tc.arguments)?.groupValues?.get(1)
+                                val result = Regex(""""result"\s*:\s*"([^"]*)"""").find(tc.arguments)?.groupValues?.get(1)
+                                if (stepIndex != null && status != null) {
+                                    val stepStatus = when (status) {
+                                        "in_progress" -> AgentContext.StepStatus.IN_PROGRESS
+                                        "done" -> AgentContext.StepStatus.DONE
+                                        "failed" -> AgentContext.StepStatus.FAILED
+                                        else -> null
+                                    }
+                                    if (stepStatus != null) {
+                                        ctx.currentPlan?.updateStep(stepIndex, stepStatus, result)
+                                        ctx.currentPlan?.let { edt { onPlanUpdate?.invoke(it) } }
+                                    }
+                                }
+                                val msg = "步骤 $stepIndex 状态更新为 $status"
+                                history.add(AnthropicMessage("assistant", textContent, toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments))
+                                history.add(AnthropicMessage("user", msg, toolCallId = tc.id))
+                                edt { onToolResult?.invoke(tc.name, msg) }
                                 continue
                             }
 
@@ -347,6 +375,7 @@ $toolList
 ## Planning
 对于需要多步骤完成的复杂任务（如实现功能、重构代码、架构变更），你应该先调用 **create_plan** 工具创建执行计划。
 简单任务（读取文件、回答单个问题、一行修改）不要创建计划。
+创建计划后，每个步骤开始前调用 **update_plan_step**（status="in_progress"），完成后调用（status="done" + result 摘要），失败时调用（status="failed" + result 原因）。
 
 ## Rules
 - Use tools to get real data; never guess
@@ -361,12 +390,14 @@ $toolList
     private fun buildToolsJsonWithPlan(): String {
         val base = ctx.toolRegistry.buildToolsJson()  // "[...]"（已缓存，含 JsonUtils.escapeJson 保护）
         val inner = base.removeSurrounding("[", "]")
-        return if (inner.isNotBlank()) "[$inner,$CREATE_PLAN_TOOL_JSON]" else "[$CREATE_PLAN_TOOL_JSON]"
+        val all = listOfNotNull(inner.takeIf { it.isNotBlank() }, CREATE_PLAN_TOOL_JSON, UPDATE_PLAN_STEP_TOOL_JSON).joinToString(",")
+        return "[$all]"
     }
 
     /** 从 create_plan 的 JSON 参数中解析 Plan */
     private fun parsePlanFromArgs(args: String): AgentContext.Plan {
         val title = Regex(""""title"\s*:\s*"([^"]*)"""").find(args)?.groupValues?.get(1) ?: "执行计划"
+        AppLogger.info("parsePlanFromArgs title=$title args=${args.take(200)}")
         val stepsJson = Regex(""""steps"\s*:\s*\[(.*?)\]""", RegexOption.DOT_MATCHES_ALL)
             .find(args)?.groupValues?.get(1) ?: ""
         val stepDescs = Regex(""""description"\s*:\s*"([^"]*)"""").findAll(stepsJson).map { it.groupValues[1] }.toList()

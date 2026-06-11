@@ -177,9 +177,9 @@ class ToolRowFactory(private val availableWidth: () -> Int) {
         val argsPart = if (hasResult) rawContent.substringBefore(sep) else rawContent
         val resultPart = if (hasResult) rawContent.substringAfter(sep) else ""
 
-        // args 预览（截断 20 字符）
-        val argsPreview = argsPart.replace('\n', ' ').replace('\r', ' ').take(20)
-            .let { if (argsPart.length > 20) "$it…" else it }
+        // args 预览（截断 40 字符）
+        val argsPreview = argsPart.replace('\n', ' ').replace('\r', ' ').take(40)
+            .let { if (argsPart.length > 40) "$it…" else it }
         val resultText = resultPart.let {
             if (it.length > 2000) it.take(2000) + "\n… (已截断)" else it
         }
@@ -207,11 +207,8 @@ class ToolRowFactory(private val availableWidth: () -> Int) {
                 infoPanel.add(argsPreviewLabel(argsPreview))
             }
 
-            // 右侧按钮/状态：不透明 toolBg，悬浮在 infoPanel 上方
-            val rightPanel = JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0)).apply {
-                isOpaque = true
-                background = ChatTheme.toolBg
-            }
+            // 右侧按钮/状态
+            val rightPanel = JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0)).apply { isOpaque = false }
             if (approvalActions != null) {
                 listOf(
                     Triple("允许", ChatTheme.toolFg, approvalActions.onAllowOnce),
@@ -233,24 +230,14 @@ class ToolRowFactory(private val availableWidth: () -> Int) {
                     rightPanel.add(lbl)
                 }
             } else if (isCollapsed) {
-                rightPanel.isOpaque = false
                 val status = if (hasResult) "✓ $lineCount 行" else "执行中..."
                 val statusColor = if (hasResult) ChatTheme.textMuted else ChatTheme.toolFg
                 rightPanel.add(statusLabel(status).apply { foreground = statusColor })
             }
 
-            // JLayeredPane: infoPanel 底层, rightPanel 顶层悬浮
-            val headerRow = JLayeredPane().apply { border = JBUI.Borders.empty(4, 8, 4, 4) }
-            headerRow.add(infoPanel, JLayeredPane.DEFAULT_LAYER)
-            headerRow.add(rightPanel, JLayeredPane.PALETTE_LAYER)
-            headerRow.addComponentListener(object : java.awt.event.ComponentAdapter() {
-                override fun componentResized(e: java.awt.event.ComponentEvent?) {
-                    val w = headerRow.width; val h = headerRow.height
-                    val rw = rightPanel.preferredSize.width
-                    rightPanel.setBounds(w - rw - 4, 0, rw, h)
-                    infoPanel.setBounds(0, 0, w - rw - 8, h)
-                }
-            })
+            val headerRow = JPanel(BorderLayout(0, 0)).apply { isOpaque = false; border = JBUI.Borders.empty(4, 8, 4, 4) }
+            headerRow.add(infoPanel, BorderLayout.CENTER)
+            headerRow.add(rightPanel, BorderLayout.EAST)
 
             headerRow.cursor = if (approvalActions == null) Cursor.getPredefinedCursor(Cursor.HAND_CURSOR) else Cursor.getDefaultCursor()
             headerRow.addMouseListener(object : MouseAdapter() {
