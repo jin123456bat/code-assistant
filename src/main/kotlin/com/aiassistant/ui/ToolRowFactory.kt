@@ -273,6 +273,46 @@ class ToolRowFactory(private val availableWidth: () -> Int) {
         rebuild(true)
         outerRow.add(bubble)
         outerRow.add(Box.createHorizontalGlue())
+
+        // 审批按钮悬浮层：outerRow 保持在标准流中（高度正确），
+        // 仅将按钮栏放在 PALETTE_LAYER 上，视觉悬浮但布局不干扰。
+        if (approvalButtonBar != null) {
+            val prefW = outerRow.preferredSize.width
+            val prefH = outerRow.preferredSize.height
+            val bw = approvalButtonBar.preferredSize.width
+            val bh = approvalButtonBar.preferredSize.height
+
+            val layered = JLayeredPane()
+            layered.add(outerRow, JLayeredPane.DEFAULT_LAYER)
+            layered.add(approvalButtonBar, JLayeredPane.PALETTE_LAYER)
+            // JLayeredPane 自身尺寸：高度 hug content，宽度允许拉伸
+            layered.preferredSize = Dimension(prefW, prefH)
+            layered.maximumSize = Dimension(Int.MAX_VALUE, prefH)
+
+            // 初始定位：outerRow 填满，按钮栏在右侧垂直居中
+            outerRow.setBounds(0, 0, prefW, prefH)
+            approvalButtonBar.setBounds(prefW - bw - 6, (prefH - bh) / 2, bw, bh)
+
+            // 窗口缩放时同步更新 outerRow 宽度和按钮位置（右侧垂直居中）
+            layered.addComponentListener(object : java.awt.event.ComponentAdapter() {
+                override fun componentResized(e: java.awt.event.ComponentEvent?) {
+                    outerRow.setBounds(0, 0, layered.width, layered.height)
+                    val pbw = approvalButtonBar.preferredSize.width
+                    val pbh = approvalButtonBar.preferredSize.height
+                    val centerY = (layered.height - pbh) / 2
+                    approvalButtonBar.setBounds(layered.width - pbw - 6, centerY, pbw, pbh)
+                }
+            })
+
+            // 用 JPanel 包裹 JLayeredPane（JLayeredPane 不继承 JPanel，无法直接返回）
+            return JPanel(BorderLayout()).apply {
+                isOpaque = false
+                add(layered, BorderLayout.CENTER)
+                preferredSize = Dimension(prefW, prefH)
+                maximumSize = Dimension(Int.MAX_VALUE, prefH)
+            }
+        }
+
         return outerRow
     }
 
