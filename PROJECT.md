@@ -56,7 +56,7 @@ src/main/kotlin/com/aiassistant/
 │   ├── GitStatusTool.kt       # Git status
 │   ├── AskUserTool.kt         # 用户交互
 │   ├── WebSearchTool.kt       # 网络搜索
-│   ├── WebFetchTool.kt        # 获取网页
+│   ├── WebFetchTool.kt        # 获取网页（支持断线重连、编码检测）
 │   ├── NotebookEditTool.kt    # Jupyter Notebook 编辑
 │   ├── TaskTool.kt            # 子任务
 │   └── CodeIntelligenceTool.kt # PSI 代码智能（跳转定义/查找引用/类型信息等）
@@ -117,7 +117,7 @@ AgentLoop 是核心调度器，在后台 `Thread` 上运行 `while` 循环：
 
 三类工具来源统一由 `ToolRegistryV3` 管理：
 
-1. **内置工具**（13 个）：`search_code`、`read_file`、`write_file`、`list_directory`、`execute_command`、`git_diff`、`git_log`、`git_status`、`ask_user`、`web_search`、`web_fetch`、`notebook_edit`、`task`
+1. **内置工具**（14 个）：`search_code`、`read_file`、`write_file`、`list_directory`、`execute_command`、`git_diff`、`git_log`、`git_status`、`ask_user`、`web_search`、`web_fetch`、`notebook_edit`、`task`、`code_intelligence`
 2. **MCP 工具**：通过 `registerMcp()` 注册，来自 MCP 服务器的工具发现
 3. **Skill 工具**：通过 `registerSkills()` 注册，从 `.claude/skills/**/SKILL.md` 加载
 

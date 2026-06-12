@@ -17,23 +17,45 @@ class AgentContext(val project: Project) {
 
     data class Step(
         val index: Int,
-        val description: String,
+        val subject: String,
+        val description: String = "",
         var status: StepStatus = StepStatus.PENDING,
         var result: String? = null
     )
 
     class Plan(
         val title: String,
-        val steps: List<Step>
+        private val steps: MutableList<Step>
     ) {
-        fun progress(): String = "${steps.count { it.status == StepStatus.DONE }}/${steps.size}"
-        fun isComplete(): Boolean = steps.all { it.status == StepStatus.DONE }
-        fun nextPending(): Step? = steps.firstOrNull { it.status == StepStatus.PENDING }
+        /** 线程安全地获取步骤快照（供 EDT 渲染使用） */
+        fun stepsSnapshot(): List<Step> = synchronized(steps) { steps.toList() }
+
+        fun progress(): String = synchronized(steps) {
+            "${steps.count { it.status == StepStatus.DONE }}/${steps.size}"
+        }
+        fun isComplete(): Boolean = synchronized(steps) {
+            steps.all { it.status == StepStatus.DONE }
+        }
+        fun nextPending(): Step? = synchronized(steps) {
+            steps.firstOrNull { it.status == StepStatus.PENDING }
+        }
 
         fun updateStep(index: Int, status: StepStatus, result: String? = null) {
-            steps.find { it.index == index }?.let {
-                it.status = status
-                it.result = result
+            synchronized(steps) {
+                steps.find { it.index == index }?.let {
+                    it.status = status
+                    it.result = result
+                }
+            }
+        }
+
+        /** 追加新步骤到已有计划末尾，index 自动递增 */
+        fun appendSteps(newSteps: List<Step>) {
+            synchronized(steps) {
+                val startIndex = (steps.lastOrNull()?.index ?: 0) + 1
+                newSteps.forEachIndexed { i, s ->
+                    steps.add(s.copy(index = startIndex + i))
+                }
             }
         }
     }

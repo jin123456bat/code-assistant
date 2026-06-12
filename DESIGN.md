@@ -165,10 +165,19 @@ panel (BorderLayout)
 ## Components
 
 ### PlanBar — 置顶计划条
-- 固定于 conversationScrollPane 上方，不随消息滚动
-- 折叠态：chevron + 标题 + 进度 "2/4" + 当前步骤 + 迷你进度条
-- 展开态：步骤列表（done/doing/todo 状态 + checkbox 图标）
+
+LLM 通过 `create_plan` 元工具自主创建执行计划，`update_plan_step` 更新步骤状态。
+
+**Plan 数据结构：**
+- `Plan(title, steps)` — 每个 `Step` 含 `index`（全局唯一递增）、`subject`（必填短名称）、`description`（可选详细描述）、`status`、`result`
+- 重复调用 `create_plan` 时**追加**而非覆盖——新步骤自动合并到已有计划末尾，`index` 从上次最大 +1 继续
+- 所有 `steps` 访问受 `synchronized` 保护，EDT 侧通过 `stepsSnapshot()` 获取只读快照
+
+**显示规则：**
+- 折叠态：chevron + 标题 + 进度 "2/4" + 当前步骤 `subject` + 迷你进度条
+- 展开态：步骤列表，每行显示 `subject`（主名称）+ `description`（灰色小字副描述，可选）+ 状态图标
 - 步骤过多时内部滚动（max-height 168px）
+- 全部完成自动隐藏
 
 ### PermissionCard — 权限确认卡
 - 圆角卡片 + `toolBg` 淡背景 + `toolBar`/`danger` 色边框
@@ -311,7 +320,11 @@ panel (BorderLayout)
 | `hover` | 类型推导 + `PsiDocCommentOwner` | 返回符号类型和文档 |
 | `document_symbols` | `PsiFile` 子元素遍历 | 文件的所有顶层符号 |
 | `workspace_symbol` | `PsiShortNamesCache` + `FilenameIndex` | 按名称全局搜索符号 |
-| `find_implementations` | `ClassInheritorsSearch.search(psiClass)` | 查找接口/抽象类实现 |
+| `find_implementations` | `ClassInheritorsSearch.search(psiClass)` | 查找接口/抽象类实现（需 `com.intellij.java` 可选依赖） |
+
+### 依赖
+
+Java PSI API（`PsiClass`、`ClassInheritorsSearch`）通过 `com.intellij.java` **可选依赖**提供。在 Java/Kotlin IDE 上自动可用，WebStorm/PyCharm 等无 Java 模块的 IDE 上 `find_implementations` 会返回友好错误提示。
 
 ### 输入参数
 
@@ -340,8 +353,14 @@ panel (BorderLayout)
 ### 实现要点
 
 - 元素定位：`file_path` + `line` + `character` → `VirtualFile` → `PsiFile.findElementAt(offset)`
+- 全体 `execute()` 包在 `ApplicationManager.getApplication().runReadAction<ToolResult> { ... }` 中——Agent 后台线程无 PSI 读权限，必须通过 read action 访问 Index/PSI
 - 只读操作，加入 `SAFE_TOOLS` 白名单，无需权限确认
+- `find_implementations` 通过 `com.intellij.java` 可选依赖提供，无 Java 模块的 IDE 上友好降级
 - `call_hierarchy` 留到 v2（`CallHierarchyProvider` 是 per-language EP）
+
+### 相关配置
+
+`build.gradle.kts` 中添加 `com.intellij.java` 编译期依赖，`plugin.xml` 中声明 `optional="true"`：
 
 ## Icons
 

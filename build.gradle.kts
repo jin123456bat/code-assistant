@@ -20,7 +20,7 @@ dependencies {
 intellij {
     version.set("2023.3")
     type.set("IC") // IntelliJ IDEA Community — 兼容所有基于 IntelliJ Platform 的 IDE
-    plugins.set(listOf())
+    plugins.set(listOf("com.intellij.java")) // Java PSI for code_intelligence
 }
 
 tasks {

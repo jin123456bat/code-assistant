@@ -3,29 +3,22 @@ package com.aiassistant.tools
 import com.aiassistant.agent.AgentTool
 import com.aiassistant.agent.ToolParameter
 import com.aiassistant.agent.ToolResult
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiManager
 import com.intellij.psi.PsiNamedElement
+import com.intellij.psi.PsiClass
 import com.intellij.psi.presentation.java.SymbolPresentationUtil
 import com.intellij.psi.search.FilenameIndex
 import com.intellij.psi.search.GlobalSearchScope
+import com.intellij.psi.search.searches.ClassInheritorsSearch
 import com.intellij.psi.search.searches.ReferencesSearch
 
 /**
  * PSI 代码智能工具 — 通过 IntelliJ PSI API 提供结构化代码导航。
- *
- * 支持 5 种操作（v1 限制于 IntelliJ IDEA Community 可用的 platform API）：
- * - go_to_definition：跳转到符号定义
- * - find_references：查找所有引用
- * - hover：获取类型信息和文档
- * - document_symbols：列出文件的所有顶层符号
- * - workspace_symbol：按名称全局搜索文件/符号
- *
- * 注：find_implementations 和 call_hierarchy 依赖 Java 特定模块（com.intellij.java），
- * 在 Community Edition 中不可用，留到后续版本通过可选的 Java 插件支持。
  */
 class CodeIntelligenceTool : AgentTool {
 
@@ -34,6 +27,7 @@ class CodeIntelligenceTool : AgentTool {
         append("通过 IntelliJ PSI 引擎提供结构化代码导航。支持以下操作：\n")
         append("- go_to_definition: 跳转到符号定义位置\n")
         append("- find_references: 查找符号的所有引用点\n")
+        append("- find_implementations: 查找接口/抽象类的所有实现类（需 Java/Kotlin 支持）\n")
         append("- hover: 返回符号的类型信息和文档注释\n")
         append("- document_symbols: 列出文件的所有顶层符号\n")
         append("- workspace_symbol: 按文件名或符号名在全局范围内搜索")
@@ -44,8 +38,8 @@ class CodeIntelligenceTool : AgentTool {
             "要执行的代码智能操作",
             required = true,
             enum = listOf(
-                "go_to_definition", "find_references", "hover",
-                "document_symbols", "workspace_symbol"
+                "go_to_definition", "find_references", "find_implementations",
+                "hover", "document_symbols", "workspace_symbol"
             )
         ),
         ToolParameter("file_path", "string", "文件相对项目根路径（workspace_symbol 操作除外）"),
@@ -60,22 +54,26 @@ class CodeIntelligenceTool : AgentTool {
         val basePath = project.basePath ?: return ToolResult.err("项目路径不可用")
         val maxResults = params["max_results"]?.toIntOrNull() ?: 20
 
+        // PSI/Index 操作必须在 read action 中执行（AgentLoop 运行在后台线程）
         return try {
-            when (operation) {
-                "document_symbols" -> documentSymbols(params, project, basePath)
-                "workspace_symbol" -> workspaceSymbols(params, project, basePath, maxResults)
-                else -> {
-                    val filePath = params["file_path"] ?: return ToolResult.err("缺少 file_path 参数")
-                    val line = params["line"]?.toIntOrNull() ?: return ToolResult.err("缺少 line 参数")
-                    val char = params["character"]?.toIntOrNull() ?: return ToolResult.err("缺少 character 参数")
-                    val element = resolveElement(project, basePath, filePath, line, char)
-                        ?: return ToolResult.err("无法定位 $filePath:$line:$char 处的元素")
+            ApplicationManager.getApplication().runReadAction<ToolResult> {
+                when (operation) {
+                    "document_symbols" -> documentSymbols(params, project, basePath)
+                    "workspace_symbol" -> workspaceSymbols(params, project, basePath, maxResults)
+                    else -> {
+                        val filePath = params["file_path"] ?: return@runReadAction ToolResult.err("缺少 file_path 参数")
+                        val line = params["line"]?.toIntOrNull() ?: return@runReadAction ToolResult.err("缺少 line 参数")
+                        val char = params["character"]?.toIntOrNull() ?: return@runReadAction ToolResult.err("缺少 character 参数")
+                        val element = resolveElement(project, basePath, filePath, line, char)
+                            ?: return@runReadAction ToolResult.err("无法定位 $filePath:$line:$char 处的元素")
 
-                    when (operation) {
-                        "go_to_definition" -> goToDefinition(element, project, basePath)
-                        "find_references" -> findReferences(element, project, basePath, maxResults)
-                        "hover" -> hover(element, project, basePath)
-                        else -> ToolResult.err("未知操作: $operation")
+                        when (operation) {
+                            "go_to_definition" -> goToDefinition(element, project, basePath)
+                            "find_references" -> findReferences(element, project, basePath, maxResults)
+                            "find_implementations" -> findImplementations(element, project, basePath, maxResults)
+                            "hover" -> hover(element, project, basePath)
+                            else -> ToolResult.err("未知操作: $operation")
+                        }
                     }
                 }
             }
@@ -192,6 +190,52 @@ class CodeIntelligenceTool : AgentTool {
         var e: PsiElement? = element
         while (e != null) {
             if (e is PsiNamedElement && e.name != null) return e
+            e = e.parent
+        }
+        return null
+    }
+
+    private fun findImplementations(element: PsiElement, project: Project, basePath: String, maxResults: Int): ToolResult {
+        // 找到 PsiClass（接口或抽象类）
+        val psiClass = findParentPsiClass(element)
+            ?: return ToolResult.err("该位置不是类或接口声明")
+
+        return try {
+            val isInterface = psiClass.isInterface
+            val isAbstract = psiClass.hasModifierProperty("abstract")
+            if (!isInterface && !isAbstract) {
+                return ToolResult.err("${psiClass.name} 不是接口或抽象类")
+            }
+
+            val kind = if (isInterface) "接口" else "抽象类"
+            val inheritors = ClassInheritorsSearch.search(psiClass, GlobalSearchScope.projectScope(project), true)
+                .findAll()
+                .take(maxResults)
+
+            val sb = StringBuilder()
+            sb.appendLine("### 查找实现")
+            sb.appendLine("$kind: ${psiClass.name} (${formatLocation(psiClass, basePath)})")
+            sb.appendLine()
+
+            if (inheritors.isEmpty()) {
+                sb.appendLine("未找到实现类")
+            } else {
+                sb.appendLine("找到 ${inheritors.size} 个实现:")
+                inheritors.forEachIndexed { i, impl ->
+                    val loc = formatLocation(impl, basePath)
+                    sb.appendLine("${i + 1}. ${impl.name ?: "(匿名)"} — $loc")
+                }
+            }
+            ToolResult.ok(sb.toString())
+        } catch (e: Exception) {
+            ToolResult.err("查找实现失败: ${e.message}（当前 IDE 可能不支持该语言的类层级搜索）")
+        }
+    }
+
+    private fun findParentPsiClass(element: PsiElement): PsiClass? {
+        var e: PsiElement? = element
+        while (e != null) {
+            if (e is PsiClass) return e
             e = e.parent
         }
         return null

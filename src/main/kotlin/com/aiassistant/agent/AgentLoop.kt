@@ -26,7 +26,7 @@ class AgentLoop(
         )
 
         /** create_plan 元工具的 input_schema（含嵌套 items，ToolParameter 无法表达） */
-        private const val CREATE_PLAN_SCHEMA = """{"type":"object","properties":{"title":{"type":"string","description":"计划标题"},"steps":{"type":"array","items":{"type":"object","properties":{"description":{"type":"string","description":"步骤描述"}},"required":["description"]}}},"required":["title","steps"],"additionalProperties":false}"""
+        private const val CREATE_PLAN_SCHEMA = """{"type":"object","properties":{"title":{"type":"string","description":"计划标题"},"steps":{"type":"array","items":{"type":"object","properties":{"subject":{"type":"string","description":"子任务简短名称（显示在任务列表）"},"description":{"type":"string","description":"子任务详细描述（可选）"}},"required":["subject"]}}},"required":["title","steps"],"additionalProperties":false}"""
 
         private const val CREATE_PLAN_TOOL_JSON = """{"name":"create_plan","description":"为复杂任务创建执行计划。简单任务不要调用。","input_schema":$CREATE_PLAN_SCHEMA}"""
 
@@ -121,10 +121,19 @@ class AgentLoop(
 
                             // create_plan 元工具：LLM 自主决定是否创建执行计划
                             if (tc.name == "create_plan") {
-                                val plan = parsePlanFromArgs(tc.arguments)
-                                ctx.currentPlan = plan
-                                edt { onPlanUpdate?.invoke(plan) }
-                                val planResult = "计划已创建，共${plan.steps.size}步。请从第一步开始执行。"
+                                val newPlan = parsePlanFromArgs(tc.arguments)
+                                val existingPlan = ctx.currentPlan
+                                val planResult = if (existingPlan != null) {
+                                    // 已有计划 → 追加步骤到末尾
+                                    existingPlan.appendSteps(newPlan.stepsSnapshot())
+                                    edt { onPlanUpdate?.invoke(existingPlan) }
+                                    "已将 ${newPlan.stepsSnapshot().size} 个新步骤追加到当前计划（共 ${existingPlan.stepsSnapshot().size} 步）"
+                                } else {
+                                    // 新计划
+                                    ctx.currentPlan = newPlan
+                                    edt { onPlanUpdate?.invoke(newPlan) }
+                                    "计划已创建，共 ${newPlan.stepsSnapshot().size} 步。请从第一步开始执行。"
+                                }
                                 history.add(AnthropicMessage(
                                     "assistant", textContent, toolUseId = tc.id,
                                     toolName = tc.name, toolInput = tc.arguments
@@ -438,24 +447,18 @@ $claudeMdContent
         return "[$all]"
     }
 
+    // 用于解析 create_plan JSON 参数的数据类
+    private data class PlanArgs(val title: String, val steps: List<StepArg>)
+    private data class StepArg(val subject: String, val description: String = "")
+
     /** 从 create_plan 的 JSON 参数中解析 Plan */
     private fun parsePlanFromArgs(args: String): AgentContext.Plan {
-        val title = Regex(""""title"\s*:\s*"([^"]*)"""").find(args)?.groupValues?.get(1) ?: "执行计划"
-        AppLogger.info("parsePlanFromArgs title=$title args=${args.take(200)}")
-        val stepsJson = Regex(""""steps"\s*:\s*\[(.*?)\]""", RegexOption.DOT_MATCHES_ALL)
-            .find(args)?.groupValues?.get(1) ?: ""
-        val stepDescs = Regex(""""description"\s*:\s*"([^"]*)"""").findAll(stepsJson).map { it.groupValues[1] }.toList()
-        val steps = if (stepDescs.isNotEmpty()) {
-            stepDescs.mapIndexed { i, desc -> AgentContext.Step(index = i + 1, description = desc) }
-        } else {
-            listOf(
-                AgentContext.Step(1, "分析需求和现有代码"),
-                AgentContext.Step(2, "制定实现方案"),
-                AgentContext.Step(3, "逐步实现并测试"),
-                AgentContext.Step(4, "验证结果并总结")
-            )
+        val gson = com.google.gson.Gson()
+        val planArgs = gson.fromJson(args, PlanArgs::class.java)
+        val steps = planArgs.steps.mapIndexed { i, s ->
+            AgentContext.Step(index = i + 1, subject = s.subject, description = s.description)
         }
-        return AgentContext.Plan(title = title, steps = steps)
+        return AgentContext.Plan(title = planArgs.title, steps = steps.toMutableList())
     }
 
     private fun edt(action: () -> Unit) {

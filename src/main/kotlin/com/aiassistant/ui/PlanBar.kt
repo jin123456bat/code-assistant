@@ -46,7 +46,7 @@ class PlanBar : JPanel(BorderLayout()) {
      */
     fun updatePlan(plan: AgentContext.Plan?) {
         currentPlan = plan
-        if (plan == null || plan.steps.isEmpty() || plan.isComplete()) {
+        if (plan == null || plan.stepsSnapshot().isEmpty() || plan.isComplete()) {
             isVisible = false
             parent?.revalidate()
             revalidate()
@@ -105,9 +105,10 @@ class PlanBar : JPanel(BorderLayout()) {
     private fun buildSummaryRow(plan: AgentContext.Plan): JPanel {
         val chevron = if (expanded) "▾" else "▸"
         val progress = plan.progress()
-        val currentStep = plan.steps.firstOrNull { it.status == AgentContext.StepStatus.IN_PROGRESS }
-            ?: plan.steps.firstOrNull { it.status == AgentContext.StepStatus.PENDING }
-        val stepDesc = if (!expanded && currentStep != null) " · ${currentStep.description}" else ""
+        val steps = plan.stepsSnapshot()
+        val currentStep = steps.firstOrNull { it.status == AgentContext.StepStatus.IN_PROGRESS }
+            ?: steps.firstOrNull { it.status == AgentContext.StepStatus.PENDING }
+        val stepDesc = if (!expanded && currentStep != null) " · ${currentStep.subject}" else ""
 
         val row = JPanel(BorderLayout()).apply {
             isOpaque = false
@@ -151,8 +152,9 @@ class PlanBar : JPanel(BorderLayout()) {
 
         // 右侧迷你进度条（折叠时显示）
         if (!expanded) {
-            val total = plan.steps.size
-            val done = plan.steps.count { it.status == AgentContext.StepStatus.DONE }
+            val snapshot = plan.stepsSnapshot()
+            val total = snapshot.size
+            val done = snapshot.count { it.status == AgentContext.StepStatus.DONE }
             val miniBar = MiniProgressBar(done, total)
             row.add(miniBar, BorderLayout.EAST)
         }
@@ -182,7 +184,7 @@ class PlanBar : JPanel(BorderLayout()) {
             border = JBUI.Borders.empty(2, 10, 6, 10)
         }
 
-        for (step in plan.steps) {
+        for (step in plan.stepsSnapshot()) {
             listPanel.add(buildStepRow(step))
         }
 
@@ -227,19 +229,28 @@ class PlanBar : JPanel(BorderLayout()) {
             foreground = markerColor
         })
 
-        // 描述文字
-        val (descText, descColor, descStyle) = when (step.status) {
-            AgentContext.StepStatus.DONE -> Triple(step.description, ChatTheme.textMuted, Font.PLAIN)
-            AgentContext.StepStatus.IN_PROGRESS -> Triple(step.description, ChatTheme.textPrimary, Font.BOLD)
-            AgentContext.StepStatus.PENDING -> Triple(step.description, ChatTheme.textSecondary, Font.PLAIN)
-            AgentContext.StepStatus.FAILED -> Triple(step.description, ChatTheme.error, Font.PLAIN)
+        // 子任务名称（subject）
+        val (nameColor, nameStyle) = when (step.status) {
+            AgentContext.StepStatus.DONE -> ChatTheme.textMuted to Font.PLAIN
+            AgentContext.StepStatus.IN_PROGRESS -> ChatTheme.textPrimary to Font.BOLD
+            AgentContext.StepStatus.PENDING -> ChatTheme.textSecondary to Font.PLAIN
+            AgentContext.StepStatus.FAILED -> ChatTheme.error to Font.PLAIN
         }
 
-        row.add(JLabel(descText).apply {
-            font = ChatTheme.metaFont.deriveFont(descStyle.toFloat())
-            foreground = descColor
+        row.add(JLabel(step.subject).apply {
+            font = ChatTheme.metaFont.deriveFont(nameStyle.toFloat())
+            foreground = nameColor
             horizontalAlignment = SwingConstants.LEFT
         })
+
+        // 详细描述（可选，灰色小字）
+        if (step.description.isNotBlank()) {
+            row.add(JLabel("  ${step.description}").apply {
+                font = ChatTheme.metaFont.deriveFont(Font.PLAIN, ChatTheme.metaFont.size2D - 2)
+                foreground = ChatTheme.textMuted
+                horizontalAlignment = SwingConstants.LEFT
+            })
+        }
 
         row.add(Box.createHorizontalGlue())
         return row
