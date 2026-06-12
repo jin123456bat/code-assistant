@@ -141,7 +141,7 @@ feat(新功能) | fix(修复) | chore(杂项) | docs(文档) | style(格式) | r
     }
 
     /** 返回生效的 prompt：有自定义用自定义，否则用默认 */
-    fun getEffectivePrompt(): String = getPrompt() ?: DEFAULT_COMMIT_PROMPT
+    fun getEffectivePrompt(): String = getPrompt() ?: DEFAULT_COMMIT_PROMPT_ZH
 
     fun setPrompt(prompt: String?) {
         if (prompt.isNullOrBlank()) {

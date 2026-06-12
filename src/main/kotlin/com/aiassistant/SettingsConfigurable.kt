@@ -149,7 +149,7 @@ class SettingsConfigurable : Configurable {
         gbc.gridy = 7; gbc.weightx = 0.0; gbc.fill = GridBagConstraints.NONE
         gbc.anchor = GridBagConstraints.EAST
         val resetBtn = JButton(AiAssistantBundle.message("settings.prompt.reset"))
-        resetBtn.addActionListener { promptArea.text = "" }
+        resetBtn.addActionListener { promptArea.text = AppSettingsService.DEFAULT_COMMIT_PROMPT_ZH }
         contentPanel.add(resetBtn, gbc)
 
         // Status

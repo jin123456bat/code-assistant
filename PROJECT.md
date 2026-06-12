@@ -31,7 +31,7 @@ Code Assistant 是 PhpStorm 的开源 AI 编程 Agent 插件（IntelliJ Platform
 
 ```
 src/main/kotlin/com/aiassistant/
-├── ChatToolWindow.kt          # Swing UI 主窗口 (工厂 + 窗口, ~1568 行)
+├── ChatToolWindow.kt          # Swing UI 主窗口 (工厂 + 窗口, ~1567 行)
 ├── ChatViewModel.kt           # UI 桥接 ViewModel (Activity 状态机)
 ├── AppSettingsService.kt      # 应用级配置: API Key, MCP Config, 白名单, 模型选择
 ├── AnthropicAdapter.kt        # Anthropic Messages API 适配器 (请求构建/SSE 解析)
@@ -75,7 +75,8 @@ src/main/kotlin/com/aiassistant/
 │   ├── PlanBar.kt             # 置顶执行计划条
 │   ├── SimpleDiff.kt          # 行级 diff 计算
 │   ├── AskUserBridge.kt       # ask_user 工具 ↔ UI 桥接
-│   └── ApprovalActions.kt     # 审批操作回调 (data class)
+│   ├── BubbleMetrics.kt        # 气泡宽度纯计算工具
+│   └── MarkdownRenderer.kt     # Markdown → Swing JPanel
 │
 ├── actions/                   # IntelliJ Actions
 │   ├── OpenChatAction.kt      # 打开聊天窗口
@@ -86,8 +87,7 @@ src/main/kotlin/com/aiassistant/
 ├── shared/                    # 共享工具
 │   └── JsonUtils.kt           # JSON 转义/反转义
 │
-└── settings/                  # 设置页
-    └── SettingsConfigurable.kt # 设置面板
+└── SettingsConfigurable.kt     # 设置面板
 ```
 
 ## 核心架构

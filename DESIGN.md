@@ -175,7 +175,7 @@ panel (BorderLayout)
 - 头部：工具名（toolFg 粗体）+ args 预览（等宽 textMuted，单行截断 120 chars）
 - 选项列表：❯ chevron 高亮 + 主文本 + 副文本
 - 正常变体 3 选项："允许" / "始终允许" / "拒绝"（`alwaysAllow` 回调内部调用 `addToolToWhitelist`）
-- danger 变体（execute_command）2 选项 + ⚠ 标记 + orange 边框
+- danger 变体（execute_command）3 选项 + ⚠ 标记 + danger 色边框
 - 点击后卡片切换为已确认静态状态，不可再交互
 - 头部含 chevron（▸/▾）展开/折叠详情（`write_file` 时展示 diff 预览，LCS 算法，超 40 行折叠）
 
@@ -302,4 +302,3 @@ panel (BorderLayout)
 
 - 使用 Unicode 符号替代图片图标：❯（chevron）、▸/▾（展开/收起箭头）、⚠（危险）、✕（失败）、✓（成功）
 - 盲文 spinner 帧：⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏
-- IntelliJ 内置图标：`AllIcons.Actions.Annotate`

@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## 🌐 语言声明
+
+**本项目所有输出必须使用简体中文**，包括但不限于：代码注释、文档、Git commit message、PR 描述、Issue 回复、对话回复。禁止输出英文内容。
+
 ## 项目概述
 
 PhpStorm 的开源 AI 编程 Agent 插件（IntelliJ Platform plugin，type `PS`）。基于 Kotlin + Swing，通过 DeepSeek 的 **Anthropic 兼容 Messages API**（`/anthropic/v1/messages`）驱动一个可自主调用工具的 Agent 循环。用户自带 DeepSeek API Key。
@@ -23,7 +27,7 @@ PhpStorm 的开源 AI 编程 Agent 插件（IntelliJ Platform plugin，type `PS`
 请求从上到下的调用链：
 
 ```
-ChatToolWindowFactory → ChatToolWindow (Swing UI, ~1448 行)
+ChatToolWindowFactory → ChatToolWindow (Swing UI, ~1567 行)
     → ChatViewModel  (UI 桥接，轻量 ViewModel，含 Activity 状态机)
         → AgentLoop (agent，Agent 主循环)
             → AnthropicAdapter (构建请求 / 解析 SSE 事件)
@@ -38,8 +42,8 @@ ChatToolWindowFactory → ChatToolWindow (Swing UI, ~1448 行)
 | `ChatBubble` | 168 | **自测量气泡**：`getPreferredSize/getMaximumSize` 实时按 viewport 宽度计算尺寸，hug content + max-width 上限。画圆角背景+描边 |
 | `BubbleFactory` | 99 | 气泡工厂：构造内容（用户 HTML JTextPane / AI markdown）+ 包进 ChatBubble + 放进 rowPanel（X_AXIS + glue 做左右对齐） |
 | `ChatTheme` | 66 | 设计 token 单一来源：语义色（JBColor 明暗双值）、间距、圆角、字体、宽度约束 |
-| `ToolRowFactory` | 442 | 工具/思考行：统一左栏竖线 + 折叠/展开。含 toolCallRow、toolResultRow、thinkingRow、runningRow、errorCardRow |
-| `PermissionCard` | 430 | 工具权限确认卡：圆角卡片 + 选项列表 + diff 预览 + 确认态。支持 danger 变体（execute_command） |
+| `ToolRowFactory` | 667 | 工具/思考行：统一左栏竖线 + 折叠/展开。含 toolCallRow、toolResultRow、thinkingRow、runningRow、errorCardRow |
+| `PermissionCard` | 256 | 工具权限确认卡：圆角卡片 + 选项列表 + diff 预览 + 确认态。支持 danger 变体（execute_command） |
 | `SelectionCard` | 452 | ask_user 选择卡：单选/多选模式，cheveron 高亮 + hover |
 | `PlanBar` | 282 | 置顶计划条：折叠看摘要（标题+进度+迷你进度条），展开看步骤列表 |
 | `SimpleDiff` | 140 | 行级 diff 计算（LCS 算法），供 PermissionCard diff 预览使用 |
@@ -83,7 +87,7 @@ panel (BorderLayout)
 
 **适配器：`AnthropicAdapter` 是唯一的适配器**（Anthropic Messages 格式 + `input_schema` 工具）。
 
-**工具系统**：`tools/` 下每个工具实现 `agent.AgentTool` 接口（`name` / `description` / `parameters` / `execute()`）。9 个内置工具由 `ToolRegistryV3.registerBuiltIn()` 注册：`search_code`、`read_file`、`write_file`、`list_directory`、`execute_command`、`git_diff`、`git_log`、`git_status`、`ask_user`。三类工具来源统一管理：内置 / MCP（`registerMcp`）/ Skill（`registerSkills`）。`buildToolsJson()` 生成 Anthropic `input_schema` 并**带缓存**，注册新工具时通过 `invalidateCache()` 失效。
+**工具系统**：`tools/` 下每个工具实现 `agent.AgentTool` 接口（`name` / `description` / `parameters` / `execute()`）。13 个内置工具由 `ToolRegistryV3.registerBuiltIn()` 注册：`search_code`、`read_file`、`write_file`、`list_directory`、`execute_command`、`git_diff`、`git_log`、`git_status`、`ask_user`、`web_search`、`web_fetch`、`notebook_edit`、`task`。三类工具来源统一管理：内置 / MCP（`registerMcp`）/ Skill（`registerSkills`）。`buildToolsJson()` 生成 Anthropic `input_schema` 并**带缓存**，注册新工具时通过 `invalidateCache()` 失效。
 
 **安全模型**：`AgentLoop.SAFE_TOOLS`（只读工具）+ 用户白名单 `AppSettingsService.getToolWhitelist()` 内的工具直接执行；其余工具（`write_file`、`execute_command` 等）触发内联确认——`onConfirmTool` 回调配合 `CountDownLatch`/`AtomicBoolean` 阻塞等待用户通过 `PermissionCard` 在 UI 上点确认。
 
@@ -92,6 +96,10 @@ panel (BorderLayout)
 **Skills**（`agent/SkillEngine.kt`）：扫描 `<project>/.claude/skills/**/SKILL.md` 和 `~/.claude/skills/**/SKILL.md`，把每个 skill 包装成一个特殊 `AgentTool`。
 
 **Plan**：LLM 通过 `create_plan` 元工具自主决定是否创建执行计划，不再使用本地关键词判定。
+
+## 编码约定
+
+- **Git commit message 必须使用中文**：遵循 Conventional Commits 格式（`feat:`/`fix:`/`refactor:`/`chore:`/`docs:`/`test:`），但描述部分用中文撰写。示例：`feat(agent): 添加 update_plan_step 元工具`、`fix(ui): 修复气泡对齐问题`
 
 ## 关键约定与坑
 
