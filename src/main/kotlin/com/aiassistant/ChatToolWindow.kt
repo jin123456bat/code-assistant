@@ -37,6 +37,8 @@ import java.awt.Font
 import java.awt.GridBagConstraints
 import java.awt.GridBagLayout
 import java.awt.Image
+import java.awt.KeyEventDispatcher
+import java.awt.KeyboardFocusManager
 import java.awt.datatransfer.DataFlavor
 import java.awt.datatransfer.Transferable
 import java.awt.event.FocusAdapter
@@ -139,6 +141,7 @@ class ChatToolWindow(private val project: Project) {
 
     /** 工具窗关闭时调用：解绑全局 handler，停止 agent，避免回调打到失效 UI / 线程泄漏。 */
     fun dispose() {
+        KeyboardFocusManager.getCurrentKeyboardFocusManager().removeKeyEventDispatcher(popupKeyDispatcher)
         if (askUserHandler != null && AskUserBridge.handler === askUserHandler) {
             AskUserBridge.handler = null
         }
@@ -203,6 +206,27 @@ class ChatToolWindow(private val project: Project) {
     private var slashCommandPopup: JPopupMenu? = null
     /** @ 文件引用弹出菜单（懒初始化） */
     private var fileRefPopup: JPopupMenu? = null
+
+    /**
+     * 全局键位分发器，在 JTextArea 的 Keymap 之前拦截 UP/DOWN 键，
+     * 确保弹窗（/ 命令、@ 文件引用）可见时箭头键用于导航而非光标移动。
+     */
+    private val popupKeyDispatcher = KeyEventDispatcher { e ->
+        if (e.id == KeyEvent.KEY_PRESSED) {
+            val code = e.keyCode
+            if (code == KeyEvent.VK_UP || code == KeyEvent.VK_DOWN) {
+                if (slashCommandPopup?.isVisible == true) {
+                    slashCommandMoveSelection?.invoke(if (code == KeyEvent.VK_UP) -1 else 1)
+                    return@KeyEventDispatcher true
+                }
+                if (fileRefPopup?.isVisible == true) {
+                    fileRefMoveSelection?.invoke(if (code == KeyEvent.VK_UP) -1 else 1)
+                    return@KeyEventDispatcher true
+                }
+            }
+        }
+        false
+    }
 
     // ---- input area ----
     private val inputArea = JTextArea(3, 20).apply {
@@ -494,6 +518,7 @@ class ChatToolWindow(private val project: Project) {
 
     init {
         register(project, this)
+        KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(popupKeyDispatcher)
         // v3: 注册内置工具+Skills（同步安全），首条消息即可调用
         viewModel.initialize(project)
 
@@ -1107,6 +1132,12 @@ class ChatToolWindow(private val project: Project) {
                     return
                 }
 
+                // @ 筛选：文本中含 @ 时持续调用 fileRefFilter 做实时过滤（不仅首次触发）
+                val atIdx = text.indexOfLast { it == '@' }.takeIf { it >= 0 } ?: -1
+                if (atIdx >= 0 && (atIdx == 0 || text.getOrElse(atIdx - 1) { ' ' }.isWhitespace())) {
+                    fileRefFilter?.invoke(text.substring(atIdx))
+                }
+
                 // 只关心单字符插入（避免粘贴大段文本时误触）
                 if (e.length != 1) return
 
@@ -1224,24 +1255,18 @@ class ChatToolWindow(private val project: Project) {
             items.forEachIndexed { i, it -> it.background = if (i == selectedIndex) JBColor(0xE0E8F0, 0x3A4048) else null }
         }
 
-        // 文本框内容变化时实时筛选
+        // 文本框内容变化时实时筛选（先隐后显，确保弹窗高度随内容自适应、始终紧贴输入框）
         slashCommandFilter = { text ->
             if (text.startsWith("/")) {
                 rebuildItems(text)
                 val h = (popup.components.filterIsInstance<JMenuItem>().size.coerceAtLeast(1) * 28).coerceAtMost(280)
+                popup.isVisible = false
                 popup.preferredSize = Dimension(inputPanel.width, h)
-                popup.show(inputPanel, 0, -h)  // 始终 show 确保底部紧贴输入框，即使弹窗已可见
+                popup.show(inputPanel, 0, -h)
             } else {
                 closePopup()
             }
         }
-
-        popup.addKeyListener(object : KeyAdapter() {
-            override fun keyPressed(e: KeyEvent) {
-                if (e.keyCode == KeyEvent.VK_ENTER) { e.consume(); doSelect() }
-                if (e.keyCode == KeyEvent.VK_ESCAPE) closePopup()
-            }
-        })
 
         slashCommandMoveSelection = { delta -> moveSelection(delta) }
         slashCommandDoSelect = { doSelect() }
@@ -1350,6 +1375,7 @@ class ChatToolWindow(private val project: Project) {
             if (text.startsWith("@")) {
                 rebuildItems(text)
                 val h = (popup.components.filterIsInstance<JMenuItem>().size.coerceAtLeast(1) * 28).coerceAtMost(280)
+                popup.isVisible = false
                 popup.preferredSize = Dimension(inputPanel.width, h)
                 popup.show(inputPanel, 0, -h)
             } else {
@@ -1358,13 +1384,6 @@ class ChatToolWindow(private val project: Project) {
         }
         fileRefMoveSelection = { delta -> moveSelection(delta) }
         fileRefDoSelect = { doSelect() }
-
-        popup.addKeyListener(object : KeyAdapter() {
-            override fun keyPressed(e: KeyEvent) {
-                if (e.keyCode == KeyEvent.VK_ENTER) { e.consume(); doSelect() }
-                if (e.keyCode == KeyEvent.VK_ESCAPE) closePopup()
-            }
-        })
 
         val popupHeight = (popup.components.filterIsInstance<JMenuItem>().size.coerceAtLeast(1) * 28).coerceAtMost(280)
         popup.isFocusable = false

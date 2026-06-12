@@ -211,9 +211,9 @@ panel (BorderLayout)
 - 高度 = `min(itemCount * 28, 280)` px
 - 紧贴输入框上方显示（`popup.show(inputPanel, 0, -height)`）
 
-**键盘交互**：Up/Down 移动选择，Enter 确认，Esc 关闭
+**键盘交互**：Up/Down 移动选择，Enter 确认，Esc 关闭。通过 `KeyboardFocusManager.addKeyEventDispatcher()` 在 `JTextArea` 的 Keymap 之前全局拦截方向键，确保弹窗可见时箭头键用于列表导航。
 
-**实时筛选**：输入变化时按命令名和描述过滤，最多显示 10 项
+**实时筛选**：输入变化时按命令名和描述过滤，最多显示 10 项。筛选时先 `popup.isVisible = false` 隐去再 `rebuildItems()` + `popup.show()` 重显，确保弹窗高度随结果数量自适应且始终紧贴输入框上方。
 
 **内置命令**：
 
