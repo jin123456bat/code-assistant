@@ -208,20 +208,43 @@ class ChatToolWindow(private val project: Project) {
     private var fileRefPopup: JPopupMenu? = null
 
     /**
-     * 全局键位分发器，在 JTextArea 的 Keymap 之前拦截 UP/DOWN 键，
-     * 确保弹窗（/ 命令、@ 文件引用）可见时箭头键用于导航而非光标移动。
+     * 全局键位分发器，在 JTextArea 的 Keymap 之前拦截弹窗导航键，
+     * 统一接管 UP/DOWN（列表导航）、ENTER（确认选择）、ESC（关闭弹窗）。
      */
     private val popupKeyDispatcher = KeyEventDispatcher { e ->
         if (e.id == KeyEvent.KEY_PRESSED) {
             val code = e.keyCode
-            if (code == KeyEvent.VK_UP || code == KeyEvent.VK_DOWN) {
-                if (slashCommandPopup?.isVisible == true) {
-                    slashCommandMoveSelection?.invoke(if (code == KeyEvent.VK_UP) -1 else 1)
-                    return@KeyEventDispatcher true
+            when (code) {
+                KeyEvent.VK_UP, KeyEvent.VK_DOWN -> {
+                    val delta = if (code == KeyEvent.VK_UP) -1 else 1
+                    if (slashCommandPopup?.isVisible == true) {
+                        slashCommandMoveSelection?.invoke(delta)
+                        return@KeyEventDispatcher true
+                    }
+                    if (fileRefPopup?.isVisible == true) {
+                        fileRefMoveSelection?.invoke(delta)
+                        return@KeyEventDispatcher true
+                    }
                 }
-                if (fileRefPopup?.isVisible == true) {
-                    fileRefMoveSelection?.invoke(if (code == KeyEvent.VK_UP) -1 else 1)
-                    return@KeyEventDispatcher true
+                KeyEvent.VK_ENTER -> {
+                    if (e.modifiersEx == 0 && slashCommandPopup?.isVisible == true) {
+                        slashCommandDoSelect?.invoke()
+                        return@KeyEventDispatcher true
+                    }
+                    if (e.modifiersEx == 0 && fileRefPopup?.isVisible == true) {
+                        fileRefDoSelect?.invoke()
+                        return@KeyEventDispatcher true
+                    }
+                }
+                KeyEvent.VK_ESCAPE -> {
+                    if (slashCommandPopup?.isVisible == true) {
+                        slashCommandPopup?.isVisible = false
+                        return@KeyEventDispatcher true
+                    }
+                    if (fileRefPopup?.isVisible == true) {
+                        fileRefPopup?.isVisible = false
+                        return@KeyEventDispatcher true
+                    }
                 }
             }
         }
@@ -387,7 +410,7 @@ class ChatToolWindow(private val project: Project) {
         }
     }
 
-    // ---- plus button (复用 @ 文件引用弹窗) ----
+    // ---- plus button（点击后在输入框插入 @，复用 @ 文件引用弹窗及筛选机制）----
     private val plusButton = JLabel("+").apply {
         font = Font(Font.SANS_SERIF, Font.BOLD, 20)
         foreground = JBColor(0x888888, 0x999999)
@@ -395,7 +418,13 @@ class ChatToolWindow(private val project: Project) {
         border = BorderFactory.createEmptyBorder(0, 4, 0, 4)
         toolTipText = "添加文件引用"
         addMouseListener(object : MouseAdapter() {
-            override fun mouseClicked(e: MouseEvent) { showFileRefPopup() }
+            override fun mouseClicked(e: MouseEvent) {
+                // 在光标位置插入 @，触发文件引用弹窗
+                val pos = inputArea.caretPosition
+                inputArea.insert("@", pos)
+                inputArea.caretPosition = pos + 1
+                inputArea.requestFocus()
+            }
         })
     }
 
