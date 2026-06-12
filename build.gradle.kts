@@ -19,7 +19,7 @@ dependencies {
 
 intellij {
     version.set("2023.3")
-    type.set("PS")
+    type.set("IC") // IntelliJ IDEA Community — 兼容所有基于 IntelliJ Platform 的 IDE
     plugins.set(listOf())
 }
 

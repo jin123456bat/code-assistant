@@ -142,6 +142,7 @@ class ChatToolWindow(private val project: Project) {
     /** 工具窗关闭时调用：解绑全局 handler，停止 agent，避免回调打到失效 UI / 线程泄漏。 */
     fun dispose() {
         KeyboardFocusManager.getCurrentKeyboardFocusManager().removeKeyEventDispatcher(popupKeyDispatcher)
+        selectionListenerConnection?.disconnect()
         if (askUserHandler != null && AskUserBridge.handler === askUserHandler) {
             AskUserBridge.handler = null
         }
@@ -513,6 +514,8 @@ class ChatToolWindow(private val project: Project) {
     // 自动引用去重
     private var lastAutoInsertedHash: Int = 0
     private var lastAutoInsertTime: Long = 0
+    /** 编辑器选区监听连接，dispose 时断开避免泄漏 */
+    private var selectionListenerConnection: com.intellij.util.messages.MessageBusConnection? = null
 
     // ---- plan bar（置顶，不随消息滚动）----
     private val planBar = PlanBar().also { it.updatePlan(null) }
@@ -593,19 +596,19 @@ class ChatToolWindow(private val project: Project) {
         // M5-B: 输入框 / 与 @ 补全菜单
         setupInputCompletions()
 
-        // 延迟注册编辑器选区监听，避免在 IDE 启动早期阶段（COMPONENTS_LOADED 之前）访问消息总线
-        ApplicationManager.getApplication().invokeLater {
-            project.messageBus.connect().subscribe(
-                FileEditorManagerListener.FILE_EDITOR_MANAGER,
-                object : FileEditorManagerListener {
-                    override fun selectionChanged(event: com.intellij.openapi.fileEditor.FileEditorManagerEvent) {
-                        ApplicationManager.getApplication().invokeLater {
-                            autoInsertSelectedCode()
-                        }
+        // 注册编辑器选区监听（init 已运行在 EDT，不需要 invokeLater 延迟）
+        val connection = project.messageBus.connect()
+        selectionListenerConnection = connection
+        connection.subscribe(
+            FileEditorManagerListener.FILE_EDITOR_MANAGER,
+            object : FileEditorManagerListener {
+                override fun selectionChanged(event: com.intellij.openapi.fileEditor.FileEditorManagerEvent) {
+                    ApplicationManager.getApplication().invokeLater {
+                        autoInsertSelectedCode()
                     }
                 }
-            )
-        }
+            }
+        )
     }
 
     private fun createWelcomePanel(): JPanel {

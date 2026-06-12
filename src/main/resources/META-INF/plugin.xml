@@ -1,20 +1,19 @@
 <idea-plugin>
-    <id>com.aiassistant.phpstorm</id>
+    <id>cn.wivoce.code-assistant</id>
     <name>Code Assistant</name>
-    <vendor email="dev@aiassistant.local" url="https://github.com/ai-assistant/phpstorm-plugin">Code Assistant</vendor>
+    <vendor email="326550324@qq.com" url="https://github.com/jin123456bat/code-assistant">Code Assistant</vendor>
 
     <description><![CDATA[
-        Free, open-source AI coding agent for PhpStorm.
+        Free, open-source AI coding agent for IntelliJ IDEA and JetBrains IDEs.
         Powered by DeepSeek V4 models (deepseek-v4-flash / deepseek-v4-pro).
         Bring your own API key.
 
         Features:
         - Agent mode: AI autonomously plans and executes tasks using built-in tools
-        - 8 built-in tools: search_code, read_file, write_file, list_directory, execute_command, git_diff, git_log, git_status
+        - 13 built-in tools: search_code, read_file, write_file, list_directory, execute_command, git_diff, git_log, git_status, ask_user, web_search, web_fetch, notebook_edit, task
         - MCP support: connect to Model Context Protocol servers for extended tools
         - Skills engine: load custom skills from .claude/skills/**/SKILL.md
-        - Plan mode: auto-detect complex tasks, generate step-by-step plans
-        - Model router: auto-select flash/pro model based on task complexity
+        - Plan mode: LLM autonomously decides whether to create execution plans
         - Streaming chat with markdown rendering and syntax highlighting
         - File references, auto code detection, image paste
 
@@ -37,9 +36,6 @@
             instance="com.aiassistant.SettingsConfigurable"
             id="com.aiassistant.settings"
             displayName="Code Assistant"/>
-
-        <applicationService
-            serviceImplementation="com.aiassistant.AppSettingsService"/>
 
         <postStartupActivity
             implementation="com.aiassistant.actions.OpenAiToolWindowOnStartup"/>

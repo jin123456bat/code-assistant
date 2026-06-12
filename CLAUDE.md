@@ -8,19 +8,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概述
 
-PhpStorm 的开源 AI 编程 Agent 插件（IntelliJ Platform plugin，type `PS`）。基于 Kotlin + Swing，通过 DeepSeek 的 **Anthropic 兼容 Messages API**（`/anthropic/v1/messages`）驱动一个可自主调用工具的 Agent 循环。用户自带 DeepSeek API Key。
+IntelliJ IDEA 的开源 AI 编程 Agent 插件（IntelliJ Platform plugin，type `IC`，兼容所有 JetBrains IDE）。基于 Kotlin + Swing，通过 DeepSeek 的 **Anthropic 兼容 Messages API**（`/anthropic/v1/messages`）驱动一个可自主调用工具的 Agent 循环。用户自带 DeepSeek API Key。
 
 ## 常用命令
 
 ```bash
 ./gradlew buildPlugin      # 构建插件 zip（产物在 build/distributions/）
-./gradlew runIde           # 启动 sandbox PhpStorm（autoReloadPlugins=true：改代码后重新编译即热加载，无需重启）
+./gradlew runIde           # 启动 sandbox IntelliJ IDEA（autoReloadPlugins=true：改代码后重新编译即热加载，无需重启）
 ./gradlew test             # 运行全部 JUnit 测试
 ./gradlew test --tests "com.aiassistant.AnthropicAdapterTest"           # 单个测试类
 ./gradlew test --tests "com.aiassistant.AnthropicAdapterTest.方法名"     # 单个测试方法
 ```
 
-环境：JVM 17、Kotlin 1.9.22、IntelliJ Platform 2023.3（PhpStorm）、Gradle IntelliJ Plugin 1.17.4。
+环境：JVM 17、Kotlin 1.9.22、IntelliJ Platform 2023.3（IntelliJ IDEA Community）、Gradle IntelliJ Plugin 1.17.4。
 
 ## 架构（big picture）
 
@@ -87,7 +87,7 @@ panel (BorderLayout)
 
 **适配器：`AnthropicAdapter` 是唯一的适配器**（Anthropic Messages 格式 + `input_schema` 工具）。
 
-**工具系统**：`tools/` 下每个工具实现 `agent.AgentTool` 接口（`name` / `description` / `parameters` / `execute()`）。13 个内置工具由 `ToolRegistryV3.registerBuiltIn()` 注册：`search_code`、`read_file`、`write_file`、`list_directory`、`execute_command`、`git_diff`、`git_log`、`git_status`、`ask_user`、`web_search`、`web_fetch`、`notebook_edit`、`task`。三类工具来源统一管理：内置 / MCP（`registerMcp`）/ Skill（`registerSkills`）。`buildToolsJson()` 生成 Anthropic `input_schema` 并**带缓存**，注册新工具时通过 `invalidateCache()` 失效。
+**工具系统**：`tools/` 下每个工具实现 `agent.AgentTool` 接口（`name` / `description` / `parameters` / `execute()`）。14 个内置工具由 `ToolRegistryV3.registerBuiltIn()` 注册：`search_code`、`read_file`、`write_file`、`list_directory`、`execute_command`、`git_diff`、`git_log`、`git_status`、`ask_user`、`web_search`、`web_fetch`、`notebook_edit`、`task`、`code_intelligence`。三类工具来源统一管理：内置 / MCP（`registerMcp`）/ Skill（`registerSkills`）。`buildToolsJson()` 生成 Anthropic `input_schema` 并**带缓存**，注册新工具时通过 `invalidateCache()` 失效。
 
 **安全模型**：`AgentLoop.SAFE_TOOLS`（只读工具）+ 用户白名单 `AppSettingsService.getToolWhitelist()` 内的工具直接执行；其余工具（`write_file`、`execute_command` 等）触发内联确认——`onConfirmTool` 回调配合 `CountDownLatch`/`AtomicBoolean` 阻塞等待用户通过 `PermissionCard` 在 UI 上点确认。
 

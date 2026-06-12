@@ -21,7 +21,8 @@ class ToolRegistryV3 {
         listOf(
             ReadFileTool(), WriteFileTool(), SearchCodeTool(), ListDirectoryTool(),
             ExecuteCommandTool(), GitDiffTool(), GitLogTool(), GitStatusTool(),
-            AskUserTool(), WebSearchTool(), WebFetchTool(), NotebookEditTool(), TaskTool()
+            AskUserTool(), WebSearchTool(), WebFetchTool(), NotebookEditTool(), TaskTool(),
+            CodeIntelligenceTool()
         ).forEach { tools[it.name] = it }
         invalidateCache()
     }

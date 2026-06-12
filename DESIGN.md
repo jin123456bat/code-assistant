@@ -1,10 +1,10 @@
 # Code Assistant Design System
 
-PhpStorm IDE 插件 — Swing UI 设计规范。Token 定义与 `ChatTheme.kt` 保持同步。
+IntelliJ IDEA 插件 — Swing UI 设计规范。Token 定义与 `ChatTheme.kt` 保持同步。
 
 ## Product Context
 
-- **What this is**: PhpStorm 开源 AI Agent 插件，可自主搜索代码、读写文件、执行命令、Git 操作
+- **What this is**: IntelliJ IDEA 开源 AI Agent 插件，可自主搜索代码、读写文件、执行命令、Git 操作
 - **Who it's for**: PHP 开发者（学生至企业级），需要免费开源的 AI 编程助手
 - **Space/industry**: JetBrains IDE 插件生态
 - **Reference**: GitHub Copilot、JetBrains AI Assistant、Cursor
@@ -297,6 +297,51 @@ panel (BorderLayout)
 - 键盘导航：Tab 序（输入框 → 停止 → 文件 → 引用 → 发送）
 - 错误消息包含具体修复步骤（不是仅"失败了"）
 - 盲文 spinner 通过 `addNotify/removeNotify` 管理 Timer 生命周期，防止泄漏
+
+## CodeIntelligenceTool — PSI 代码智能
+
+通过 IntelliJ PSI（Program Structure Interface）API 提供结构化代码导航，替代 `grep` 文本搜索。单一工具多操作模式。
+
+### 支持的操作
+
+| 操作 | IntelliJ API | 说明 |
+|------|-------------|------|
+| `go_to_definition` | `PsiElement.reference?.resolve()` | 跳转到符号定义位置 |
+| `find_references` | `ReferencesSearch.search(element)` | 查找所有引用点 |
+| `hover` | 类型推导 + `PsiDocCommentOwner` | 返回符号类型和文档 |
+| `document_symbols` | `PsiFile` 子元素遍历 | 文件的所有顶层符号 |
+| `workspace_symbol` | `PsiShortNamesCache` + `FilenameIndex` | 按名称全局搜索符号 |
+| `find_implementations` | `ClassInheritorsSearch.search(psiClass)` | 查找接口/抽象类实现 |
+
+### 输入参数
+
+| 参数 | 类型 | 必需 | 说明 |
+|------|------|------|------|
+| `operation` | string(enum) | 是 | 操作类型 |
+| `file_path` | string | 除 workspace_symbol 外 | 文件相对路径 |
+| `line` | integer | 除 workspace_symbol/document_symbols 外 | 1-based 行号 |
+| `character` | integer | 除 workspace_symbol/document_symbols 外 | 1-based 字符偏移 |
+| `query` | string | workspace_symbol 时必需 | 符号搜索词 |
+| `max_results` | integer | 否，默认 20 | 最大结果数 |
+
+### 输出格式
+
+统一结构化输出，方便 LLM 解析：
+
+```
+### 操作: find_references
+符号: FooClass (src/main/.../Foo.kt:10:6)
+找到 3 个引用:
+1. src/.../Bar.kt:15:8  |  val foo = FooClass()
+2. src/.../Baz.kt:23:4  |  foo.doSomething()
+3. src/.../Foo.kt:10:6  |  class FooClass {  ← 定义
+```
+
+### 实现要点
+
+- 元素定位：`file_path` + `line` + `character` → `VirtualFile` → `PsiFile.findElementAt(offset)`
+- 只读操作，加入 `SAFE_TOOLS` 白名单，无需权限确认
+- `call_hierarchy` 留到 v2（`CallHierarchyProvider` 是 per-language EP）
 
 ## Icons
 

@@ -38,7 +38,7 @@ class SearchCodeTool : AgentTool {
                 .start()
 
             val output = process.inputStream.bufferedReader().readText()
-            process.waitFor(10, TimeUnit.SECONDS)
+            val finished = process.waitFor(10, TimeUnit.SECONDS); if (!finished) { process.destroyForcibly(); process.waitFor(2, TimeUnit.SECONDS) }
 
             val lines = output.lines().filter { it.isNotBlank() }.take(maxResults)
             if (lines.isEmpty()) {

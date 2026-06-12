@@ -58,6 +58,10 @@ class ExecuteCommandTool : AgentTool {
 
             val output = process.inputStream.bufferedReader().readText()
             val finished = process.waitFor(30, TimeUnit.SECONDS)
+            if (!finished) {
+                process.destroyForcibly()
+                process.waitFor(2, TimeUnit.SECONDS) // 等待强制终止完成
+            }
             val exitCode = if (finished) process.exitValue() else -1
 
             // 工具结果截断（防止超大规模输出耗尽 token）
@@ -67,7 +71,7 @@ class ExecuteCommandTool : AgentTool {
                 append("命令: $command\n")
                 append("工作目录: ${workingDir.path}\n")
                 append("退出码: $exitCode\n")
-                if (!finished) append("(命令执行超时)\n")
+                if (!finished) append("(命令执行超时，已强制终止)\n")
                 append("\n$truncated")
                 if (output.length > maxChars) append("\n... (输出已截断，共 ${output.length} 字符)")
             }

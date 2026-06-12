@@ -22,7 +22,7 @@ class AgentLoop(
         val SAFE_TOOLS = setOf(
             "search_code", "read_file", "list_directory",
             "git_diff", "git_log", "git_status", "web_search",
-            "web_fetch", "task", "ask_user"
+            "web_fetch", "task", "ask_user", "code_intelligence"
         )
 
         /** create_plan 元工具的 input_schema（含嵌套 items，ToolParameter 无法表达） */
@@ -373,7 +373,7 @@ class AgentLoop(
         } else ""
         val claudeMdContent = loadClaudeMdFiles()
         return """
-You are an AI coding assistant in PhpStorm. Use tools to work with the project.
+You are an AI coding assistant in idea. Use tools to work with the project.
 
 ## Project: ${project.name}
 Path: ${project.basePath ?: "unknown"}

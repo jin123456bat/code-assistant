@@ -2,13 +2,13 @@
 
 ## 项目概述
 
-Code Assistant 是 PhpStorm 的开源 AI 编程 Agent 插件（IntelliJ Platform plugin，type `PS`）。基于 Kotlin + Swing，通过 DeepSeek 的 **Anthropic 兼容 Messages API**（`/anthropic/v1/messages`）驱动一个可自主调用工具的 Agent 循环。用户自带 DeepSeek API Key。
+Code Assistant 是 IntelliJ IDEA 的开源 AI 编程 Agent 插件（IntelliJ Platform plugin，type `IC`，兼容所有 JetBrains IDE）。基于 Kotlin + Swing，通过 DeepSeek 的 **Anthropic 兼容 Messages API**（`/anthropic/v1/messages`）驱动一个可自主调用工具的 Agent 循环。用户自带 DeepSeek API Key。
 
 **核心能力：**
 
 - **Agent 模式**：AI 自主规划并执行多步骤任务，使用内置工具（搜索代码、读写文件、执行命令、Git 操作等）
 - **流式聊天**：Markdown 渲染 + 语法高亮，实时流式输出
-- **工具系统**：13 个内置工具 + MCP（Model Context Protocol）扩展 + Skills 引擎
+- **工具系统**：14 个内置工具 + MCP（Model Context Protocol）扩展 + Skills 引擎
 - **计划模式**：LLM 自主决定是否创建执行计划，并跟踪步骤进度
 - **安全机制**：工具审批流、白名单、文件越界防护
 - **输入增强**：文件引用、编辑器选区自动引用、图片粘贴、斜杠命令
@@ -19,7 +19,7 @@ Code Assistant 是 PhpStorm 的开源 AI 编程 Agent 插件（IntelliJ Platform
 |------|------|
 | 语言 | Kotlin 1.9.22 |
 | 运行时 | JVM 17 |
-| 平台 | IntelliJ Platform 2023.3 (PhpStorm) |
+| 平台 | IntelliJ Platform 2023.3 (IntelliJ IDEA Community) |
 | 构建 | Gradle (IntelliJ Plugin 1.17.4) |
 | UI 框架 | Swing (JBUI, JTextPane, BoxLayout) |
 | AI API | DeepSeek Anthropic 兼容 Messages API (SSE 流式) |
@@ -45,7 +45,7 @@ src/main/kotlin/com/aiassistant/
 │   ├── SkillEngine.kt         # Skill 加载引擎
 │   └── AgentTool.kt           # 工具接口定义 (AgentTool/ToolParameter/ToolResult)
 │
-├── tools/                     # 13 个内置工具实现
+├── tools/                     # 14 个内置工具实现
 │   ├── ReadFileTool.kt        # 读取文件
 │   ├── WriteFileTool.kt       # 写入文件 (含越界防护)
 │   ├── SearchCodeTool.kt      # 搜索代码
@@ -58,7 +58,8 @@ src/main/kotlin/com/aiassistant/
 │   ├── WebSearchTool.kt       # 网络搜索
 │   ├── WebFetchTool.kt        # 获取网页
 │   ├── NotebookEditTool.kt    # Jupyter Notebook 编辑
-│   └── TaskTool.kt            # 子任务
+│   ├── TaskTool.kt            # 子任务
+│   └── CodeIntelligenceTool.kt # PSI 代码智能（跳转定义/查找引用/类型信息等）
 │
 ├── mcp/                       # MCP 支持
 │   ├── McpManager.kt          # MCP 服务器生命周期管理
@@ -155,13 +156,12 @@ AgentLoop 内置两个不由 ToolRegistryV3 管理的元工具，以硬编码 JS
 - JDK 17
 - Gradle 7.x+（通过 wrapper）
 - Kotlin 1.9.22
-- PhpStorm 2023.3+
 
 ### 常用命令
 
 ```bash
 ./gradlew buildPlugin      # 构建插件 zip（产物在 build/distributions/）
-./gradlew runIde           # 启动 sandbox PhpStorm（改代码后重新编译即热加载）
+./gradlew runIde           # 启动 sandbox IntelliJ IDEA（改代码后重新编译即热加载）
 ./gradlew test             # 运行全部 JUnit 测试
 ./gradlew test --tests "com.aiassistant.AnthropicAdapterTest"           # 单个测试类
 ./gradlew test --tests "com.aiassistant.AnthropicAdapterTest.方法名"     # 单个测试方法
@@ -169,7 +169,7 @@ AgentLoop 内置两个不由 ToolRegistryV3 管理的元工具，以硬编码 JS
 
 ### 调试方式
 
-- `runIde` 启动 sandbox PhpStorm，`autoReloadPlugins=true` 支持热加载
+- `runIde` 启动 sandbox，`autoReloadPlugins=true` 支持热加载
 - 在 sandbox IDE 中安装插件后，右侧工具窗打开 "Code Assistant"
 - 日志输出通过 `AppLogger` 查看
 

@@ -54,7 +54,7 @@ private fun runGit(project: Project, vararg args: String): ToolResult {
             .redirectErrorStream(true)
             .start()
         val output = process.inputStream.bufferedReader().readText()
-        process.waitFor(10, TimeUnit.SECONDS)
+        val finished = process.waitFor(10, TimeUnit.SECONDS); if (!finished) { process.destroyForcibly(); process.waitFor(2, TimeUnit.SECONDS) }
         ToolResult.ok(output.ifBlank { "(无输出)" })
     } catch (e: Exception) {
         ToolResult.err("Git 命令失败: ${e.message}")
