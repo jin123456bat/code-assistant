@@ -14,12 +14,12 @@ import com.aiassistant.ui.PlanBar
 import com.aiassistant.ui.SelectionCard
 import com.aiassistant.ui.SimpleDiff
 import com.aiassistant.ui.ToolRowFactory
+import com.aiassistant.ui.WrapLayout
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.fileChooser.FileChooser
 import com.intellij.openapi.fileChooser.FileChooserDescriptor
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.FileEditorManager
-import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ToolWindowFactory
@@ -142,7 +142,9 @@ class ChatToolWindow(private val project: Project) {
     /** 工具窗关闭时调用：解绑全局 handler，停止 agent，避免回调打到失效 UI / 线程泄漏。 */
     fun dispose() {
         KeyboardFocusManager.getCurrentKeyboardFocusManager().removeKeyEventDispatcher(popupKeyDispatcher)
-        selectionListenerConnection?.disconnect()
+        @Suppress("DEPRECATION")
+        factoryListenerRef?.let { com.intellij.openapi.editor.EditorFactory.getInstance().removeEditorFactoryListener(it) }
+        trackedEditors.clear()
         if (askUserHandler != null && AskUserBridge.handler === askUserHandler) {
             AskUserBridge.handler = null
         }
@@ -159,7 +161,7 @@ class ChatToolWindow(private val project: Project) {
         toolTipText = "新会话"
         border = JBUI.Borders.empty(2, 6, 2, 6)
         addMouseListener(object : MouseAdapter() {
-            override fun mouseClicked(e: MouseEvent) { viewModel.clearConversation(); planBar.updatePlan(null); rebuildConversation() }
+            override fun mouseClicked(e: MouseEvent) { viewModel.clearConversation(); messageRefChips.clear(); planBar.updatePlan(null); rebuildConversation() }
             override fun mouseEntered(e: MouseEvent) { foreground = JBColor(0x2674B4, 0x5A9FD4) }
             override fun mouseExited(e: MouseEvent) { foreground = JBColor(0x888888, 0x999999) }
         })
@@ -315,7 +317,7 @@ class ChatToolWindow(private val project: Project) {
     private val refChips = mutableListOf<RefChip>()
     /** 待发送的粘贴图片（Claude 原生 image 块，非 Markdown data URL） */
     private val pastedImages = mutableListOf<ImageData>()
-    private val chipPanel = JPanel(FlowLayout(FlowLayout.LEFT, 4, 2)).apply {
+    private val chipPanel = JPanel(WrapLayout(FlowLayout.LEFT, 4, 2)).apply {
         isOpaque = false
     }
 
@@ -379,6 +381,7 @@ class ChatToolWindow(private val project: Project) {
                 toolTipText = "移除引用"
                 addMouseListener(object : MouseAdapter() {
                     override fun mouseClicked(e: MouseEvent) {
+                        if (chip === selectionRefChip) selectionRefChip = null
                         refChips.remove(chip)
                         rebuildChips()
                     }
@@ -402,13 +405,75 @@ class ChatToolWindow(private val project: Project) {
         if (refChips.isEmpty()) return ""
         return refChips.joinToString("\n\n") { chip ->
             val lang = chip.fullPath.substringAfterLast('.').lowercase().let { if (it.length <= 10) it else "" }
+            val lineInfo = if (chip.startLine > 0 && chip.endLine > 0) "#L${chip.startLine}-L${chip.endLine}" else ""
             buildString {
-                append("`${chip.fullPath}`\n\n")
+                append("`${chip.fullPath}$lineInfo`\n\n")
                 append("```$lang\n")
                 append(chip.content)
                 append("\n```")
             }
         }
+    }
+
+    /** 创建引用文件 chips 面板（嵌入用户气泡底部，无外层 glue——气泡已处理右对齐） */
+    private fun buildRefChipFooter(refs: List<RefChip>): JPanel {
+        val viewportWidth = conversationScrollPane.viewport.width
+        val maxWidth = (viewportWidth * ChatTheme.USER_FRACTION).toInt()
+        val chipRow = JPanel(WrapLayout(FlowLayout.RIGHT, 2, 2)).apply {
+            isOpaque = false
+            maximumSize = Dimension(maxWidth, Int.MAX_VALUE)
+        }
+        for (ref in refs) {
+            val fileName = ref.fullPath.substringAfterLast('/')
+            val lineSuffix = if (ref.startLine > 0) ":$ref.startLine" else ""
+            val chipText = "📄 $fileName$lineSuffix"
+            val chip = JLabel(chipText).apply {
+                font = ChatTheme.metaFont
+                foreground = ChatTheme.textSecondary
+                border = BorderFactory.createCompoundBorder(
+                    BorderFactory.createLineBorder(JBColor(0xC0C8D0, 0x505560), 1),
+                    JBUI.Borders.empty(2, 8, 2, 8)
+                )
+                isOpaque = true
+                background = JBColor(0xE3E8EE, 0x3A3E48)
+                cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
+                toolTipText = "点击打开: ${ref.fullPath}${if (ref.startLine > 0) " (第${ref.startLine}行)" else ""}"
+            }
+            val labelRef = chip
+            val file = File(project.basePath ?: "", ref.fullPath)
+            chip.addMouseListener(object : MouseAdapter() {
+                override fun mouseClicked(e: MouseEvent) {
+                    if (file.exists()) {
+                        val vf = com.intellij.openapi.vfs.LocalFileSystem.getInstance().findFileByIoFile(file)
+                        if (vf != null) {
+                            com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project).openFile(vf, true)
+                            if (ref.startLine > 0) {
+                                ApplicationManager.getApplication().invokeLater {
+                                    val textEditor = com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project)
+                                        .selectedTextEditor
+                                    if (textEditor != null) {
+                                        val doc = textEditor.document
+                                        val offset = doc.getLineStartOffset((ref.startLine - 1).coerceAtLeast(0))
+                                        textEditor.caretModel.moveToOffset(offset)
+                                        textEditor.scrollingModel.scrollToCaret(com.intellij.openapi.editor.ScrollType.CENTER)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                override fun mouseEntered(e: MouseEvent) {
+                    labelRef.foreground = JBColor(0x2674B4, 0x5A9FD4)
+                    labelRef.background = JBColor(0xD0D8E8, 0x4A4E58)
+                }
+                override fun mouseExited(e: MouseEvent) {
+                    labelRef.foreground = ChatTheme.textSecondary
+                    labelRef.background = JBColor(0xE3E8EE, 0x3A3E48)
+                }
+            })
+            chipRow.add(chip)
+        }
+        return chipRow
     }
 
     // ---- plus button（点击后在输入框插入 @，复用 @ 文件引用弹窗及筛选机制）----
@@ -459,8 +524,12 @@ class ChatToolWindow(private val project: Project) {
         BorderFactory.createEmptyBorder(6, 9, 6, 9)
     )
 
-    private val inputPanel = JPanel(BorderLayout(0, 0)).apply {
-        preferredSize = Dimension(200, 120)
+    private val inputPanel = object : JPanel(BorderLayout(0, 0)) {
+        override fun getPreferredSize(): Dimension {
+            val natural = super.getPreferredSize()  // 由 BorderLayout + 子组件实际高度计算
+            return Dimension(maxOf(natural.width, 200), maxOf(natural.height, 80))
+        }
+    }.apply {
         minimumSize = Dimension(150, 80)
         border = lingmaInputBorder
         isOpaque = true
@@ -514,8 +583,13 @@ class ChatToolWindow(private val project: Project) {
     // 自动引用去重
     private var lastAutoInsertedHash: Int = 0
     private var lastAutoInsertTime: Long = 0
-    /** 编辑器选区监听连接，dispose 时断开避免泄漏 */
-    private var selectionListenerConnection: com.intellij.util.messages.MessageBusConnection? = null
+    /** 通过 SelectionListener 自动添加的文件引用（最多一个，选区变化时更新而非新增） */
+    private var selectionRefChip: RefChip? = null
+    /** EditorFactoryListener 引用，dispose 时移除（2023.3 中 addEditorFactoryListener 标记废弃但仍是唯一正确 API） */
+    @Suppress("DEPRECATION")
+    private var factoryListenerRef: com.intellij.openapi.editor.event.EditorFactoryListener? = null
+    /** 已注册 SelectionListener 的编辑器集合，用于 dispose 时清理 */
+    private val trackedEditors = mutableSetOf<com.intellij.openapi.editor.Editor>()
 
     // ---- plan bar（置顶，不随消息滚动）----
     private val planBar = PlanBar().also { it.updatePlan(null) }
@@ -596,19 +670,30 @@ class ChatToolWindow(private val project: Project) {
         // M5-B: 输入框 / 与 @ 补全菜单
         setupInputCompletions()
 
-        // 注册编辑器选区监听（init 已运行在 EDT，不需要 invokeLater 延迟）
-        val connection = project.messageBus.connect()
-        selectionListenerConnection = connection
-        connection.subscribe(
-            FileEditorManagerListener.FILE_EDITOR_MANAGER,
-            object : FileEditorManagerListener {
-                override fun selectionChanged(event: com.intellij.openapi.fileEditor.FileEditorManagerEvent) {
-                    ApplicationManager.getApplication().invokeLater {
-                        autoInsertSelectedCode()
+        // 注册编辑器文本选区监听——捕获用户在编辑器内选中文本的动作
+        @Suppress("DEPRECATION")
+        val factoryListener = object : com.intellij.openapi.editor.event.EditorFactoryListener {
+            override fun editorCreated(event: com.intellij.openapi.editor.event.EditorFactoryEvent) {
+                val editor = event.editor
+                trackedEditors.add(editor)
+                editor.selectionModel.addSelectionListener(object : com.intellij.openapi.editor.event.SelectionListener {
+                    override fun selectionChanged(e: com.intellij.openapi.editor.event.SelectionEvent) {
+                        if (e.newRange != null && e.newRange!!.length > 0) {
+                            if (System.currentTimeMillis() - lastAutoInsertTime < 100) return
+                            ApplicationManager.getApplication().invokeLater {
+                                autoInsertSelectedCode()
+                            }
+                        }
                     }
-                }
+                })
             }
-        )
+            override fun editorReleased(event: com.intellij.openapi.editor.event.EditorFactoryEvent) {
+                trackedEditors.remove(event.editor)
+            }
+        }
+        @Suppress("DEPRECATION")
+        com.intellij.openapi.editor.EditorFactory.getInstance().addEditorFactoryListener(factoryListener)
+        factoryListenerRef = factoryListener
     }
 
     private fun createWelcomePanel(): JPanel {
@@ -875,6 +960,15 @@ class ChatToolWindow(private val project: Project) {
         val hasMessages = displayMessages.isNotEmpty() || viewModel.streamingContent.isNotEmpty() || viewModel.streamingThinking.isNotEmpty()
         if (hasMessages) {
             for (msg in displayMessages) {
+                // 用户消息带引用 chips 时，chips 嵌入气泡底部（与消息文本同属一个气泡）
+                if (msg.role == "user") {
+                    val msgIndex = viewModel.messages.indexOf(msg)
+                    val refs = messageRefChips[msgIndex]
+                    if (refs != null && refs.isNotEmpty()) {
+                        conversationContainer.add(createUserBubbleWithFooter(msg, buildRefChipFooter(refs)))
+                        continue
+                    }
+                }
                 conversationContainer.add(createMessageBubble(msg))
             }
 
@@ -1063,6 +1157,13 @@ class ChatToolWindow(private val project: Project) {
         return row
     }
 
+    /** 带引用文件 chips 的用户气泡：chips 嵌入气泡底部，与消息文本同属一个气泡 */
+    private fun createUserBubbleWithFooter(message: AgentMessage, footer: JComponent): JPanel {
+        val (row, bubble, content) = bubbleFactory.userBubbleWithFooter(message, footer)
+        bubbleSizeConstraints.add(Pair(bubble, content))
+        return row
+    }
+
     private fun createAssistantBubble(message: AgentMessage): JPanel {
         val (row, bubble, content) = bubbleFactory.assistantBubble(message)
         bubbleSizeConstraints.add(Pair(bubble, content))
@@ -1226,7 +1327,7 @@ class ChatToolWindow(private val project: Project) {
         }
 
         val commands = listOf(
-            Cmd("/new",   "新会话") { viewModel.clearConversation(); planBar.updatePlan(null); rebuildConversation() },
+            Cmd("/new",   "新会话") { viewModel.clearConversation(); messageRefChips.clear(); planBar.updatePlan(null); rebuildConversation() },
             Cmd("/plan",  "创建执行计划") { sendQuick("请为当前任务创建执行计划。先分析需求，然后调用 create_plan 工具。") },
             Cmd("/init",  "初始化项目文档") { sendQuick("请分析当前项目结构，创建 CLAUDE.md 文档，包含项目概述、常用命令、架构说明和关键约定。") },
             Cmd("/review","审查当前改动") { sendQuick("请审查当前分支的代码改动，分析潜在问题并给出修复建议。") },
@@ -1425,6 +1526,9 @@ class ChatToolWindow(private val project: Project) {
         fileRefPopup = popup
     }
 
+    /** 用户消息对应的引用文件（用于气泡下方显示可点击跳转的 chips），消息索引 → RefChip 列表 */
+    private val messageRefChips = mutableMapOf<Int, List<RefChip>>()
+
     private fun sendMessage() {
         val textContent = inputArea.text.trim()
         val refContent = buildRefContent()
@@ -1432,11 +1536,6 @@ class ChatToolWindow(private val project: Project) {
         if (textContent.isEmpty() && refContent.isEmpty() && images.isEmpty()) {
             showWarning(AiAssistantBundle.message("chat.error.empty"))
             return
-        }
-        val fullContent = if (refContent.isNotEmpty() && textContent.isNotEmpty()) {
-            "$textContent\n\n$refContent"
-        } else {
-            textContent.ifEmpty { refContent }
         }
         // PasswordSafe 是慢操作，不能阻塞 EDT
         ApplicationManager.getApplication().executeOnPooledThread {
@@ -1449,11 +1548,18 @@ class ChatToolWindow(private val project: Project) {
                     return@invokeLater
                 }
                 hideError()
+                // 记录引用文件用于气泡下方可点击跳转的 chips 展示
+                val msgIndex = viewModel.messageCount
+                if (refChips.isNotEmpty()) {
+                    messageRefChips[msgIndex] = refChips.toList() // 快照
+                }
                 inputArea.text = ""
                 refChips.clear()
+                selectionRefChip = null
                 pastedImages.clear()
                 rebuildChips()
-                viewModel.sendMessage(apiKey, fullContent, images.ifEmpty { null })
+                // 气泡只显示用户文本，引用内容通过 refContent 单独传给 LLM
+                viewModel.sendMessage(apiKey, textContent, images.ifEmpty { null }, refContent)
             }
         }
     }
@@ -1509,8 +1615,6 @@ class ChatToolWindow(private val project: Project) {
     private fun addSelectionToChips() {
         val editor = FileEditorManager.getInstance(project).selectedTextEditor ?: return
         if (!editor.selectionModel.hasSelection()) return
-        val selectedText = editor.selectionModel.selectedText ?: return
-        if (selectedText.isBlank()) return
         val file = FileDocumentManager.getInstance().getFile(editor.document)
         val relativePath = if (file != null) {
             val basePath = project.basePath
@@ -1521,7 +1625,19 @@ class ChatToolWindow(private val project: Project) {
         val doc = editor.document
         val startLine = doc.getLineNumber(editor.selectionModel.selectionStart) + 1
         val endLine = doc.getLineNumber(editor.selectionModel.selectionEnd) + 1
-        addRefChip(relativePath, relativePath, selectedText, startLine, endLine)
+        // 发送文件全部内容，同时标记选中行号（LLM 可按行号聚焦关键区域）
+        val content = if (doc.textLength > 500_000) {
+            // 超大文件截断保护
+            doc.text.take(500_000) + "\n... (文件过大，已截断至 500KB)"
+        } else {
+            doc.text
+        }
+        // 选区引用最多一个：移除旧的选区引用，替换为新选区
+        selectionRefChip?.let { refChips.remove(it) }
+        val chip = RefChip(relativePath, relativePath, content, startLine, endLine)
+        selectionRefChip = chip
+        refChips.add(chip)
+        rebuildChips()
         activateToolWindow()
     }
 

@@ -5,7 +5,6 @@ import java.awt.*
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicReference
 import javax.swing.*
 import javax.swing.border.AbstractBorder
 
@@ -53,16 +52,14 @@ object PermissionCard {
             isOpaque = false
             border = BorderFactory.createCompoundBorder(
                 CardBorder(if (isDanger) ChatTheme.danger else ChatTheme.toolBar),
-                JBUI.Borders.empty(0, 0, 4, 0)
+                JBUI.Borders.empty(4, 0, 4, 0)
             )
-            maximumSize = Dimension(Int.MAX_VALUE, Int.MAX_VALUE)
             alignmentX = Component.LEFT_ALIGNMENT
         }
 
         // ---- 折叠状态 ----
         val expanded = AtomicBoolean(false)
         var chosen = false
-        val resultLabelRef = AtomicReference<JLabel>()
 
         // ---- 头部行 ----
         val chevronLabel = JLabel("▸").apply {
@@ -132,7 +129,6 @@ object PermissionCard {
                                 foreground = btn.color
                                 border = JBUI.Borders.empty(1, 5, 1, 5)
                             }
-                            resultLabelRef.set(resultLbl)
                             buttonPanel.add(resultLbl)
                             buttonPanel.revalidate()
                             buttonPanel.repaint()
@@ -179,15 +175,6 @@ object PermissionCard {
         if (diffPanel != null) northContainer.add(diffPanel)
 
         card.add(northContainer, BorderLayout.NORTH)
-
-        // ---- 已选结果区（默认空） ----
-        val resultRow = JPanel().apply {
-            layout = BoxLayout(this, BoxLayout.X_AXIS)
-            isOpaque = false
-            border = JBUI.Borders.empty(0, 10, 4, 10)
-        }
-        card.add(resultRow, BorderLayout.SOUTH)
-
         return card
     }
 

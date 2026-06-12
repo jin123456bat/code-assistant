@@ -253,8 +253,10 @@ class AgentLoop(
     private fun callAnthropic(
         apiKey: String, history: List<AnthropicMessage>
     ): Triple<String, String, List<ToolCallResult>>? {
+        val planPrompt = buildPlanPrompt() // 动态注入当前计划状态
+        val effectivePrompt = if (planPrompt.isNotEmpty()) ctx.systemPrompt + "\n\n" + planPrompt else ctx.systemPrompt
         val toolsJson = buildToolsJsonWithPlan()
-        val requestBody = adapter.buildRequest(ctx.systemPrompt, history, toolsJson, modelOverride = model)
+        val requestBody = adapter.buildRequest(effectivePrompt, history, toolsJson, modelOverride = model)
 
         val textBuffer = StringBuilder()
         val thinkingBuffer = StringBuilder()
@@ -459,6 +461,36 @@ $claudeMdContent
             AgentContext.Step(index = i + 1, subject = s.subject, description = s.description)
         }
         return AgentContext.Plan(title = planArgs.title, steps = steps.toMutableList())
+    }
+
+    /** 动态生成当前计划状态提示，每次 API 调用前注入，确保 LLM 不会忘记未完成的计划 */
+    private fun buildPlanPrompt(): String {
+        val plan = ctx.currentPlan ?: return ""
+        val steps = plan.stepsSnapshot()
+        if (steps.isEmpty() || plan.isComplete()) return ""
+        val pendingCount = steps.count { it.status == AgentContext.StepStatus.PENDING }
+        val inProgressCount = steps.count { it.status == AgentContext.StepStatus.IN_PROGRESS }
+        val stepsSummary = steps.joinToString("\n") { s ->
+            val statusMark = when (s.status) {
+                AgentContext.StepStatus.DONE -> "✅"
+                AgentContext.StepStatus.IN_PROGRESS -> "🔄"
+                AgentContext.StepStatus.PENDING -> "⏳"
+                AgentContext.StepStatus.FAILED -> "❌"
+            }
+            "  ${s.index}. $statusMark ${s.subject}${if (s.description.isNotBlank()) " — ${s.description}" else ""}"
+        }
+        return """
+## Active Plan: ${plan.title}
+Progress: ${plan.progress()} (${steps.size} steps total, $inProgressCount in progress, $pendingCount pending)
+
+$stepsSummary
+
+CRITICAL: You have an active plan. You MUST continue executing it step by step.
+- Call update_plan_step(index=<n>, status="in_progress") when starting a step
+- Call update_plan_step(index=<n>, status="done", result="...") when completing a step
+- After ask_user or any other tool result, proceed to the NEXT step — do NOT end the conversation
+- Only stop when ALL steps are DONE. Do NOT output final text until plan is complete.
+""".trimIndent()
     }
 
     private fun edt(action: () -> Unit) {

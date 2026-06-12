@@ -77,7 +77,8 @@ src/main/kotlin/com/aiassistant/
 │   ├── SimpleDiff.kt          # 行级 diff 计算
 │   ├── AskUserBridge.kt       # ask_user 工具 ↔ UI 桥接
 │   ├── BubbleMetrics.kt        # 气泡宽度纯计算工具
-│   └── MarkdownRenderer.kt     # Markdown → Swing JPanel
+│   ├── MarkdownRenderer.kt     # Markdown → Swing JPanel
+│   └── WrapLayout.kt            # 可换行 FlowLayout 变体（preferredSize 基于容器宽度模拟换行）
 │
 ├── actions/                   # IntelliJ Actions
 │   ├── OpenChatAction.kt      # 打开聊天窗口

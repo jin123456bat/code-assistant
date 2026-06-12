@@ -21,6 +21,7 @@ class ChatViewModel(
     private val anthropicAdapter: AnthropicAdapter = AnthropicAdapter()
 ) {
     @Volatile var messages = mutableListOf<AgentMessage>()
+    val messageCount: Int get() = messages.size
     @Volatile var streamingContent = ""
     @Volatile var streamingThinking = ""
     @Volatile var isStreaming = false
@@ -164,18 +165,25 @@ class ChatViewModel(
         }
     }
 
-    fun sendMessage(apiKey: String, content: String, images: List<ImageData>? = null) {
+    /**
+     * @param content 用户输入文本（显示在气泡中）
+     * @param images 粘贴的图片
+     * @param refContent 文件引用的 Markdown 内容（仅发给 LLM，不显示在气泡中）
+     */
+    fun sendMessage(apiKey: String, content: String, images: List<ImageData>? = null, refContent: String = "") {
         if (content.isBlank() || isStreaming || isRateLimited) return
         streamingContent = ""
         streamingThinking = ""
+        // 气泡只显示用户文本，引用内容以 chips 形式独立展示
         messages.add(AgentMessage("user", content, images = images))
         runOnEdt { onMessagesChanged?.invoke() }
         isStreaming = true
         runOnEdt { onStreamingStateChanged?.invoke(true) }
 
+        val llmContent = if (refContent.isNotEmpty()) "$content\n\n$refContent" else content
         val a = agent
         if (a != null) {
-            a.run(content, apiKey, images) { finalText, thinking ->
+            a.run(llmContent, apiKey, images) { finalText, thinking ->
                 // thinking 与 assistant 消息在同一个 EDT 块中原子性地落地，
                 // 同时清空 streamingThinking/streamingContent，避免分两次 rebuild
                 // 导致 streamingContent 作为临时气泡重复渲染。

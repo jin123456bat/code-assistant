@@ -14,11 +14,14 @@ import java.awt.event.MouseEvent
 import javax.swing.BorderFactory
 import javax.swing.Box
 import javax.swing.BoxLayout
+import javax.swing.JComponent
 import javax.swing.JLabel
+import javax.swing.JLayeredPane
 import javax.swing.JPanel
 import javax.swing.JScrollPane
 import javax.swing.ScrollPaneConstants
 import javax.swing.SwingConstants
+import javax.swing.SwingUtilities
 
 /**
  * 置顶可折叠执行计划条（M2-B）。
@@ -48,6 +51,7 @@ class PlanBar : JPanel(BorderLayout()) {
         currentPlan = plan
         if (plan == null || plan.stepsSnapshot().isEmpty() || plan.isComplete()) {
             isVisible = false
+            removeOverlay()
             parent?.revalidate()
             revalidate()
             repaint()
@@ -64,19 +68,8 @@ class PlanBar : JPanel(BorderLayout()) {
         removeAll()
         val plan = currentPlan ?: return
 
-        // 外层容器：纵向堆叠 [摘要行, (展开内容)]
-        val container = JPanel().apply {
-            layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            isOpaque = false
-        }
-
-        // 摘要行（始终可见，点击切换折叠/展开）
-        container.add(buildSummaryRow(plan))
-
-        // 展开内容（步骤列表）
-        if (expanded) {
-            container.add(buildStepList(plan))
-        }
+        // 摘要行（固定高度，点击切换折叠/展开）
+        add(buildSummaryRow(plan), BorderLayout.NORTH)
 
         // 底部分隔线
         val dividerLine = object : JPanel() {
@@ -89,12 +82,52 @@ class PlanBar : JPanel(BorderLayout()) {
                 g2.dispose()
             }
         }.apply { isOpaque = false }
-
-        add(container, BorderLayout.CENTER)
         add(dividerLine, BorderLayout.SOUTH)
+
+        // 展开内容：通过 JLayeredPane 悬浮在下层之上，不推挤对话区
+        removeOverlay()
+        if (expanded) {
+            val stepScroll = buildStepList(plan)
+            stepScroll.border = BorderFactory.createLineBorder(ChatTheme.divider, 1)
+            stepScroll.background = JBColor(0xFFFFFF, 0x2B2D30)
+            stepScroll.isOpaque = true
+            overlay = stepScroll
+            val rootPane = SwingUtilities.getRootPane(this)
+            if (rootPane != null) {
+                rootPane.layeredPane.add(stepScroll, JLayeredPane.POPUP_LAYER)
+                rootPane.layeredPane.revalidate()
+                rootPane.layeredPane.repaint()
+                // 定位：紧贴 dividerLine 下方
+                SwingUtilities.invokeLater {
+                    val pt = SwingUtilities.convertPoint(this, 0, height, rootPane.layeredPane)
+                    stepScroll.setBounds(pt.x, pt.y, rootPane.layeredPane.width, minOf(stepScroll.preferredSize.height, 168))
+                }
+                // 点击外部关闭
+                rootPane.layeredPane.addMouseListener(object : MouseAdapter() {
+                    override fun mouseClicked(e: MouseEvent) {
+                        val comp = rootPane.layeredPane.getComponentAt(e.point)
+                        if (comp != stepScroll && !SwingUtilities.isDescendingFrom(e.component, stepScroll)) {
+                            expanded = false
+                            rebuild()
+                        }
+                    }
+                })
+            }
+        }
 
         revalidate()
         repaint()
+    }
+
+    private var overlay: JComponent? = null
+
+    private fun removeOverlay() {
+        overlay?.let {
+            val rootPane = SwingUtilities.getRootPane(this)
+            rootPane?.layeredPane?.remove(it)
+            rootPane?.layeredPane?.repaint()
+        }
+        overlay = null
     }
 
     /**

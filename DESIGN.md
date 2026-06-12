@@ -175,9 +175,15 @@ LLM 通过 `create_plan` 元工具自主创建执行计划，`update_plan_step` 
 
 **显示规则：**
 - 折叠态：chevron + 标题 + 进度 "2/4" + 当前步骤 `subject` + 迷你进度条
-- 展开态：步骤列表，每行显示 `subject`（主名称）+ `description`（灰色小字副描述，可选）+ 状态图标
-- 步骤过多时内部滚动（max-height 168px）
+- 展开态：步骤列表通过 `JLayeredPane.POPUP_LAYER` 悬浮展示，**不推挤下方对话区**
+- 每行显示 `subject`（主名称）+ `description`（灰色小字副描述，可选）+ 状态图标
+- 步骤过多时内部滚动（max-height 168px），点击对话区自动收起
 - 全部完成自动隐藏
+
+**LLM 上下文注入：**
+- 每次 API 调用前通过 `buildPlanPrompt()` 动态生成计划状态提示，注入到 system prompt
+- 包含完整步骤列表、各步骤状态标记（✅🔄⏳❌）、进度百分比
+- 强制指令：`ask_user` 或其他工具调用后必须继续执行下一步，禁止提前结束对话
 
 ### PermissionCard — 权限确认卡
 - 圆角卡片 + `toolBg` 淡背景 + `toolBar`/`danger` 色边框
@@ -252,11 +258,24 @@ LLM 通过 `create_plan` 元工具自主创建执行计划，`update_plan_step` 
 
 ### RefChip — 文件引用芯片
 
-- 显示在输入区上方（`chipPanel`），灰色圆角矩形背景（`JBColor(0xE3E8EE, 0x3A3E48)`），边框 `JBColor(0xC0C8D0, 0x505560)`
-- 芯片内容：文件名标签 + `×` 删除按钮（悬浮变蓝 `JBColor(0x2674B4, 0x5A9FD4)`）
+**输入区芯片**（可删除）：
+- 显示在 `chipPanel` 输入区上方，灰色圆角矩形背景 + 边框，文件名标签 + `×` 删除按钮（hover 变蓝）
 - 去重：相同文件 + 行号范围的芯片不会重复添加
-- 发送时拼接为 Markdown 代码块引用格式
-- **编辑器选区自动引用**：在编辑器中选中代码 → 自动添加为引用芯片（`SelectionEvent` 监听，3 秒内相同 hash 跳过去重），仅在工具窗口可见时生效
+- 使用 `WrapLayout`（自定义 `FlowLayout` 变体）：多芯片自动换行，`preferredSize` 基于容器宽度模拟换行计算真实高度，面板随芯片数量向上拉伸，确保所有芯片可见
+- `inputPanel.preferredSize` 动态计算（`super.getPreferredSize()`），不再硬编码固定高度
+
+**气泡下方芯片**（只读）：
+- 引用文件 chips 嵌入用户气泡底部，与消息文本同属一个气泡组件（上半部分消息文本 + 下半部分 chips 面板）
+- 无引用时不显示 chips 区域，气泡退化为纯文本气泡
+- 格式 `📄 文件名:行号`，`WrapLayout(RIGHT)` 靠右排列，多芯片自动换行，宽度受气泡约束，高度动态计算防止裁切
+- 点击芯片 → 在编辑器中打开文件，有行号则自动跳转并居中；hover 变蓝高亮
+- 引用内容不存入消息文本——气泡仅显示用户输入，引用全文通过 `refContent` 参数单独发送给 LLM
+
+**编辑器选区自动引用**：
+- 通过 `EditorFactoryListener` + `SelectionListener` 监听编辑器内文本选中事件
+- 选中后自动添加芯片（发送文件全文 + 标记行号 `#L5-L10`，500KB 上限）
+- **选区引用最多一个**：变更选区时直接更新已有芯片（替换文件/行号/内容），而非新增多个
+- 100ms 防抖 + 3 秒相同 hash 去重，仅工具窗口可见时生效
 
 ### 新会话按钮（`newSessionBtn`）
 

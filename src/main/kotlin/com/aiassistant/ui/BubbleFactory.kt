@@ -54,10 +54,18 @@ class BubbleFactory(private val scrollPane: JBScrollPane) {
     }
 
     fun userBubble(message: AgentMessage): Triple<JPanel, JPanel, JComponent> {
-        // 用户气泡用 HTML JTextPane：视图测高可靠，CJK 不裁字。
+        return buildUserBubble(message, null)
+    }
+
+    /** 带底部 footer（如引用文件 chips）的用户气泡。footer 为 null 时退化为普通用户气泡。 */
+    fun userBubbleWithFooter(message: AgentMessage, footer: JComponent): Triple<JPanel, JPanel, JComponent> {
+        return buildUserBubble(message, footer)
+    }
+
+    private fun buildUserBubble(message: AgentMessage, footer: JComponent?): Triple<JPanel, JPanel, JComponent> {
         val fg = String.format("#%06X", ChatTheme.userFg.rgb and 0xFFFFFF)
         val esc = htmlEscape(message.content)
-        val content = JTextPane().apply {
+        val textPane = JTextPane().apply {
             isEditable = false
             contentType = "text/html"
             editorKit = HTMLEditorKit()
@@ -66,6 +74,16 @@ class BubbleFactory(private val scrollPane: JBScrollPane) {
             text = "<html><body style='margin:0;padding:0;font-family:sans-serif;" +
                 "font-size:${editorFontSize}px;color:$fg'>$esc</body></html>"
             caretPosition = 0
+        }
+        val content: JComponent = if (footer != null) {
+            JPanel().apply {
+                layout = BoxLayout(this, BoxLayout.Y_AXIS)
+                isOpaque = false
+                add(textPane)
+                add(footer)
+            }
+        } else {
+            textPane
         }
         val bubble = ChatBubble(content, ChatTheme.userBg, null, ChatTheme.USER_FRACTION) { availableWidth() }
         val row = rowPanel().apply {
