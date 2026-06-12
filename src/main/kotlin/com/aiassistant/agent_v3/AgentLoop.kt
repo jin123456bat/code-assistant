@@ -21,7 +21,8 @@ class AgentLoop(
         /** 安全工具白名单 — 无需用户确认直接执行 */
         val SAFE_TOOLS = setOf(
             "search_code", "read_file", "list_directory",
-            "git_diff", "git_log", "git_status", "web_search"
+            "git_diff", "git_log", "git_status", "web_search",
+            "web_fetch", "task", "ask_user"
         )
 
         /** create_plan 元工具的 input_schema（含嵌套 items，ToolParameter 无法表达） */
@@ -59,11 +60,9 @@ class AgentLoop(
         ctx.toolRegistry.registerBuiltIn()
         ctx.toolRegistry.registerMcp(mcpTools)
         val basePath = project.basePath
-        if (basePath != null) {
-            val skillTools = SkillEngine.loadProjectSkills(basePath)
-            ctx.toolRegistry.registerSkills(skillTools)
-        }
-        ctx.systemPrompt = buildSystemPrompt()
+        val skillTools = if (basePath != null) SkillEngine.loadProjectSkills(basePath) else emptyList()
+        ctx.toolRegistry.registerSkills(skillTools)
+        ctx.systemPrompt = buildSystemPrompt(skillTools)
     }
 
     fun run(userMessage: String, apiKey: String, callback: (String, String) -> Unit) {
@@ -162,7 +161,9 @@ class AgentLoop(
                             }
 
                             val params = parseParams(tc.arguments)
-                            val approved = if (tc.name in SAFE_TOOLS || tc.name in AppSettingsService.getInstance().getToolWhitelist()) {
+                            // skill 工具不执行实际文件操作，只是 prompt 注入包装器，无需审批
+                            val isSkillTool = ctx.toolRegistry.isSkill(tc.name)
+                            val approved = if (isSkillTool || tc.name in SAFE_TOOLS || tc.name in AppSettingsService.getInstance().getToolWhitelist()) {
                                 true
                             } else {
                                 // 内联确认：通过回调 + CountDownLatch 等待用户操作。
@@ -357,12 +358,19 @@ class AgentLoop(
         return p
     }
 
-    private fun buildSystemPrompt(): String {
+    private fun buildSystemPrompt(skills: List<AgentTool> = emptyList()): String {
         val tools = ctx.toolRegistry.getAll()
-        val toolList = tools.joinToString("\n") { t ->
+        val builtInCount = ctx.toolRegistry.getAll().count { it !is SkillTool }
+        val toolList = tools.take(builtInCount).joinToString("\n") { t ->
             val params = t.parameters.joinToString(", ") { "${it.name}:${it.type}" }
             "- **${t.name}**($params): ${t.description}"
         }
+        val skillsSection = if (skills.isNotEmpty()) {
+            "\n## Skills\n" + skills.joinToString("\n\n") { s ->
+                val st = s as? SkillTool ?: return@joinToString ""
+                "### ${st.name}\n${st.description}\n\n${st.prompt}"
+            }
+        } else ""
         return """
 You are an AI coding assistant in PhpStorm. Use tools to work with the project.
 
@@ -376,7 +384,7 @@ $toolList
 对于需要多步骤完成的复杂任务（如实现功能、重构代码、架构变更），你应该先调用 **create_plan** 工具创建执行计划。
 简单任务（读取文件、回答单个问题、一行修改）不要创建计划。
 创建计划后，每个步骤开始前调用 **update_plan_step**（status="in_progress"），完成后调用（status="done" + result 摘要），失败时调用（status="failed" + result 原因）。
-
+$skillsSection
 ## Rules
 - Use tools to get real data; never guess
 - Read before edit; report results in Chinese

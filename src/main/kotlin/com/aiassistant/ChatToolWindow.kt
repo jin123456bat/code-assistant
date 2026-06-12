@@ -65,6 +65,7 @@ import javax.swing.JLabel
 import javax.swing.JMenuItem
 import javax.swing.JPanel
 import javax.swing.JPopupMenu
+import javax.swing.JTextField
 import javax.swing.JTextArea
 import javax.swing.JTextPane
 import javax.swing.ScrollPaneConstants
@@ -211,8 +212,13 @@ class ChatToolWindow(private val project: Project) {
         border = JBUI.Borders.empty(4, 4)
         addKeyListener(object : KeyAdapter() {
             override fun keyPressed(e: KeyEvent) {
+                if (e.keyCode == KeyEvent.VK_UP || e.keyCode == KeyEvent.VK_DOWN) {
+                    if (slashCommandPopup?.isVisible == true) { e.consume(); slashCommandMoveSelection?.invoke(if (e.keyCode == KeyEvent.VK_UP) -1 else 1); return }
+                }
                 if (e.keyCode == KeyEvent.VK_ENTER && e.modifiersEx == 0) {
-                    e.consume(); sendMessage()
+                    e.consume()
+                    if (slashCommandPopup?.isVisible == true) { slashCommandDoSelect?.invoke(); return }
+                    sendMessage()
                 }
             }
         })
@@ -1136,27 +1142,35 @@ class ChatToolWindow(private val project: Project) {
     private fun setupInputCompletions() {
         inputArea.document.addDocumentListener(object : DocumentListener {
             override fun insertUpdate(e: DocumentEvent) = checkTrigger(e)
-            override fun removeUpdate(e: DocumentEvent) = Unit
+            override fun removeUpdate(e: DocumentEvent) { checkFilter() }
             override fun changedUpdate(e: DocumentEvent) = Unit
+
+            private fun checkFilter() {
+                if (inputListenerGuard.get()) return
+                val text = try { inputArea.text } catch (_: Exception) { return }
+                slashCommandFilter?.invoke(if (text.startsWith("/")) text else "")
+            }
 
             private fun checkTrigger(e: DocumentEvent) {
                 // 重入保护：若当前正在 invokeLater 内修改文档，直接跳过
                 if (inputListenerGuard.get()) return
 
+                val text = try { inputArea.text } catch (_: Exception) { return }
+
+                // 斜杠命令：以 "/" 开头时实时筛选弹窗
+                if (text.startsWith("/")) {
+                    if (text.trim() == "/" && e.length == 1) SwingUtilities.invokeLater { showSlashCommandMenu() }
+                    else slashCommandFilter?.invoke(text)
+                    return
+                }
+
                 // 只关心单字符插入（避免粘贴大段文本时误触）
                 if (e.length != 1) return
 
-                val text = try { inputArea.text } catch (_: Exception) { return }
                 val insertPos = e.offset
                 val insertedChar = try { e.document.getText(insertPos, 1) } catch (_: Exception) { return }
 
                 when (insertedChar) {
-                    "/" -> {
-                        // 仅当输入框此时只含一个 "/" 字符（trim 后）时才弹出命令菜单
-                        if (text.trim() == "/") {
-                            SwingUtilities.invokeLater { showSlashCommandMenu() }
-                        }
-                    }
                     "@" -> {
                         // 仅当 @ 出现在行首或空白之后（即合理的文件引用触发位置）
                         val beforeAt = if (insertPos > 0) {
@@ -1200,59 +1214,114 @@ class ChatToolWindow(private val project: Project) {
      * 键盘：Up/Down 选项，Enter 确认，Esc 关闭。
      * 选择后：先清除输入框中的 "/"，再执行对应操作。
      */
+    private var slashCommandFilter: ((String) -> Unit)? = null
+    private var slashCommandMoveSelection: ((Int) -> Unit)? = null
+    private var slashCommandDoSelect: (() -> Unit)? = null
+
     private fun showSlashCommandMenu() {
-        // 若当前正在流式输出，/stop 以外的命令通常无害，但仍按正常菜单展示
         val popup = JPopupMenu()
 
         data class Cmd(val name: String, val desc: String, val action: () -> Unit)
-        val commands = listOf(
-            Cmd("/new",   "新会话") {
-                viewModel.clearConversation()
-                planBar.updatePlan(null)
-                rebuildConversation()
-            },
-            Cmd("/stop",  "停止生成") {
-                viewModel.stopGeneration()
-            },
-            Cmd("/clear", "清空输入") {
-                // 输入框已在 executeCommand 中清空，此处无需重复
+        fun sendQuick(msg: String) {
+            ApplicationManager.getApplication().executeOnPooledThread {
+                val apiKey = try { AppSettingsService.getInstance().getApiKey() } catch (_: Exception) { null }
+                ApplicationManager.getApplication().invokeLater {
+                    if (apiKey.isNullOrBlank()) { showError(AiAssistantBundle.message("chat.error.nokey")); return@invokeLater }
+                    hideError()
+                    viewModel.sendMessage(apiKey, msg)
+                }
             }
+        }
+
+        val commands = listOf(
+            Cmd("/new",   "新会话") { viewModel.clearConversation(); planBar.updatePlan(null); rebuildConversation() },
+            Cmd("/plan",  "创建执行计划") { sendQuick("请为当前任务创建执行计划。先分析需求，然后调用 create_plan 工具。") },
+            Cmd("/init",  "初始化项目文档") { sendQuick("请分析当前项目结构，创建 CLAUDE.md 文档，包含项目概述、常用命令、架构说明和关键约定。") },
+            Cmd("/review","审查当前改动") { sendQuick("请审查当前分支的代码改动，分析潜在问题并给出修复建议。") },
+            Cmd("/test",  "运行测试") { sendQuick("请运行 ./gradlew test，分析测试结果并修复失败的测试。") },
+            Cmd("/stop",  "停止生成") { viewModel.stopGeneration() },
+            Cmd("/clear", "清空输入") { /* 已在 executeCommand 中清空 */ }
         )
 
-        /** 清除输入框中的触发字符并执行命令 */
         fun executeCommand(cmd: Cmd) {
             popup.isVisible = false
             inputListenerGuard.set(true)
-            try {
-                inputArea.text = ""
-            } finally {
-                inputListenerGuard.set(false)
-            }
+            try { inputArea.text = "" } finally { inputListenerGuard.set(false) }
             cmd.action()
         }
 
-        for (cmd in commands) {
-            val item = JMenuItem().apply {
-                // 命令名用等宽字体，描述用普通字体，通过 HTML 排版
-                text = "<html><tt style='font-size:12pt'>${cmd.name}</tt>" +
-                        "&nbsp;&nbsp;<span style='color:gray;font-size:10pt'>${cmd.desc}</span></html>"
-                addActionListener { executeCommand(cmd) }
-            }
-            popup.add(item)
+        val skills = viewModel.getSkillNames().sorted()
+        val allEntries: List<Pair<String, String>> = commands.map { it.name to it.desc } + skills.map { "/$it" to "skill" }
+        var selectedIndex = 0
+
+        fun closePopup() { popup.isVisible = false; slashCommandFilter = null; slashCommandMoveSelection = null; slashCommandDoSelect = null }
+        fun doSelect() {
+            val items = popup.components.filterIsInstance<JMenuItem>()
+            if (selectedIndex in items.indices) items[selectedIndex].doClick()
         }
 
-        // 键盘支持：Esc 关闭
+        fun rebuildItems(filter: String) {
+            val keep = popup.components.takeWhile { it !is JMenuItem }.size
+            for (i in popup.componentCount - 1 downTo keep) popup.remove(i)
+            val q = filter.removePrefix("/").lowercase()
+            val filtered = allEntries.filter { it.first.lowercase().contains(q) || it.second.lowercase().contains(q) }.take(10)
+            selectedIndex = 0
+            for ((idx, entry) in filtered.withIndex()) {
+                val (name, desc) = entry
+                val cmd = commands.find { it.name == name }
+                val item = JMenuItem("$name  $desc").apply {
+                    font = ChatTheme.metaFont; border = JBUI.Borders.empty(4, 10, 4, 10)
+                    preferredSize = Dimension(inputPanel.width, 28)
+                    minimumSize = Dimension(inputPanel.width, 28)
+                    maximumSize = Dimension(inputPanel.width, 28)
+                    if (idx == 0) background = JBColor(0xE0E8F0, 0x3A4048)
+                }
+                if (cmd != null) item.addActionListener { executeCommand(cmd) }
+                else item.addActionListener {
+                    closePopup()
+                    inputListenerGuard.set(true)
+                    try { inputArea.text = "" } finally { inputListenerGuard.set(false) }
+                    sendQuick("请使用 ${name.removePrefix("/")} skill 执行任务")
+                }
+                popup.add(item)
+            }
+        }
+        rebuildItems(inputArea.text)
+
+        fun moveSelection(delta: Int) {
+            val items = popup.components.filterIsInstance<JMenuItem>()
+            if (items.isEmpty()) return
+            selectedIndex = (selectedIndex + delta).coerceIn(0, items.lastIndex)
+            items.forEachIndexed { i, it -> it.background = if (i == selectedIndex) JBColor(0xE0E8F0, 0x3A4048) else null }
+        }
+
+        // 文本框内容变化时实时筛选
+        slashCommandFilter = { text ->
+            if (text.startsWith("/")) {
+                rebuildItems(text)
+                val h = (popup.components.filterIsInstance<JMenuItem>().size.coerceAtLeast(1) * 28).coerceAtMost(280)
+                popup.preferredSize = Dimension(inputPanel.width, h)
+                popup.show(inputPanel, 0, -h)  // 始终 show 确保底部紧贴输入框，即使弹窗已可见
+            } else {
+                closePopup()
+            }
+        }
+
         popup.addKeyListener(object : KeyAdapter() {
             override fun keyPressed(e: KeyEvent) {
-                if (e.keyCode == KeyEvent.VK_ESCAPE) popup.isVisible = false
+                if (e.keyCode == KeyEvent.VK_ENTER) { e.consume(); doSelect() }
+                if (e.keyCode == KeyEvent.VK_ESCAPE) closePopup()
             }
         })
 
-        // 定位：显示在 inputPanel 正上方
-        val popupHeight = popup.preferredSize.height
-            .coerceAtLeast(commands.size * 32 + 8) // 估算高度（首次 preferredSize 可能为 0）
-        popup.show(inputPanel, 0, -popupHeight)
+        slashCommandMoveSelection = { delta -> moveSelection(delta) }
+        slashCommandDoSelect = { doSelect() }
 
+        val popupHeight = (popup.components.filterIsInstance<JMenuItem>().size.coerceAtLeast(1) * 28).coerceAtMost(280)
+        popup.isFocusable = false
+        popup.pack()
+        popup.preferredSize = Dimension(inputPanel.width, popupHeight)
+        popup.show(inputPanel, 0, -popupHeight)
         slashCommandPopup = popup
     }
 

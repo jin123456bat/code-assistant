@@ -33,7 +33,7 @@ object SkillEngine {
     private fun loadFromDir(dir: File, tools: MutableList<AgentTool>) {
         if (!dir.exists()) return
         dir.walkTopDown().maxDepth(2).forEach { file ->
-            if (file.name == "SKILL.md" && file.isFile && file.length() < 50_000) {
+            if (file.name == "SKILL.md" && file.isFile && file.length() < 200_000) {
                 try {
                     val content = file.readText()
                     val skill = parseSkill(file.parentFile.name, content)

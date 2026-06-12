@@ -31,6 +31,7 @@ class ToolRegistryV3 {
 
     fun getAll(): List<AgentTool> = (tools.values + mcpTools.values + skillTools.values).toList()
     fun find(name: String): AgentTool? = tools[name] ?: mcpTools[name] ?: skillTools[name]
+    fun isSkill(name: String): Boolean = name in skillTools
 
     fun executeTool(name: String, params: Map<String, String>, project: Project): ToolResult =
         find(name)?.execute(params, project) ?: ToolResult.err("未知工具: $name")

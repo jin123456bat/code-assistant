@@ -70,6 +70,10 @@ class ChatViewModel(
         agent = a
     }
 
+    fun getSkillNames(): List<String> = agent?.ctx?.toolRegistry?.getAll()
+        ?.filter { it.name !in setOf("search_code","read_file","write_file","list_directory","execute_command","git_diff","git_log","git_status","ask_user","web_search","web_fetch","notebook_edit","task") }
+        ?.map { it.name } ?: emptyList()
+
     fun addMcpTools(mcpTools: List<com.aiassistant.agent.AgentTool>) {
         agent?.ctx?.toolRegistry?.registerMcp(mcpTools)
     }
