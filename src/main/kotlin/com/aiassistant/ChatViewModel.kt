@@ -194,6 +194,10 @@ class ChatViewModel(
     }
 
     private fun runOnEdt(action: () -> Unit) {
+        if (SwingUtilities.isEventDispatchThread()) {
+            action()
+            return
+        }
         val app = ApplicationManager.getApplication()
         if (app != null) app.invokeLater(action) else action()
     }
