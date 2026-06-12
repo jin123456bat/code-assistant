@@ -1,6 +1,5 @@
 package com.aiassistant.agent
 
-import com.aiassistant.shared.JsonUtils
 import com.intellij.openapi.project.Project
 
 /**
@@ -41,57 +40,4 @@ interface AgentTool {
      */
     fun execute(params: Map<String, String>, project: Project): ToolResult
 
-    /**
-     * 生成 OpenAI 兼容的 function JSON Schema。
-     * @deprecated v3 使用 Anthropic input_schema 格式（由 ToolRegistryV3.buildToolsJson() 生成）。
-     */
-    fun toFunctionJson(): String {
-        val propsJson = parameters.joinToString(",") { p ->
-            buildString {
-                append("\"${p.name}\":{")
-                append("\"type\":\"${p.type}\",")
-                append("\"description\":\"${JsonUtils.escapeJson(p.description)}\"")
-                if (p.enum != null) {
-                    append(",\"enum\":[${p.enum.joinToString(",") { "\"$it\"" }}]")
-                }
-                append("}")
-            }
-        }
-        val requiredJson = parameters.filter { it.required }.joinToString(",") { "\"${it.name}\"" }
-        val requiredBlock = if (requiredJson.isNotEmpty()) ",\"required\":[$requiredJson]" else ""
-
-        return """{"name":"$name","description":"${JsonUtils.escapeJson(description)}","parameters":{"type":"object","properties":{$propsJson},"additionalProperties":false$requiredBlock}}"""
-    }
-}
-
-/**
- * 工具注册中心 — 管理所有可用工具。
- *
- * @deprecated 已由 agent_v3/ToolRegistryV3 取代（Anthropic input_schema 格式 + 缓存）。
- *             此文件保留用于测试兼容性。
- */
-@Deprecated("Use ToolRegistryV3 instead", replaceWith = ReplaceWith("ToolRegistryV3"))
-class ToolRegistry {
-    private val tools = mutableListOf<AgentTool>()
-
-    fun register(tool: AgentTool) {
-        tools.add(tool)
-    }
-
-    fun registerAll(newTools: List<AgentTool>) {
-        tools.addAll(newTools)
-    }
-
-    fun getTools(): List<AgentTool> = tools.toList()
-
-    fun findTool(name: String): AgentTool? = tools.find { it.name == name }
-
-    /**
-     * 生成 OpenAI 兼容的 tools 数组 JSON
-     */
-    fun buildToolsJson(): String {
-        return tools.joinToString(",") { tool ->
-            """{"type":"function","function":${tool.toFunctionJson()}}"""
-        }.let { "[$it]" }
-    }
 }

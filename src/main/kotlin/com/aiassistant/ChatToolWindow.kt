@@ -1,6 +1,7 @@
 package com.aiassistant
 
-import com.aiassistant.agent_v3.AgentMessage
+import com.aiassistant.agent.AgentMessage
+import com.aiassistant.agent.ImageData
 import com.aiassistant.mcp.McpManager
 import com.aiassistant.shared.JsonUtils
 import com.aiassistant.ui.ApprovalActions
@@ -25,9 +26,7 @@ import com.intellij.openapi.wm.ToolWindowFactory
 import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.psi.PsiDocumentManager
 import com.intellij.ui.JBColor
-import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBScrollPane
-import com.intellij.ui.components.JBTextField
 import com.intellij.util.ui.JBUI
 import java.awt.BorderLayout
 import java.awt.Color
@@ -59,7 +58,6 @@ import javax.swing.*
 import javax.swing.BorderFactory
 import javax.swing.Box
 import javax.swing.BoxLayout
-import javax.swing.DefaultListModel
 import javax.swing.JComponent
 import javax.swing.JLabel
 import javax.swing.JMenuItem
@@ -203,6 +201,8 @@ class ChatToolWindow(private val project: Project) {
 
     /** 斜杠命令弹出菜单（懒初始化） */
     private var slashCommandPopup: JPopupMenu? = null
+    /** @ 文件引用弹出菜单（懒初始化） */
+    private var fileRefPopup: JPopupMenu? = null
 
     // ---- input area ----
     private val inputArea = JTextArea(3, 20).apply {
@@ -214,10 +214,12 @@ class ChatToolWindow(private val project: Project) {
             override fun keyPressed(e: KeyEvent) {
                 if (e.keyCode == KeyEvent.VK_UP || e.keyCode == KeyEvent.VK_DOWN) {
                     if (slashCommandPopup?.isVisible == true) { e.consume(); slashCommandMoveSelection?.invoke(if (e.keyCode == KeyEvent.VK_UP) -1 else 1); return }
+                    if (fileRefPopup?.isVisible == true) { e.consume(); fileRefMoveSelection?.invoke(if (e.keyCode == KeyEvent.VK_UP) -1 else 1); return }
                 }
                 if (e.keyCode == KeyEvent.VK_ENTER && e.modifiersEx == 0) {
                     e.consume()
                     if (slashCommandPopup?.isVisible == true) { slashCommandDoSelect?.invoke(); return }
+                    if (fileRefPopup?.isVisible == true) { fileRefDoSelect?.invoke(); return }
                     sendMessage()
                 }
             }
@@ -263,12 +265,45 @@ class ChatToolWindow(private val project: Project) {
         }
     }
     private val refChips = mutableListOf<RefChip>()
+    /** 待发送的粘贴图片（Claude 原生 image 块，非 Markdown data URL） */
+    private val pastedImages = mutableListOf<ImageData>()
     private val chipPanel = JPanel(FlowLayout(FlowLayout.LEFT, 4, 2)).apply {
         isOpaque = false
     }
 
     private fun rebuildChips() {
         chipPanel.removeAll()
+        // 图片芯片
+        for ((idx, img) in pastedImages.withIndex()) {
+            val chipComp = JPanel(FlowLayout(FlowLayout.LEFT, 2, 0)).apply {
+                background = JBColor(0xE3E8EE, 0x3A3E48)
+                border = BorderFactory.createCompoundBorder(
+                    roundedBorder(JBColor(0xC0C8D0, 0x505560)),
+                    BorderFactory.createEmptyBorder(1, 6, 1, 4)
+                )
+                toolTipText = "已粘贴图片 (${img.mediaType})"
+            }
+            chipComp.add(JLabel("图片 ${idx + 1}").apply {
+                font = Font(Font.SANS_SERIF, Font.PLAIN, 11)
+                foreground = JBColor(0x333333, 0xCCCCCC)
+            })
+            val removeBtn = JLabel("×").apply {
+                font = Font(Font.SANS_SERIF, Font.BOLD, 13)
+                foreground = JBColor(0x888888, 0xAAAAAA)
+                cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
+                border = BorderFactory.createEmptyBorder(0, 2, 0, 2)
+                toolTipText = "移除图片"
+                addMouseListener(object : MouseAdapter() {
+                    override fun mouseClicked(e: MouseEvent) {
+                        pastedImages.removeAt(idx)
+                        rebuildChips()
+                    }
+                })
+            }
+            chipComp.add(removeBtn)
+            chipPanel.add(chipComp)
+        }
+        // 文件引用芯片
         for (chip in refChips) {
             val chipComp = JPanel(FlowLayout(FlowLayout.LEFT, 2, 0)).apply {
                 background = JBColor(0xE3E8EE, 0x3A3E48)
@@ -328,106 +363,7 @@ class ChatToolWindow(private val project: Project) {
         }
     }
 
-    // ---- file picker popup ----
-    private var filePickerPopup: JPopupMenu? = null
-    private val filePickerList = JBList(DefaultListModel<String>()).apply {
-        visibleRowCount = 10
-        font = Font(Font.MONOSPACED, Font.PLAIN, 12)
-        addMouseListener(object : MouseAdapter() {
-            override fun mouseClicked(e: MouseEvent) {
-                if (e.clickCount == 2) acceptFilePickerSelection()
-            }
-        })
-        addKeyListener(object : KeyAdapter() {
-            override fun keyPressed(e: KeyEvent) {
-                if (e.keyCode == KeyEvent.VK_ENTER) { e.consume(); acceptFilePickerSelection() }
-                if (e.keyCode == KeyEvent.VK_ESCAPE) { filePickerPopup?.isVisible = false }
-            }
-        })
-    }
-    private val filePickerFilter = JBTextField().apply {
-        addKeyListener(object : KeyAdapter() {
-            override fun keyPressed(e: KeyEvent) {
-                when (e.keyCode) {
-                    KeyEvent.VK_ENTER -> { e.consume(); acceptFilePickerSelection() }
-                    KeyEvent.VK_ESCAPE -> { filePickerPopup?.isVisible = false }
-                    KeyEvent.VK_DOWN -> {
-                        e.consume()
-                        val model = filePickerList.model as DefaultListModel<String>
-                        if (model.size > 0) {
-                            val i = minOf(filePickerList.selectedIndex + 1, model.size - 1)
-                            filePickerList.selectedIndex = i
-                            filePickerList.ensureIndexIsVisible(i)
-                        }
-                    }
-                    KeyEvent.VK_UP -> {
-                        e.consume()
-                        val i = maxOf(filePickerList.selectedIndex - 1, 0)
-                        filePickerList.selectedIndex = i
-                        filePickerList.ensureIndexIsVisible(i)
-                    }
-                }
-            }
-        })
-        document.addDocumentListener(object : DocumentListener {
-            override fun insertUpdate(e: DocumentEvent?) { updateFileList(text) }
-            override fun removeUpdate(e: DocumentEvent?) { updateFileList(text) }
-            override fun changedUpdate(e: DocumentEvent?) { updateFileList(text) }
-        })
-    }
-
-    private fun showFilePicker() {
-        if (filePickerPopup == null) {
-            val panel = JPanel(BorderLayout())
-            val scrollFiles = JBScrollPane(filePickerList).apply { preferredSize = Dimension(400, 250) }
-            panel.add(scrollFiles, BorderLayout.CENTER)
-            val filterPanel = JPanel(BorderLayout()).apply {
-                border = BorderFactory.createCompoundBorder(
-                    BorderFactory.createMatteBorder(1, 0, 0, 0, JBColor.border()),
-                    BorderFactory.createEmptyBorder(4, 8, 4, 8)
-                )
-                filePickerFilter.putClientProperty("JTextField.Search.Gap", 4)
-                filePickerFilter.putClientProperty("JTextField.Search.Placeholder", "筛选文件或文件夹...")
-            }
-            filterPanel.add(filePickerFilter)
-            panel.add(filterPanel, BorderLayout.SOUTH)
-            filePickerPopup = JPopupMenu().apply { add(panel) }
-        }
-        if (projectFilesCache.isEmpty()) projectFilesCache = collectProjectFiles()
-        updateFileList("")
-        filePickerList.selectedIndex = 0
-        // 弹窗宽度与输入区一致，紧贴加号上方
-        val popupWidth = inputPanel.width
-        filePickerPopup!!.preferredSize = Dimension(popupWidth, filePickerPopup!!.preferredSize.height)
-        val plusPos = SwingUtilities.convertPoint(plusButton, 0, 0, panel)
-        filePickerPopup!!.show(panel, 0, plusPos.y - filePickerPopup!!.preferredSize.height)
-        SwingUtilities.invokeLater { filePickerFilter.requestFocus() }
-    }
-
-    private fun updateFileList(query: String) {
-        val model: DefaultListModel<String> = filePickerList.model as DefaultListModel<String>
-        model.clear()
-        val q = query.lowercase()
-        val filtered = if (q.isEmpty()) projectFilesCache.take(50) else projectFilesCache.filter { it.lowercase().contains(q) }.take(50)
-        filtered.forEach { model.addElement(it) }
-        if (model.size > 0) filePickerList.selectedIndex = 0
-    }
-
-    private fun acceptFilePickerSelection() {
-        val selected = filePickerList.selectedValue ?: return
-        filePickerPopup?.isVisible = false
-        filePickerFilter.text = ""
-        val basePath = project.basePath ?: return
-        val file = File(basePath, selected)
-        if (file.isFile && file.length() < 500_000) {
-            try {
-                val content = file.readText()
-                addRefChip(selected, selected, content)
-            } catch (_: Exception) {}
-        }
-    }
-
-    // ---- plus button ----
+    // ---- plus button (复用 @ 文件引用弹窗) ----
     private val plusButton = JLabel("+").apply {
         font = Font(Font.SANS_SERIF, Font.BOLD, 20)
         foreground = JBColor(0x888888, 0x999999)
@@ -435,7 +371,7 @@ class ChatToolWindow(private val project: Project) {
         border = BorderFactory.createEmptyBorder(0, 4, 0, 4)
         toolTipText = "添加文件引用"
         addMouseListener(object : MouseAdapter() {
-            override fun mouseClicked(e: MouseEvent) { showFilePicker() }
+            override fun mouseClicked(e: MouseEvent) { showFileRefPopup() }
         })
     }
 
@@ -1149,6 +1085,13 @@ class ChatToolWindow(private val project: Project) {
                 if (inputListenerGuard.get()) return
                 val text = try { inputArea.text } catch (_: Exception) { return }
                 slashCommandFilter?.invoke(if (text.startsWith("/")) text else "")
+                // @ 文件筛选：找到最后一个 @ 位置（行首或空白后），提取筛选文本
+                val atIdx = text.indexOfLast { it == '@' }.takeIf { it >= 0 } ?: -1
+                if (atIdx >= 0 && (atIdx == 0 || text.getOrElse(atIdx - 1) { ' ' }.isWhitespace())) {
+                    fileRefFilter?.invoke(text.substring(atIdx))
+                } else {
+                    fileRefFilter?.invoke("")
+                }
             }
 
             private fun checkTrigger(e: DocumentEvent) {
@@ -1172,29 +1115,11 @@ class ChatToolWindow(private val project: Project) {
 
                 when (insertedChar) {
                     "@" -> {
-                        // 仅当 @ 出现在行首或空白之后（即合理的文件引用触发位置）
                         val beforeAt = if (insertPos > 0) {
                             try { e.document.getText(insertPos - 1, 1) } catch (_: Exception) { " " }
-                        } else {
-                            " " // 位于文本最开头，视为空白后
-                        }
+                        } else " "
                         if (beforeAt.isBlank()) {
-                            SwingUtilities.invokeLater {
-                                // 移除触发字符 @ 以获得更干净的体验，再打开文件选择器
-                                inputListenerGuard.set(true)
-                                try {
-                                    // 找到并删除刚插入的 @（用最新 text 重新定位）
-                                    val currentText = inputArea.text
-                                    val atIdx = currentText.lastIndexOf('@')
-                                    if (atIdx >= 0) {
-                                        inputArea.document.remove(atIdx, 1)
-                                    }
-                                } catch (_: Exception) {
-                                } finally {
-                                    inputListenerGuard.set(false)
-                                }
-                                showFilePicker()
-                            }
+                            SwingUtilities.invokeLater { showFileRefPopup() }
                         }
                     }
                 }
@@ -1217,6 +1142,10 @@ class ChatToolWindow(private val project: Project) {
     private var slashCommandFilter: ((String) -> Unit)? = null
     private var slashCommandMoveSelection: ((Int) -> Unit)? = null
     private var slashCommandDoSelect: (() -> Unit)? = null
+
+    private var fileRefFilter: ((String) -> Unit)? = null
+    private var fileRefMoveSelection: ((Int) -> Unit)? = null
+    private var fileRefDoSelect: (() -> Unit)? = null
 
     private fun showSlashCommandMenu() {
         val popup = JPopupMenu()
@@ -1325,10 +1254,131 @@ class ChatToolWindow(private val project: Project) {
         slashCommandPopup = popup
     }
 
+    /**
+     * 显示 @ 文件引用弹出菜单。
+     *
+     * 支持文件和目录两种引用：
+     * - 文件：读取内容作为代码引用
+     * - 目录（以 / 结尾）：生成目录列表，不读取文件内容
+     */
+    private fun showFileRefPopup() {
+        if (projectFilesCache.isEmpty()) projectFilesCache = collectProjectFiles()
+        val popup = JPopupMenu()
+        var selectedIndex = 0
+
+        fun closePopup() { popup.isVisible = false; fileRefFilter = null; fileRefMoveSelection = null; fileRefDoSelect = null }
+
+        fun doSelect() {
+            val items = popup.components.filterIsInstance<JMenuItem>()
+            if (selectedIndex !in items.indices) return
+            val rawPath = items[selectedIndex].text.removeSuffix("/")
+            val isDir = items[selectedIndex].text.endsWith("/")
+            closePopup()
+            // 删除输入框中的 @text
+            inputListenerGuard.set(true)
+            try {
+                val text = inputArea.text
+                val atIdx = text.indexOfLast { it == '@' }
+                if (atIdx >= 0) {
+                    val endIdx = (atIdx + 1..text.length).firstOrNull { idx ->
+                        idx >= text.length || text[idx].isWhitespace()
+                    } ?: text.length
+                    inputArea.document.remove(atIdx, endIdx - atIdx)
+                }
+            } finally { inputListenerGuard.set(false) }
+            // 添加引用芯片
+            val basePath = project.basePath ?: return
+            if (isDir) {
+                // 目录：生成文件列表
+                val dir = File(basePath, rawPath)
+                if (dir.isDirectory) {
+                    val listing = dir.listFiles()?.sorted()?.joinToString("\n") { f ->
+                        "${if (f.isDirectory) "/" else "  "}${f.name}"
+                    } ?: "(空目录)"
+                    addRefChip("$rawPath/", rawPath, listing)
+                }
+            } else {
+                // 文件：读取内容
+                val file = File(basePath, rawPath)
+                if (file.isFile && file.length() < 500_000) {
+                    try {
+                        val content = file.readText()
+                        addRefChip(rawPath, rawPath, content)
+                    } catch (_: Exception) {}
+                }
+            }
+        }
+
+        fun rebuildItems(filter: String) {
+            val keep = popup.components.takeWhile { it !is JMenuItem }.size
+            for (i in popup.componentCount - 1 downTo keep) popup.remove(i)
+            val q = filter.removePrefix("@").lowercase()
+            // 文件和目录混合：目录加上 / 后缀
+            val fileMatches = projectFilesCache.filter { it.lowercase().contains(q) }
+            // 从文件路径中提取匹配的目录
+            val dirMatches = projectFilesCache
+                .flatMap { f ->
+                    val parts = f.split('/')
+                    (1..parts.size).map { parts.take(it).joinToString("/") + "/" }
+                }
+                .distinct()
+                .filter { it.lowercase().contains(q) && !projectFilesCache.contains(it.removeSuffix("/")) }
+            val allMatches = (dirMatches + fileMatches).take(50)
+            selectedIndex = 0
+            for ((idx, entry) in allMatches.withIndex()) {
+                val item = JMenuItem(entry).apply {
+                    font = ChatTheme.metaFont; border = JBUI.Borders.empty(4, 10, 4, 10)
+                    preferredSize = Dimension(inputPanel.width, 28)
+                    minimumSize = Dimension(inputPanel.width, 28)
+                    maximumSize = Dimension(inputPanel.width, 28)
+                    if (idx == 0) background = JBColor(0xE0E8F0, 0x3A4048)
+                }
+                item.addActionListener { doSelect() }
+                popup.add(item)
+            }
+        }
+        rebuildItems(inputArea.text.substringAfterLast('@', ""))
+
+        fun moveSelection(delta: Int) {
+            val items = popup.components.filterIsInstance<JMenuItem>()
+            if (items.isEmpty()) return
+            selectedIndex = (selectedIndex + delta).coerceIn(0, items.lastIndex)
+            items.forEachIndexed { i, it -> it.background = if (i == selectedIndex) JBColor(0xE0E8F0, 0x3A4048) else null }
+        }
+
+        fileRefFilter = { text ->
+            if (text.startsWith("@")) {
+                rebuildItems(text)
+                val h = (popup.components.filterIsInstance<JMenuItem>().size.coerceAtLeast(1) * 28).coerceAtMost(280)
+                popup.preferredSize = Dimension(inputPanel.width, h)
+                popup.show(inputPanel, 0, -h)
+            } else {
+                closePopup()
+            }
+        }
+        fileRefMoveSelection = { delta -> moveSelection(delta) }
+        fileRefDoSelect = { doSelect() }
+
+        popup.addKeyListener(object : KeyAdapter() {
+            override fun keyPressed(e: KeyEvent) {
+                if (e.keyCode == KeyEvent.VK_ENTER) { e.consume(); doSelect() }
+                if (e.keyCode == KeyEvent.VK_ESCAPE) closePopup()
+            }
+        })
+
+        val popupHeight = (popup.components.filterIsInstance<JMenuItem>().size.coerceAtLeast(1) * 28).coerceAtMost(280)
+        popup.isFocusable = false
+        popup.pack()
+        popup.preferredSize = Dimension(inputPanel.width, popupHeight)
+        popup.show(inputPanel, 0, -popupHeight)
+        fileRefPopup = popup
+    }
+
     private fun sendMessage() {
         val textContent = inputArea.text.trim()
         val refContent = buildRefContent()
-        if (textContent.isEmpty() && refContent.isEmpty()) {
+        val images = pastedImages.toList()  // 快照，避免异步清空后丢失
+        if (textContent.isEmpty() && refContent.isEmpty() && images.isEmpty()) {
             showWarning(AiAssistantBundle.message("chat.error.empty"))
             return
         }
@@ -1350,8 +1400,9 @@ class ChatToolWindow(private val project: Project) {
                 hideError()
                 inputArea.text = ""
                 refChips.clear()
+                pastedImages.clear()
                 rebuildChips()
-                viewModel.sendMessage(apiKey, fullContent)
+                viewModel.sendMessage(apiKey, fullContent, images.ifEmpty { null })
             }
         }
     }
@@ -1424,7 +1475,7 @@ class ChatToolWindow(private val project: Project) {
     }
 
     private fun insertFileReference() {
-        showFilePicker()
+        showFileRefPopup()
     }
 
     private fun autoInsertSelectedCode() {
@@ -1464,16 +1515,9 @@ class ChatToolWindow(private val project: Project) {
             val imageBytes = baos.toByteArray()
             val base64 = Base64.getEncoder().encodeToString(imageBytes)
 
-            // 保存到项目目录方便后续查找
-            try {
-                val imagesDir = File(project.basePath, ".code-assistant/images")
-                imagesDir.mkdirs()
-                val imageFile = File(imagesDir, "pasted_${System.currentTimeMillis()}.png")
-                imageFile.writeBytes(imageBytes)
-            } catch (_: Exception) { /* 保存失败不影响粘贴 */ }
-
-            val markdown = "![image](data:image/png;base64,$base64)\n"
-            insertAtCursor(markdown)
+            // 存储为 Claude 原生 image 块（而非 Markdown data URL）
+            pastedImages.add(ImageData("image/png", base64))
+            rebuildChips()
             return true
         } catch (_: Exception) {
             return false

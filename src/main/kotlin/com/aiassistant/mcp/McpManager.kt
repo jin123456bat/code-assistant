@@ -1,6 +1,5 @@
 package com.aiassistant.mcp
 
-import com.aiassistant.AppSettingsService
 import com.aiassistant.agent.AgentTool
 import com.intellij.openapi.project.Project
 
@@ -20,22 +19,23 @@ class McpManager(private val project: Project) {
     }
 
     /**
-     * 加载并连接所有 MCP 服务器
+     * 加载并连接所有 MCP 服务器。
+     * 优先从 Claude 的 ~/.claude.json 读取配置，fallback 到项目 .mcp.json。
      */
     fun loadAndConnect(): List<AgentTool> {
         val allTools = mutableListOf<AgentTool>()
 
-        // 1. 从设置页面加载全局配置
-        val globalConfigs = AppSettingsService.getInstance().getMcpConfigs()
-        for (config in globalConfigs) {
+        // 1. Claude 全局配置 ~/.claude.json
+        val claudeConfigs = McpServerConfig.fromClaudeConfig()
+        for (config in claudeConfigs) {
             if (!config.enabled) continue
             configs[config.name] = config
             val tools = connectAndDiscover(config)
             allTools.addAll(tools)
         }
 
-        // 2. 从项目配置文件加载
-        val projectConfigs = project.basePath?.let { McpServerConfig.fromProjectFile(it) } ?: emptyList()
+        // 2. 项目级 .mcp.json（Claude Code 格式）
+        val projectConfigs = project.basePath?.let { McpServerConfig.fromProjectMcpJson(it) } ?: emptyList()
         for (config in projectConfigs) {
             if (!config.enabled) continue
             if (clients.containsKey(config.name)) continue

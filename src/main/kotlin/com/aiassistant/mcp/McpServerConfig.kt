@@ -16,15 +16,28 @@ data class McpServerConfig(
 ) {
     companion object {
         /**
-         * 从项目 .code-assistant/mcp.json 解析配置
+         * 从 Claude 的 ~/.claude.json 读取 MCP 配置。
+         * Claude Code 格式：{ "mcpServers": { "name": { "type": "stdio", "command": "...", "args": [...] } } }
          */
-        fun fromProjectFile(projectBasePath: String): List<McpServerConfig> {
-            val configFile = java.io.File(projectBasePath, ".code-assistant/mcp.json")
+        fun fromClaudeConfig(): List<McpServerConfig> {
+            val home = System.getProperty("user.home") ?: return emptyList()
+            val configFile = java.io.File(home, ".claude.json")
             if (!configFile.exists()) return emptyList()
-
             return try {
-                val json = configFile.readText()
-                parseConfigs(json)
+                parseConfigs(configFile.readText())
+            } catch (_: Exception) {
+                emptyList()
+            }
+        }
+
+        /**
+         * 从项目 .mcp.json 读取 MCP 配置（Claude Code 项目级格式）。
+         */
+        fun fromProjectMcpJson(projectBasePath: String): List<McpServerConfig> {
+            val configFile = java.io.File(projectBasePath, ".mcp.json")
+            if (!configFile.exists()) return emptyList()
+            return try {
+                parseConfigs(configFile.readText())
             } catch (_: Exception) {
                 emptyList()
             }
@@ -54,7 +67,12 @@ data class McpServerConfig(
         private fun parseServerBody(name: String, body: String): McpServerConfig {
             val command = extractJsonValue(body, "command")
             val url = extractJsonValue(body, "url")
-            val transport = if (url.isNotBlank()) "http" else "stdio"
+            val type = extractJsonValue(body, "type")  // Claude 格式: "stdio" | "http"
+            val transport = when {
+                type.equals("http", ignoreCase = true) -> "http"
+                url.isNotBlank() -> "http"  // fallback: 有 url 就是 http
+                else -> "stdio"
+            }
 
             // 解析 args 数组
             val args = mutableListOf<String>()

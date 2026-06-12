@@ -16,7 +16,6 @@ class AppSettingsService {
     companion object {
         private const val SERVICE_NAME = "AI_Coding_Assistant"
         private const val PROMPT_KEY = "$SERVICE_NAME.PROMPT"
-        private const val MCP_CONFIG_KEY = "$SERVICE_NAME.MCP_CONFIG"
         private const val WHITELIST_KEY = "$SERVICE_NAME.COMMAND_WHITELIST"
         private const val MODEL_KEY = "$SERVICE_NAME.MODEL"
 
@@ -150,23 +149,6 @@ feat(新功能) | fix(修复) | chore(杂项) | docs(文档) | style(格式) | r
         } else {
             com.intellij.ide.util.PropertiesComponent.getInstance().setValue(PROMPT_KEY, prompt)
         }
-    }
-
-    fun getMcpConfigJson(): String? {
-        return com.intellij.ide.util.PropertiesComponent.getInstance().getValue(MCP_CONFIG_KEY)
-    }
-
-    fun setMcpConfigJson(json: String?) {
-        if (json.isNullOrBlank()) {
-            com.intellij.ide.util.PropertiesComponent.getInstance().unsetValue(MCP_CONFIG_KEY)
-        } else {
-            com.intellij.ide.util.PropertiesComponent.getInstance().setValue(MCP_CONFIG_KEY, json)
-        }
-    }
-
-    fun getMcpConfigs(): List<com.aiassistant.mcp.McpServerConfig> {
-        val json = getMcpConfigJson() ?: return emptyList()
-        return com.aiassistant.mcp.McpServerConfig.parseConfigs(json)
     }
 
     // ---- Tool Whitelist ----

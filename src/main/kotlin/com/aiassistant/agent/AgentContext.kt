@@ -1,4 +1,4 @@
-package com.aiassistant.agent_v3
+package com.aiassistant.agent
 
 import com.aiassistant.agent.AgentTool
 import com.aiassistant.agent.ToolResult
@@ -47,7 +47,11 @@ data class AgentMessage(
     val toolCallId: String? = null,
     val toolName: String? = null,
     val toolCalls: List<ToolCallRequest>? = null,
-    val approvalPending: Boolean = false  // 待审批状态
+    val approvalPending: Boolean = false,  // 待审批状态
+    val images: List<ImageData>? = null    // 用户粘贴的图片（Claude 原生 image 块格式）
 )
 
 data class ToolCallRequest(val id: String, val name: String, val arguments: String)
+
+/** 图片数据：mediaType 如 "image/png"，data 为 base64 字符串 */
+data class ImageData(val mediaType: String, val data: String)

@@ -1,4 +1,4 @@
-package com.aiassistant.agent_v3
+package com.aiassistant.agent
 
 import com.aiassistant.agent.AgentTool
 import com.aiassistant.agent.ToolParameter

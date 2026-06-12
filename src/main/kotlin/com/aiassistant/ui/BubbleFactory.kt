@@ -1,7 +1,7 @@
 package com.aiassistant.ui
 
 import com.aiassistant.MarkdownRenderer
-import com.aiassistant.agent_v3.AgentMessage
+import com.aiassistant.agent.AgentMessage
 import com.intellij.openapi.editor.colors.EditorColorsManager
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.util.ui.JBUI

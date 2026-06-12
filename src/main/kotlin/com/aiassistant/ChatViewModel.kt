@@ -1,8 +1,9 @@
 package com.aiassistant
 
-import com.aiassistant.agent_v3.AgentContext
-import com.aiassistant.agent_v3.AgentLoop
-import com.aiassistant.agent_v3.AgentMessage
+import com.aiassistant.agent.AgentContext
+import com.aiassistant.agent.AgentLoop
+import com.aiassistant.agent.AgentMessage
+import com.aiassistant.agent.ImageData
 import com.aiassistant.mcp.McpManager
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicBoolean
@@ -163,18 +164,18 @@ class ChatViewModel(
         }
     }
 
-    fun sendMessage(apiKey: String, content: String) {
+    fun sendMessage(apiKey: String, content: String, images: List<ImageData>? = null) {
         if (content.isBlank() || isStreaming || isRateLimited) return
         streamingContent = ""
         streamingThinking = ""
-        messages.add(AgentMessage("user", content))
+        messages.add(AgentMessage("user", content, images = images))
         runOnEdt { onMessagesChanged?.invoke() }
         isStreaming = true
         runOnEdt { onStreamingStateChanged?.invoke(true) }
 
         val a = agent
         if (a != null) {
-            a.run(content, apiKey) { finalText, thinking ->
+            a.run(content, apiKey, images) { finalText, thinking ->
                 // thinking 与 assistant 消息在同一个 EDT 块中原子性地落地，
                 // 同时清空 streamingThinking/streamingContent，避免分两次 rebuild
                 // 导致 streamingContent 作为临时气泡重复渲染。

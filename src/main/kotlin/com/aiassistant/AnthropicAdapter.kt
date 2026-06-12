@@ -1,5 +1,6 @@
 package com.aiassistant
 
+import com.aiassistant.agent.ImageData
 import com.aiassistant.shared.JsonUtils
 
 /**
@@ -48,8 +49,17 @@ class AnthropicAdapter(
                     """[{"type":"text","text":"$text"}]"""
                 }
                 else -> {
-                    val text = JsonUtils.escapeJson(msg.content)
-                    """[{"type":"text","text":"$text"}]"""
+                    // 用户消息：如有图片则生成 Claude 原生 image 块
+                    val blocks = mutableListOf<String>()
+                    msg.images?.forEach { img ->
+                        val imgData = JsonUtils.escapeJson(img.data)
+                        blocks.add("""{"type":"image","source":{"type":"base64","media_type":"${img.mediaType}","data":"$imgData"}}""")
+                    }
+                    if (msg.content.isNotBlank()) {
+                        val text = JsonUtils.escapeJson(msg.content)
+                        blocks.add("""{"type":"text","text":"$text"}""")
+                    }
+                    "[${blocks.joinToString(",")}]"
                 }
             }
             """{"role":"${msg.role}","content":$contentBlocks}"""
@@ -146,7 +156,8 @@ data class AnthropicMessage(
     val toolCallId: String? = null,    // tool_result 的 tool_use_id
     val toolUseId: String? = null,     // tool_use 的 id
     val toolName: String? = null,      // tool_use 的 name
-    val toolInput: String = ""         // tool_use 的 input JSON
+    val toolInput: String = "",        // tool_use 的 input JSON
+    val images: List<ImageData>? = null // 用户消息附带的图片（Claude 原生 image 块）
 )
 
 /** SSE 事件解析结果 */

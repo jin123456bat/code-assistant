@@ -1,4 +1,4 @@
-package com.aiassistant.agent_v3
+package com.aiassistant.agent
 
 import com.aiassistant.*
 import com.intellij.openapi.application.ApplicationManager
@@ -65,7 +65,7 @@ class AgentLoop(
         ctx.systemPrompt = buildSystemPrompt(skillTools)
     }
 
-    fun run(userMessage: String, apiKey: String, callback: (String, String) -> Unit) {
+    fun run(userMessage: String, apiKey: String, images: List<ImageData>? = null, callback: (String, String) -> Unit) {
         cancelled = false
         onStateChange?.invoke(true)
         val history = mutableListOf<AnthropicMessage>()
@@ -77,7 +77,7 @@ class AgentLoop(
                 val toolNames = ctx.toolRegistry.getAll().joinToString(", ") { it.name }
                 edt { onMessage?.invoke(AgentMessage("system", "$toolCount 个工具已就绪: $toolNames")) }
 
-                history.add(AnthropicMessage("user", userMessage))
+                history.add(AnthropicMessage("user", userMessage, images = images))
 
                 var loopCount = 0
                 var consecutiveFailures = 0
@@ -371,6 +371,7 @@ class AgentLoop(
                 "### ${st.name}\n${st.description}\n\n${st.prompt}"
             }
         } else ""
+        val claudeMdContent = loadClaudeMdFiles()
         return """
 You are an AI coding assistant in PhpStorm. Use tools to work with the project.
 
@@ -385,6 +386,7 @@ $toolList
 简单任务（读取文件、回答单个问题、一行修改）不要创建计划。
 创建计划后，每个步骤开始前调用 **update_plan_step**（status="in_progress"），完成后调用（status="done" + result 摘要），失败时调用（status="failed" + result 原因）。
 $skillsSection
+$claudeMdContent
 ## Rules
 - Use tools to get real data; never guess
 - Read before edit; report results in Chinese
@@ -392,6 +394,40 @@ $skillsSection
 - For search: use search_code (not execute_command grep)
 - For commands: use execute_command
         """.trimIndent()
+    }
+
+    /** 按照 Claude Code 层级自动加载 CLAUDE.md 文件 */
+    private fun loadClaudeMdFiles(): String {
+        val parts = mutableListOf<String>()
+        val basePath = project.basePath ?: return ""
+        val home = System.getProperty("user.home") ?: return ""
+
+        // 1. 用户全局 ~/.claude/CLAUDE.md
+        val userGlobal = java.io.File(home, ".claude/CLAUDE.md")
+        if (userGlobal.exists()) {
+            try { parts.add(userGlobal.readText()) } catch (_: Exception) {}
+        }
+
+        // 2. 项目根 CLAUDE.md
+        val projectRoot = java.io.File(basePath, "CLAUDE.md")
+        if (projectRoot.exists()) {
+            try { parts.add(projectRoot.readText().removePrefix("<!--").also { /* strip HTML comments */ }) } catch (_: Exception) {}
+        }
+
+        // 3. .claude/CLAUDE.md
+        val dotClaude = java.io.File(basePath, ".claude/CLAUDE.md")
+        if (dotClaude.exists()) {
+            try { parts.add(dotClaude.readText()) } catch (_: Exception) {}
+        }
+
+        // 4. CLAUDE.local.md (个人覆盖，gitignored)
+        val localMd = java.io.File(basePath, "CLAUDE.local.md")
+        if (localMd.exists()) {
+            try { parts.add(localMd.readText()) } catch (_: Exception) {}
+        }
+
+        if (parts.isEmpty()) return ""
+        return "\n## CLAUDE.md\n\n${parts.joinToString("\n\n---\n\n")}"
     }
 
     /** 将 create_plan 元工具拼接到 tools JSON 末尾（ToolRegistryV3 的 ToolParameter 无法表达嵌套 items 子结构） */

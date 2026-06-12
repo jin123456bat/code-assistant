@@ -1,6 +1,6 @@
 package com.aiassistant
 
-import com.aiassistant.agent_v3.AgentMessage
+import com.aiassistant.agent.AgentMessage
 import org.junit.Assert.*
 import org.junit.Test
 

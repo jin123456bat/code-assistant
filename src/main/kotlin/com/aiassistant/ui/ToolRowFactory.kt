@@ -1,6 +1,6 @@
 package com.aiassistant.ui
 
-import com.aiassistant.agent_v3.AgentMessage
+import com.aiassistant.agent.AgentMessage
 import com.intellij.openapi.editor.colors.EditorColorsManager
 import com.intellij.ui.JBColor
 import com.intellij.util.ui.JBUI
@@ -167,7 +167,7 @@ class ToolRowFactory(private val availableWidth: () -> Int) {
         val toolName = message.toolName ?: "tool"
         val rawContent = message.content
 
-        // 检测失败前缀（中文全角/半角冒号 + 英文 Error:）
+        // 检测失败前缀
         val contentTrimmed = rawContent.trimStart()
         val isError = contentTrimmed.startsWith("错误:") ||
                 contentTrimmed.startsWith("错误：") ||
@@ -177,13 +177,12 @@ class ToolRowFactory(private val availableWidth: () -> Int) {
             return errorCardRow(toolName, contentTrimmed)
         }
 
-        // 拆分 args 和 result（由 ChatViewModel 用 \n---\n 拼接）
+        // 拆分 args 和 result
         val sep = "\n---\n"
         val hasResult = rawContent.contains(sep)
         val argsPart = if (hasResult) rawContent.substringBefore(sep) else rawContent
         val resultPart = if (hasResult) rawContent.substringAfter(sep) else ""
 
-        // args 预览（截断 40 字符）
         val argsPreview = argsPart.replace('\n', ' ').replace('\r', ' ').take(40)
             .let { if (argsPart.length > 40) "$it…" else it }
         val resultText = resultPart.let {
@@ -194,13 +193,10 @@ class ToolRowFactory(private val availableWidth: () -> Int) {
         val outerRow = outerRow()
         val collapsed = AtomicBoolean(true)
         val bubble = leftBarPanel()
-        // 预创建审批按钮栏（审批时复用，避免重复创建）
-        val approvalButtonBar: JPanel? = approvalActions?.let { createApprovalButtonBar(it) }
 
         fun rebuild(isCollapsed: Boolean) {
             bubble.removeAll()
 
-            // 左侧信息：箭头/spinner + name + args
             val infoPanel = JPanel().apply { layout = BoxLayout(this, BoxLayout.X_AXIS); isOpaque = false }
             val running = !hasResult && approvalActions == null
             if (running) {
@@ -215,12 +211,8 @@ class ToolRowFactory(private val availableWidth: () -> Int) {
                 infoPanel.add(argsPreviewLabel(argsPreview))
             }
 
-            // 右侧：审批按钮（优先）或状态文本
             val rightPanel = JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0)).apply { isOpaque = false }
-            if (approvalButtonBar != null) {
-                // 审批模式：将按钮栏放入 headerRow 的 EAST 位置（内联，不浮动）
-                rightPanel.add(approvalButtonBar)
-            } else if (isCollapsed) {
+            if (approvalActions == null && isCollapsed) {
                 val status = if (hasResult) "✓ $lineCount 行" else "执行中..."
                 val statusColor = if (hasResult) ChatTheme.textMuted else ChatTheme.toolFg
                 rightPanel.add(statusLabel(status).apply { foreground = statusColor })
@@ -234,7 +226,7 @@ class ToolRowFactory(private val availableWidth: () -> Int) {
             headerRow.addMouseListener(object : MouseAdapter() {
                 override fun mouseClicked(e: MouseEvent) {
                     if (approvalActions != null) return
-                    if (running) return  // 执行中不响应点击
+                    if (running) return
                     collapsed.set(!collapsed.get())
                     rebuild(collapsed.get())
                     bubble.revalidate()
@@ -243,20 +235,13 @@ class ToolRowFactory(private val availableWidth: () -> Int) {
             })
             bubble.add(headerRow, BorderLayout.NORTH)
 
-            // 审批时不添加结果内容，按钮已在 headerRow 中
-            if (approvalActions != null) {
-                return
-            }
+            if (approvalActions != null) return
 
             if (!isCollapsed && hasResult) {
                 val textArea = JTextArea(resultText).apply {
-                    isEditable = false
-                    lineWrap = true
-                    wrapStyleWord = true
-                    font = toolCodeFont
-                    background = ChatTheme.codeBg
-                    foreground = ChatTheme.textSecondary
-                    border = JBUI.Borders.empty(4, 6)
+                    isEditable = false; lineWrap = true; wrapStyleWord = true
+                    font = toolCodeFont; background = ChatTheme.codeBg
+                    foreground = ChatTheme.textSecondary; border = JBUI.Borders.empty(4, 6)
                 }
                 val codePanel = JPanel(BorderLayout()).apply {
                     background = ChatTheme.codeBg
@@ -274,43 +259,16 @@ class ToolRowFactory(private val availableWidth: () -> Int) {
         outerRow.add(bubble)
         outerRow.add(Box.createHorizontalGlue())
 
-        // 审批按钮悬浮层：outerRow 保持在标准流中（高度正确），
-        // 仅将按钮栏放在 PALETTE_LAYER 上，视觉悬浮但布局不干扰。
-        if (approvalButtonBar != null) {
-            val prefW = outerRow.preferredSize.width
-            val prefH = outerRow.preferredSize.height
-            val bw = approvalButtonBar.preferredSize.width
-            val bh = approvalButtonBar.preferredSize.height
-
-            val layered = JLayeredPane()
-            layered.add(outerRow, JLayeredPane.DEFAULT_LAYER)
-            layered.add(approvalButtonBar, JLayeredPane.PALETTE_LAYER)
-            // JLayeredPane 自身尺寸：高度 hug content，宽度允许拉伸
-            layered.preferredSize = Dimension(prefW, prefH)
-            layered.maximumSize = Dimension(Int.MAX_VALUE, prefH)
-
-            // 初始定位：outerRow 填满，按钮栏在右侧垂直居中
-            outerRow.setBounds(0, 0, prefW, prefH)
-            approvalButtonBar.setBounds(prefW - bw - 6, (prefH - bh) / 2, bw, bh)
-
-            // 窗口缩放时同步更新 outerRow 宽度和按钮位置（右侧垂直居中）
-            layered.addComponentListener(object : java.awt.event.ComponentAdapter() {
-                override fun componentResized(e: java.awt.event.ComponentEvent?) {
-                    outerRow.setBounds(0, 0, layered.width, layered.height)
-                    val pbw = approvalButtonBar.preferredSize.width
-                    val pbh = approvalButtonBar.preferredSize.height
-                    val centerY = (layered.height - pbh) / 2
-                    approvalButtonBar.setBounds(layered.width - pbw - 6, centerY, pbw, pbh)
-                }
-            })
-
-            // 用 JPanel 包裹 JLayeredPane（JLayeredPane 不继承 JPanel，无法直接返回）
-            return JPanel(BorderLayout()).apply {
+        // 审批模式：在 tool 行下方附加 ask_user 风格的选择卡
+        if (approvalActions != null) {
+            val container = JPanel().apply {
+                layout = BoxLayout(this, BoxLayout.Y_AXIS)
                 isOpaque = false
-                add(layered, BorderLayout.CENTER)
-                preferredSize = Dimension(prefW, prefH)
-                maximumSize = Dimension(Int.MAX_VALUE, prefH)
+                alignmentX = Component.LEFT_ALIGNMENT
             }
+            container.add(outerRow)
+            container.add(approvalCard(toolName, approvalActions))
+            return container
         }
 
         return outerRow
@@ -489,6 +447,7 @@ class ToolRowFactory(private val availableWidth: () -> Int) {
      * - 右侧圆角约 7px
      */
     private fun leftBarPanel(): JPanel = JPanel(BorderLayout()).apply {
+        isOpaque = false  // 使用半透明背景，必须关闭 opaque 避免覆盖上层组件
         background = ChatTheme.toolBg
         border = LeftBarBorder(ChatTheme.toolBar, 3, 7)
     }
@@ -535,68 +494,137 @@ class ToolRowFactory(private val availableWidth: () -> Int) {
     // ---- 审批浮层 ----
 
     /**
-     * 创建审批按钮栏（不含浮层逻辑），用于预计算宽度和复用按钮构建。
-     * 按钮采用圆角药丸样式：浅色背景 + 彩色文字 + 悬停加深背景。
+     * 审批选择卡 — ask_user SelectionCard 同款样式。
+     * tool 行下方显示三个选项：允许本次 / 始终允许 / 拒绝，点击即提交。
      */
-    private fun createApprovalButtonBar(approvalActions: ApprovalActions): JPanel {
-        val buttonBar = JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0)).apply {
+    private fun approvalCard(
+        toolName: String,
+        approvalActions: ApprovalActions
+    ): JPanel {
+        // 圆角卡片，toolBg 背景
+        val card = object : JPanel(BorderLayout()) {
+            override fun paintComponent(g: Graphics) {
+                val g2 = g.create() as Graphics2D
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+                g2.color = ChatTheme.toolBg
+                g2.fillRoundRect(0, 0, width, height, ChatTheme.RADIUS, ChatTheme.RADIUS)
+                g2.dispose()
+                super.paintComponent(g)
+            }
+        }.apply {
             isOpaque = false
+            border = BorderFactory.createCompoundBorder(
+                RoundedBorder(ChatTheme.toolBar),
+                JBUI.Borders.empty(0, 0, 6, 0)
+            )
+            maximumSize = Dimension(Int.MAX_VALUE, Int.MAX_VALUE)
+            alignmentX = Component.LEFT_ALIGNMENT
         }
 
-        // 按钮背景色（半透明，明暗双值）
-        val btnAllowBg = JBColor(Color(53, 116, 240, 18), Color(92, 143, 214, 28))
-        val btnAllowHoverBg = JBColor(Color(53, 116, 240, 35), Color(92, 143, 214, 50))
-        val btnRejectBg = JBColor(Color(181, 80, 62, 18), Color(224, 138, 114, 28))
-        val btnRejectHoverBg = JBColor(Color(181, 80, 62, 35), Color(224, 138, 114, 50))
+        // 头部：审批 · toolName
+        val header = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.X_AXIS)
+            isOpaque = false
+            border = JBUI.Borders.empty(8, 10, 6, 10)
+            add(JLabel("审批 · $toolName").apply {
+                font = toolFontBold
+                foreground = ChatTheme.toolFg
+            })
+            add(Box.createHorizontalGlue())
+        }
+        card.add(header, BorderLayout.NORTH)
 
-        data class ButtonStyle(
-            val text: String,
-            val fg: Color,
-            val bg: Color,
-            val hoverBg: Color,
-            val action: () -> Unit
+        // 选项列表
+        val optionList = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            isOpaque = false
+            border = JBUI.Borders.empty(0, 6, 2, 6)
+        }
+
+        var confirmed = false
+
+        data class ApprovalOption(val text: String, val action: () -> Unit)
+        val options = listOf(
+            ApprovalOption("❯  允许本次", approvalActions.onAllowOnce),
+            ApprovalOption("❯  始终允许", approvalActions.onAlwaysAllow),
+            ApprovalOption("❯  拒绝", approvalActions.onReject)
         )
 
-        val buttons = listOf(
-            ButtonStyle("允许", ChatTheme.toolFg, btnAllowBg, btnAllowHoverBg, approvalActions.onAllowOnce),
-            ButtonStyle("始终允许", ChatTheme.doneCheck, btnAllowBg, btnAllowHoverBg, approvalActions.onAlwaysAllow),
-            ButtonStyle("拒绝", ChatTheme.error, btnRejectBg, btnRejectHoverBg, approvalActions.onReject)
-        )
+        options.forEachIndexed { idx, opt ->
+            val isDefault = idx == 0
+            var hovered = isDefault
 
-        buttons.forEach { style ->
-            val lbl = object : JLabel(style.text) {
-                override fun updateUI() {
-                    super.updateUI()
-                    isOpaque = false
-                    background = null
+            val row = object : JPanel(BorderLayout()) {
+                override fun paintComponent(g: Graphics) {
+                    if (hovered && !confirmed) {
+                        val g2 = g.create() as Graphics2D
+                        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+                        g2.color = ChatTheme.toolBg
+                        g2.fillRoundRect(0, 0, width, height, 8, 8)
+                        g2.dispose()
+                    }
+                    super.paintComponent(g)
                 }
             }.apply {
-                font = ChatTheme.metaFont
-                foreground = style.fg
+                isOpaque = false
+                border = JBUI.Borders.empty(4, 4, 4, 8)
                 cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
-                // 圆角药丸内边距
-                border = JBUI.Borders.empty(3, 10, 3, 10)
-                isOpaque = true
-                background = style.bg
-                addMouseListener(object : MouseAdapter() {
-                    override fun mouseClicked(e: MouseEvent?) { style.action() }
-                    override fun mouseEntered(e: MouseEvent?) {
-                        background = style.hoverBg
-                        foreground = ChatTheme.textPrimary
-                    }
-                    override fun mouseExited(e: MouseEvent?) {
-                        background = style.bg
-                        foreground = style.fg
-                    }
-                })
+                maximumSize = Dimension(Int.MAX_VALUE, Int.MAX_VALUE)
             }
-            buttonBar.add(lbl)
+
+            val lbl = JLabel(opt.text).apply {
+                font = ChatTheme.metaFont
+                foreground = if (isDefault) ChatTheme.textPrimary else ChatTheme.textSecondary
+            }
+            row.add(lbl, BorderLayout.CENTER)
+
+            row.addMouseListener(object : MouseAdapter() {
+                override fun mouseClicked(e: MouseEvent) {
+                    if (confirmed) return
+                    confirmed = true
+                    lbl.text = "✓  ${opt.text}"
+                    lbl.foreground = ChatTheme.doneCheck
+                    optionList.components.forEach { c ->
+                        c.isEnabled = false
+                        c.cursor = Cursor.getDefaultCursor()
+                    }
+                    card.repaint()
+                    opt.action()
+                }
+                override fun mouseEntered(e: MouseEvent) {
+                    if (!confirmed) { hovered = true; row.repaint() }
+                }
+                override fun mouseExited(e: MouseEvent) {
+                    if (!confirmed) { hovered = isDefault; row.repaint() }
+                }
+            })
+
+            optionList.add(row)
         }
 
-        return buttonBar
+        card.add(optionList, BorderLayout.CENTER)
+        return card
     }
 
-    // ---- 左栏边框实现 ----
+    // ---- 边框实现 ----
+
+    /** 圆角矩形边框（用于审批选项卡等卡片） */
+    private inner class RoundedBorder(private val color: Color) : AbstractBorder() {
+        override fun paintBorder(c: Component, g: Graphics, x: Int, y: Int, w: Int, h: Int) {
+            val g2 = g.create() as Graphics2D
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+            g2.color = color
+            g2.stroke = BasicStroke(1f)
+            g2.drawRoundRect(x, y, w - 1, h - 1, ChatTheme.RADIUS, ChatTheme.RADIUS)
+            g2.dispose()
+        }
+        override fun getBorderInsets(c: Component) = Insets(1, 1, 1, 1)
+        override fun getBorderInsets(c: Component, insets: Insets): Insets {
+            insets.set(1, 1, 1, 1)
+            return insets
+        }
+        override fun isBorderOpaque() = false
+    }
 
     /**
      * 左栏边框：

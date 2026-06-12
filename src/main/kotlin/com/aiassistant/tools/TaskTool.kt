@@ -4,7 +4,7 @@ import com.aiassistant.*
 import com.aiassistant.agent.AgentTool
 import com.aiassistant.agent.ToolParameter
 import com.aiassistant.agent.ToolResult
-import com.aiassistant.agent_v3.AgentLoop
+import com.aiassistant.agent.AgentLoop
 import com.intellij.openapi.project.Project
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicReference

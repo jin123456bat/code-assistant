@@ -1,6 +1,6 @@
 package com.aiassistant.ui
 
-import com.aiassistant.agent_v3.AgentContext
+import com.aiassistant.agent.AgentContext
 import com.intellij.ui.JBColor
 import com.intellij.util.ui.JBUI
 import java.awt.BorderLayout
