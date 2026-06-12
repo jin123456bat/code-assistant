@@ -18,7 +18,7 @@ import javax.swing.JComponent
 import javax.swing.JLabel
 import javax.swing.JLayeredPane
 import javax.swing.JPanel
-import javax.swing.JScrollPane
+import com.intellij.ui.components.JBScrollPane
 import javax.swing.ScrollPaneConstants
 import javax.swing.SwingConstants
 import javax.swing.SwingUtilities
@@ -210,7 +210,7 @@ class PlanBar : JPanel(BorderLayout()) {
     /**
      * 步骤列表（展开时），最高 168px，超出内部滚动。
      */
-    private fun buildStepList(plan: AgentContext.Plan): JScrollPane {
+    private fun buildStepList(plan: AgentContext.Plan): JBScrollPane {
         val listPanel = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
             isOpaque = false
@@ -221,7 +221,7 @@ class PlanBar : JPanel(BorderLayout()) {
             listPanel.add(buildStepRow(step))
         }
 
-        return JScrollPane(
+        return JBScrollPane(
             listPanel,
             ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
             ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER
