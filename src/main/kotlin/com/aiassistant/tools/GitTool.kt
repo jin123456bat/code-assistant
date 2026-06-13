@@ -55,7 +55,7 @@ private fun runGit(project: Project, vararg args: String): ToolResult {
             .start()
         val output = process.inputStream.bufferedReader().use { it.readText() }
         val finished = process.waitFor(10, TimeUnit.SECONDS); if (!finished) { process.destroyForcibly(); process.waitFor(2, TimeUnit.SECONDS) }
-        ToolResult.ok(output.ifBlank { "(无输出)" })
+        ToolResult.ok(if (output.length > 10000) output.take(10000) + "\n… (已截断)" else output.ifBlank { "(无输出)" })
     } catch (e: Exception) {
         ToolResult.err("Git 命令失败: ${e.message}")
     }

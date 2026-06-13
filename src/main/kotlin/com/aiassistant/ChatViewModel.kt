@@ -37,6 +37,8 @@ class ChatViewModel(
     @Volatile var activity: Activity = Activity.Idle
     @Volatile var currentPlan: AgentContext.Plan? = null
     @Volatile var currentModel: String = "deepseek-chat"
+    /** Agent 当前是否在思考中（由 onThinkingDelta 直接设置，避免字符串嗅探语言依赖） */
+    @Volatile var isThinking = false
     /** 每次 sendMessage/stopGeneration 递增，用于回调中校验是否已被新请求覆盖 */
     @Volatile private var generationId = 0L
 
@@ -116,6 +118,7 @@ class ChatViewModel(
             val currentGen = generationId
             runOnEdt {
                 if (generationId != currentGen) return@runOnEdt
+                isThinking = true
                 streamingThinking = text; onStreamingThinkingChanged?.invoke(text)
             }
         }
@@ -144,13 +147,28 @@ class ChatViewModel(
             }
         }
         a.onPlanUpdate = { plan -> runOnEdt { currentPlan = plan; onPlanUpdate?.invoke(plan); onMessagesChanged?.invoke() } }
-        a.onError = { msg -> runOnEdt { onError?.invoke(msg) } }
+        a.onError = { msg ->
+            runOnEdt {
+                // Rate Limit 检测：若错误消息包含 429 状态码，标记限流状态并在若干秒后自动恢复
+                if (msg.contains("429")) {
+                    isRateLimited = true
+                    onError?.invoke(msg)
+                    // 60 秒后用 javax.swing.Timer 在 EDT 上自动重置限流状态
+                    javax.swing.Timer(60_000) { isRateLimited = false }.apply {
+                        isRepeats = false
+                        start()
+                    }
+                } else {
+                    onError?.invoke(msg)
+                }
+            }
+        }
         a.onStateChange = { streaming ->
             runOnEdt {
                 isStreaming = streaming
                 // 运行开始→思考中；结束→空闲
                 if (streaming) { if (activity == Activity.Idle) activity = Activity.Thinking }
-                else { activity = Activity.Idle; currentToolName = null; streamingThinking = "" }
+                else { activity = Activity.Idle; currentToolName = null; streamingThinking = ""; isThinking = false }
                 onStreamingStateChanged?.invoke(streaming)
             }
         }
@@ -159,7 +177,8 @@ class ChatViewModel(
                 // 仅"思考中"语义更新状态；null（清空）不再直接清状态，避免 null 间隙闪烁。
                 // 不触发 onMessagesChanged，否则当前轮 streamingContent 还未清空时就 rebuild，
                 // 导致同一份 AI 回复先作为流式气泡渲染一次，又被 callback 的 messages 渲染一次（重复显示）。
-                if (text != null && text.contains("思考")) {
+                // 使用 isThinking 标记而非 text.contains("思考")，避免中文语言依赖。
+                if (text != null && isThinking) {
                     activity = Activity.Thinking
                 }
             }
@@ -235,6 +254,11 @@ class ChatViewModel(
         if (app != null) app.invokeLater(action) else action()
     }
 
+    /** 刷新 Agent 模型配置，响应 Settings 变更 */
+    fun refreshModel() {
+        agent?.refreshModel()
+    }
+
     fun stopGeneration() {
         generationId++  // 废弃所有 pending 回调
         agent?.stop()
@@ -252,6 +276,8 @@ class ChatViewModel(
         currentPlan = null
         isRateLimited = false
         pendingApprovals.clear()
+        activity = Activity.Idle
+        isThinking = false
         runOnEdt { onMessagesChanged?.invoke() }
     }
 }

@@ -22,20 +22,17 @@ class WriteFileTool : AgentTool {
         val content = params["content"]?.takeIf { it.isNotBlank() } ?: return ToolResult.err("content 不能为空")
         val basePath = project.basePath ?: return ToolResult.err("项目路径不可用")
 
-        // 支持绝对路径
-        val file = if (File(relativePath).isAbsolute) File(relativePath) else File(basePath, relativePath)
-        // 安全检查：不允许写入系统目录
-        val normalizedPath = file.canonicalPath
-        val normalizedBase = File(basePath).canonicalPath
-        if (!normalizedPath.startsWith(normalizedBase)) {
+        // 安全检查：使用 PathUtils 统一检查，防止路径穿越（含 separator 边界）
+        if (!com.aiassistant.shared.PathUtils.isInsideProject(relativePath, basePath)) {
             return ToolResult.err("安全限制：不能写入项目目录之外的文件")
         }
 
+        val file = if (File(relativePath).isAbsolute) File(relativePath) else File(basePath, relativePath)
         return try {
-            val targetFile = File(normalizedPath)
+            val targetFile = file.canonicalFile
             targetFile.parentFile?.mkdirs()
             // 原子写入：先写临时文件，成功后再 rename，避免写入中断导致原文件损坏
-            val tmpFile = File(normalizedPath + ".tmp")
+            val tmpFile = File(targetFile.path + ".tmp")
             tmpFile.writeText(content, Charsets.UTF_8)
             if (!tmpFile.renameTo(targetFile)) {
                 tmpFile.delete()

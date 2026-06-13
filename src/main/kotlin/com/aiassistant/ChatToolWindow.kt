@@ -126,6 +126,9 @@ class ChatToolWindow(private val project: Project) {
     /** 本窗口注册到 AskUserBridge 的 handler 引用，dispose 时据此安全解绑。 */
     private var askUserHandler: ((String, List<String>, Boolean, CountDownLatch, AtomicReference<String>) -> Unit)? = null
 
+    /** MCP 管理器，dispose 时断开所有 MCP 连接，防止进程泄漏。 */
+    private val mcpManager: McpManager = McpManager(project)
+
     /** 上次重算气泡时的 viewport 宽度，用于仅在宽度真正变化时重算（避免无谓重排）。 */
     private var lastViewportWidth = -1
 
@@ -156,6 +159,7 @@ class ChatToolWindow(private val project: Project) {
         }
         askUserHandler = null
         viewModel.stopGeneration()
+        mcpManager.disconnectAll()
         instances.remove(project, this)
     }
 
@@ -657,7 +661,6 @@ class ChatToolWindow(private val project: Project) {
 
         // MCP 延迟加载（需 COMPONENTS_LOADED 之后）
         ApplicationManager.getApplication().invokeLater {
-            val mcpManager = McpManager(project)
             val mcpTools = try { mcpManager.loadAndConnect() } catch (_: Exception) { emptyList() }
             viewModel.addMcpTools(mcpTools)
         }
@@ -1420,7 +1423,10 @@ class ChatToolWindow(private val project: Project) {
         if (conversationPanel.parent != null) {
             panel.remove(conversationPanel)
         }
+        // 移除旧的 welcomePanel（如果存在），防止多次创建叠加
+        welcomePanel?.let { panel.remove(it) }
         val welcome = createWelcomePanel()
+        welcomePanel = welcome
         panel.add(welcome, BorderLayout.CENTER)
         panel.revalidate()
         panel.repaint()

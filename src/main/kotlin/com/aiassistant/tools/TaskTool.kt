@@ -7,6 +7,7 @@ import com.aiassistant.agent.ToolResult
 import com.aiassistant.agent.AgentLoop
 import com.intellij.openapi.project.Project
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -42,7 +43,10 @@ class TaskTool : AgentTool {
                 latch.countDown()
             }
 
-            latch.await()
+            val finished = latch.await(5, TimeUnit.MINUTES)
+            if (!finished) {
+                return ToolResult.err("子 Agent 执行超时（超过 5 分钟），任务: $description")
+            }
             val result = resultRef.get() ?: ""
             return if (result.isBlank()) {
                 ToolResult.err("子 Agent 未返回结果")

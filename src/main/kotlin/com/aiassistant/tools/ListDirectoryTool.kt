@@ -3,6 +3,7 @@ package com.aiassistant.tools
 import com.aiassistant.agent.AgentTool
 import com.aiassistant.agent.ToolParameter
 import com.aiassistant.agent.ToolResult
+import com.aiassistant.shared.PathUtils
 import com.intellij.openapi.project.Project
 import java.io.File
 
@@ -28,6 +29,11 @@ class ListDirectoryTool : AgentTool {
             else -> File(basePath, relativePath)
         }
 
+        // 路径穿越防护：确保目标目录在项目目录内
+        if (!PathUtils.isInsideProject(targetDir.absolutePath, basePath)) {
+            return ToolResult.err("路径穿越检测：拒绝访问项目目录外的路径 ${targetDir.absolutePath}")
+        }
+
         if (!targetDir.exists()) return ToolResult.err("目录不存在: ${targetDir.absolutePath}")
         if (!targetDir.isDirectory) return ToolResult.err("不是目录: $relativePath")
 
@@ -40,7 +46,7 @@ class ListDirectoryTool : AgentTool {
                 append("$relativePath/\n")
                 appendTree(targetDir, "", 1, maxDepth, ignoreDirs)
             }
-            ToolResult.ok(result)
+            ToolResult.ok(if (result.length > 10000) result.take(10000) + "\n… (已截断)" else result)
         } catch (e: Exception) {
             ToolResult.err("列出目录失败: ${e.message}")
         }

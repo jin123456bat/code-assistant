@@ -140,8 +140,13 @@ feat(新功能) | fix(修复) | chore(杂项) | docs(文档) | style(格式) | r
         return com.intellij.ide.util.PropertiesComponent.getInstance().getValue(PROMPT_KEY)
     }
 
-    /** 返回生效的 prompt：有自定义用自定义，否则用默认 */
-    fun getEffectivePrompt(): String = getPrompt() ?: DEFAULT_COMMIT_PROMPT_ZH
+    /** 返回生效的 prompt：有自定义用自定义，否则根据系统语言选择中/英文默认 */
+    fun getEffectivePrompt(): String {
+        val custom = getPrompt()
+        if (custom != null) return custom
+        val lang = java.util.Locale.getDefault().language
+        return if (lang.equals("zh", ignoreCase = true)) DEFAULT_COMMIT_PROMPT_ZH else DEFAULT_COMMIT_PROMPT
+    }
 
     fun setPrompt(prompt: String?) {
         if (prompt.isNullOrBlank()) {
@@ -165,6 +170,7 @@ feat(新功能) | fix(修复) | chore(杂项) | docs(文档) | style(格式) | r
         return raw.split(",").map { it.trim() }.filter { it.isNotBlank() }.toSet()
     }
 
+    @Synchronized
     fun addToolToWhitelist(tool: String) {
         val current = getToolWhitelist().toMutableSet()
         current.add(tool.trim())
@@ -172,6 +178,7 @@ feat(新功能) | fix(修复) | chore(杂项) | docs(文档) | style(格式) | r
             .setValue(TOOL_WHITELIST_KEY, current.sorted().joinToString(","))
     }
 
+    @Synchronized
     fun removeToolFromWhitelist(tool: String) {
         val current = getToolWhitelist().toMutableSet()
         current.remove(tool.trim())
@@ -186,6 +193,7 @@ feat(新功能) | fix(修复) | chore(杂项) | docs(文档) | style(格式) | r
         return raw.split(",").map { it.trim() }.filter { it.isNotBlank() }.toSet()
     }
 
+    @Synchronized
     fun addCommandToWhitelist(command: String) {
         val current = getCommandWhitelist().toMutableSet()
         current.add(command.trim())
@@ -193,6 +201,7 @@ feat(新功能) | fix(修复) | chore(杂项) | docs(文档) | style(格式) | r
             .setValue(WHITELIST_KEY, current.sorted().joinToString(","))
     }
 
+    @Synchronized
     fun removeCommandFromWhitelist(command: String) {
         val current = getCommandWhitelist().toMutableSet()
         current.remove(command.trim())

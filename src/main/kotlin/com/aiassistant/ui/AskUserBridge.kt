@@ -59,12 +59,12 @@ object AskUserBridge {
      * @param options  选项列表（至少一项）
      * @param multiple true 时展示多选模式，返回逗号连接的多项；false 时单选
      * @return 用户选中的选项文本；
-     *         单选超时返回第一项；多选超时返回空字符串；
+     *         超时或未响应时统一返回空字符串，让 LLM 知道用户未响应；
      *         handler 未注册时同上降级
      */
     fun request(question: String, options: List<String>, multiple: Boolean = false): String {
         // handler 未注册时安全降级，不阻塞
-        val h = handler ?: return if (multiple) "" else options.firstOrNull() ?: ""
+        val h = handler ?: return ""
 
         val latch = CountDownLatch(1)
         val result = AtomicReference("")
@@ -81,9 +81,7 @@ object AskUserBridge {
             Thread.currentThread().interrupt()
         }
 
-        // 超时或结果为空时的降级：单选返回第一项，多选返回空字符串
-        return result.get().ifEmpty {
-            if (multiple) "" else options.firstOrNull() ?: ""
-        }
+        // 超时或结果为空时统一返回空字符串，让 LLM 知道用户未响应
+        return result.get().ifEmpty { "" }
     }
 }

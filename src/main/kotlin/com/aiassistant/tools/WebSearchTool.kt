@@ -40,7 +40,7 @@ class WebSearchTool : AgentTool {
             if (results.isEmpty()) {
                 ToolResult.ok("未找到 \"$query\" 的搜索结果")
             } else {
-                ToolResult.ok(results)
+                ToolResult.ok(if (results.length > 10000) results.take(10000) + "\n… (已截断)" else results)
             }
         } catch (e: Exception) {
             ToolResult.err("搜索失败: ${e.message}")

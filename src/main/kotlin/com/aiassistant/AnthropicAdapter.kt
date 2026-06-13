@@ -35,14 +35,19 @@ class AnthropicAdapter(
         val msgs = messages.joinToString(",") { msg ->
             val contentBlocks = when {
                 msg.toolCallId != null -> {
-                    // tool_result
+                    // tool_result — content 必须为数组格式 [{"type":"text","text":"..."}]
                     val content = JsonUtils.escapeJson(msg.content)
                     val callId = JsonUtils.escapeJson(msg.toolCallId ?: "")
-                    """[{"type":"tool_result","tool_use_id":"$callId","content":"$content"}]"""
+                    """[{"type":"tool_result","tool_use_id":"$callId","content":[{"type":"text","text":"$content"}]}]"""
                 }
                 msg.toolUseId != null -> {
                     // assistant with tool_use — prepend empty thinking block for DeepSeek V4 compatibility
-                    val input = msg.toolInput.ifEmpty { "{}" }
+                    val input = try {
+                        com.google.gson.Gson().fromJson(msg.toolInput.ifEmpty { "{}" }, Any::class.java)
+                        msg.toolInput.ifEmpty { "{}" } // 合法 JSON 则使用原值
+                    } catch (_: Exception) {
+                        "{}" // 非法 JSON 则 fallback
+                    }
                     val useId = JsonUtils.escapeJson(msg.toolUseId ?: "")
                     val tName = JsonUtils.escapeJson(msg.toolName ?: "unknown")
                     """[{"type":"thinking","thinking":""},{"type":"tool_use","id":"$useId","name":"$tName","input":$input}]"""

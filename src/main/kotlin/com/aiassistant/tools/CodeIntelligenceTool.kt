@@ -88,7 +88,8 @@ class CodeIntelligenceTool : AgentTool {
     private fun resolveElement(
         project: Project, basePath: String, filePath: String, line: Int, character: Int
     ): PsiElement? {
-        val fullPath = if (filePath.startsWith(basePath)) filePath else "$basePath/$filePath"
+        val separator = java.io.File.separator
+        val fullPath = if (filePath.startsWith(basePath)) filePath else "$basePath$separator$filePath"
         val virtualFile = LocalFileSystem.getInstance().findFileByPath(fullPath) ?: return null
         val psiFile = PsiManager.getInstance(project).findFile(virtualFile) ?: return null
         val document = FileDocumentManager.getInstance().getDocument(virtualFile) ?: return null
@@ -100,7 +101,7 @@ class CodeIntelligenceTool : AgentTool {
 
     private fun formatLocation(element: PsiElement, basePath: String): String {
         val vFile = element.containingFile?.virtualFile ?: return "(未知)"
-        val relativePath = vFile.path.removePrefix("$basePath/")
+        val relativePath = vFile.path.removePrefix("$basePath${java.io.File.separator}")
         val document = FileDocumentManager.getInstance().getDocument(vFile) ?: return relativePath
         val offset = element.textOffset.coerceIn(0, document.textLength - 1)
         val elLine = document.getLineNumber(offset) + 1
@@ -279,7 +280,8 @@ class CodeIntelligenceTool : AgentTool {
 
     private fun documentSymbols(params: Map<String, String>, project: Project, basePath: String): ToolResult {
         val filePath = params["file_path"] ?: return ToolResult.err("缺少 file_path 参数")
-        val fullPath = if (filePath.startsWith(basePath)) filePath else "$basePath/$filePath"
+        val separator = java.io.File.separator
+        val fullPath = if (filePath.startsWith(basePath)) filePath else "$basePath$separator$filePath"
         val virtualFile = LocalFileSystem.getInstance().findFileByPath(fullPath)
             ?: return ToolResult.err("文件不存在: $filePath")
         val psiFile = PsiManager.getInstance(project).findFile(virtualFile)
@@ -349,7 +351,7 @@ class CodeIntelligenceTool : AgentTool {
         for (name in matches) {
             val files = FilenameIndex.getVirtualFilesByName(name, scope).take(3)
             for (vf in files) {
-                val relativePath = vf.path.removePrefix("$basePath/")
+                val relativePath = vf.path.removePrefix("$basePath${java.io.File.separator}")
                 sb.appendLine("  $relativePath")
             }
         }

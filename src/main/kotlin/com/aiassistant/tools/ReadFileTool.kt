@@ -33,6 +33,7 @@ class ReadFileTool : AgentTool {
         if (!file.isFile) return ToolResult.err("不是文件: $relativePath")
 
         // 纵深防御：canonical path 前缀校验（AgentLoop 层已做一次，此处为二次保险）
+        // 设计决策：安全拦截时统一返回"文件不存在"，不暴露实际路径也不透露项目目录位置
         if (!PathUtils.isInsideProject(relativePath, basePath)) {
             return ToolResult.err("文件不存在: ${file.absolutePath}")
         }

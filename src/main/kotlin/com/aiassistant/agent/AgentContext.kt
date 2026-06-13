@@ -40,16 +40,24 @@ class AgentContext(val project: Project) {
             steps.firstOrNull { it.status == StepStatus.PENDING }
         }
 
-        fun updateStep(index: Int, status: StepStatus, result: String? = null) {
-            synchronized(steps) {
-                steps.find { it.index == index }?.let {
-                    it.status = status
-                    it.result = result
+        fun updateStep(index: Int, status: StepStatus, result: String? = null): Boolean {
+            return synchronized(steps) {
+                val step = steps.find { it.index == index }
+                if (step != null) {
+                    step.status = status
+                    step.result = result
+                    true
+                } else {
+                    false
                 }
             }
         }
 
-        /** 追加新步骤到已有计划末尾，index 自动递增 */
+        /**
+         * 追加新步骤到已有计划末尾，index 自动递增。
+         * 设计决策：不设置步骤数量上限——LLM 通常先完成已有步骤再创建新步骤，
+         * 且新会话会清空 Plan，实际不会无限增长。
+         */
         fun appendSteps(newSteps: List<Step>) {
             synchronized(steps) {
                 val startIndex = (steps.lastOrNull()?.index ?: 0) + 1

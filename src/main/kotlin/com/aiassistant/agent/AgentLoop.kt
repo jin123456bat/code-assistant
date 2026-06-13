@@ -37,7 +37,12 @@ class AgentLoop(
 
     val ctx = AgentContext(project)
     @Volatile private var cancelled = false
-    private var model: String = AppSettingsService.getInstance().getModel()
+    @Volatile private var model: String = AppSettingsService.getInstance().getModel()
+
+    /** 刷新模型配置，用于 Settings 变更后同步 */
+    fun refreshModel() {
+        model = AppSettingsService.getInstance().getModel()
+    }
 
     /** 当前正在等待用户确认的 latch（用于 stop() 时解除阻塞，避免背景线程挂起）。 */
     @Volatile private var pendingConfirmLatch: CountDownLatch? = null
@@ -107,6 +112,9 @@ class AgentLoop(
                         }
                         consecutiveFailures = 0
 
+                        // 标记：只有第一个 toolCall 才将 textContent 添加到 history，后续 toolCall 跳过
+                        var firstToolCallTextAdded = false
+
                         for (tc in toolCalls) {
                             if (cancelled) break
 
@@ -134,10 +142,13 @@ class AgentLoop(
                                     edt { onPlanUpdate?.invoke(newPlan) }
                                     "计划已创建，共 ${newPlan.stepsSnapshot().size} 步。请从第一步开始执行。"
                                 }
-                                history.add(AnthropicMessage(
-                                    "assistant", textContent, toolUseId = tc.id,
-                                    toolName = tc.name, toolInput = tc.arguments
-                                ))
+                                if (!firstToolCallTextAdded) {
+                                    history.add(AnthropicMessage(
+                                        "assistant", textContent, toolUseId = tc.id,
+                                        toolName = tc.name, toolInput = tc.arguments
+                                    ))
+                                    firstToolCallTextAdded = true
+                                }
                                 history.add(AnthropicMessage(
                                     "user", planResult, toolCallId = tc.id
                                 ))
@@ -150,6 +161,7 @@ class AgentLoop(
                                 val stepIndex = Regex(""""index"\s*:\s*(\d+)""").find(tc.arguments)?.groupValues?.get(1)?.toIntOrNull()
                                 val status = Regex(""""status"\s*:\s*"([^"]*)"""").find(tc.arguments)?.groupValues?.get(1)
                                 val result = Regex(""""result"\s*:\s*"([^"]*)"""").find(tc.arguments)?.groupValues?.get(1)
+                                var updated = false
                                 if (stepIndex != null && status != null) {
                                     val stepStatus = when (status) {
                                         "in_progress" -> AgentContext.StepStatus.IN_PROGRESS
@@ -158,12 +170,17 @@ class AgentLoop(
                                         else -> null
                                     }
                                     if (stepStatus != null) {
-                                        ctx.currentPlan?.updateStep(stepIndex, stepStatus, result)
-                                        ctx.currentPlan?.let { edt { onPlanUpdate?.invoke(it) } }
+                                        updated = ctx.currentPlan?.updateStep(stepIndex, stepStatus, result) ?: false
+                                        if (updated) {
+                                            ctx.currentPlan?.let { edt { onPlanUpdate?.invoke(it) } }
+                                        }
                                     }
                                 }
-                                val msg = "步骤 $stepIndex 状态更新为 $status"
-                                history.add(AnthropicMessage("assistant", textContent, toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments))
+                                val msg = if (updated) "步骤 $stepIndex 状态更新为 $status" else "更新失败: 步骤 $stepIndex 不存在，当前计划共 ${ctx.currentPlan?.stepsSnapshot()?.size ?: 0} 步"
+                                if (!firstToolCallTextAdded) {
+                                    history.add(AnthropicMessage("assistant", textContent, toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments))
+                                    firstToolCallTextAdded = true
+                                }
                                 history.add(AnthropicMessage("user", msg, toolCallId = tc.id))
                                 edt { onToolResult?.invoke(tc.name, msg) }
                                 continue
@@ -216,10 +233,13 @@ class AgentLoop(
                             }
                             val resultText = if (toolResult.success) toolResult.content else "错误: ${toolResult.error}"
 
-                            history.add(AnthropicMessage(
-                                "assistant", textContent, toolUseId = tc.id,
-                                toolName = tc.name, toolInput = tc.arguments
-                            ))
+                            if (!firstToolCallTextAdded) {
+                                history.add(AnthropicMessage(
+                                    "assistant", textContent, toolUseId = tc.id,
+                                    toolName = tc.name, toolInput = tc.arguments
+                                ))
+                                firstToolCallTextAdded = true
+                            }
                             history.add(AnthropicMessage(
                                 "user", resultText, toolCallId = tc.id
                             ))
@@ -245,6 +265,7 @@ class AgentLoop(
             } catch (e: InterruptedException) {
                 Thread.currentThread().interrupt()
             } catch (e: Exception) {
+                AppLogger.error("AgentLoop 异常: ${e.message}\n${e.stackTraceToString()}")
                 edt { onError?.invoke("Agent 错误: ${e.message}") }
             } finally {
                 onStateChange?.invoke(false)
@@ -300,7 +321,6 @@ class AgentLoop(
                             is ParsedEvent.TextDelta -> {
                                 hasResponse = true
                                 textBuffer.append(event.text)
-                                AppLogger.info("SSE#$sseSeq $evName text(${event.text.length}c) totalText=${textBuffer.length} → edt:onStreaming")
                                 edt { onStreaming?.invoke(textBuffer.toString()) }
                             }
                             is ParsedEvent.ToolUseStart -> {
@@ -315,9 +335,7 @@ class AgentLoop(
                                 currentToolInput.append(event.partial)
                             }
                             is ParsedEvent.ContentBlockStop -> {
-                                AppLogger.info("SSE#$sseSeq $evName inToolUse=$inToolUse")
                                 if (inToolUse) {
-                                    AppLogger.info("SSE#$sseSeq toolCall: id=$currentToolId name=$currentToolName")
                                     toolCalls.add(ToolCallResult(
                                         currentToolId, currentToolName,
                                         currentToolInput.toString().ifEmpty { "{}" }
@@ -326,10 +344,9 @@ class AgentLoop(
                                 }
                             }
                             is ParsedEvent.MessageStart -> { hasResponse = true; AppLogger.info("SSE#$sseSeq $evName") }
-                            is ParsedEvent.ThinkingStart -> { hasResponse = true; AppLogger.info("SSE#$sseSeq $evName") }
+                            is ParsedEvent.ThinkingStart -> { hasResponse = true }
                             is ParsedEvent.ThinkingDelta -> {
                                 thinkingBuffer.append(event.thinking)
-                                AppLogger.info("SSE#$sseSeq $evName thinking(${event.thinking.length}c) totalThinking=${thinkingBuffer.length} → edt:onThinkingDelta")
                                 edt { onThinkingDelta?.invoke(thinkingBuffer.toString()) }
                             }
                             is ParsedEvent.SignatureDelta -> {}
@@ -337,7 +354,7 @@ class AgentLoop(
                                 AppLogger.info("SSE#$sseSeq $evName → done.notifyAll")
                                 synchronized(done) { done.notifyAll() }
                             }
-                            else -> { AppLogger.info("SSE#$sseSeq $evName (unhandled)") }
+                            else -> { /* 未处理的事件类型，不记录日志 */ }
                         }
                     }
                 }
@@ -349,7 +366,12 @@ class AgentLoop(
             }
         )
 
-        synchronized(done) { try { done.wait(120_000) } catch (_: InterruptedException) {} }
+        // 先检查是否已完成（防止回调在 wait() 前已通知导致永久挂起）
+        synchronized(done) {
+            if (!hasResponse && errorDetail == null) {
+                try { done.wait(120_000) } catch (_: InterruptedException) {}
+            }
+        }
         if (!hasResponse) {
             val detail = errorDetail ?: "无响应 — 请检查 API Key 和网络连接"
             AppLogger.requestFailed(-1, detail)
