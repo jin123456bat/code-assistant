@@ -170,12 +170,14 @@ class ChatViewModel(
      * @param images 粘贴的图片
      * @param refContent 文件引用的 Markdown 内容（仅发给 LLM，不显示在气泡中）
      */
-    fun sendMessage(apiKey: String, content: String, images: List<ImageData>? = null, refContent: String = "") {
-        if (content.isBlank() || isStreaming || isRateLimited) return
+    /** 发送用户消息，返回消息 ID（用于 messageRefChips 索引） */
+    fun sendMessage(apiKey: String, content: String, images: List<ImageData>? = null, refContent: String = ""): Long {
+        if (content.isBlank() || isStreaming || isRateLimited) return -1L
         streamingContent = ""
         streamingThinking = ""
         // 气泡只显示用户文本，引用内容以 chips 形式独立展示
-        messages.add(AgentMessage("user", content, images = images))
+        val msg = AgentMessage("user", content, images = images)
+        messages.add(msg)
         runOnEdt { onMessagesChanged?.invoke() }
         isStreaming = true
         runOnEdt { onStreamingStateChanged?.invoke(true) }
@@ -200,6 +202,7 @@ class ChatViewModel(
                 }
             }
         }
+        return msg.id
     }
 
     private fun runOnEdt(action: () -> Unit) {

@@ -303,7 +303,8 @@ class ChatToolWindow(private val project: Project) {
         return files.sorted()
     }
     // ---- reference chips (selected files/code) ----
-    data class RefChip(val label: String, val fullPath: String, val content: String, val startLine: Int = 0, val endLine: Int = 0) {
+    /** 文件引用芯片：仅存路径和行号，发送给 LLM 时才读取文件内容。快捷跳转使用 fullPath + startLine。 */
+    data class RefChip(val label: String, val fullPath: String, val startLine: Int = 0, val endLine: Int = 0) {
         val displayName: String get() = when {
             startLine > 0 && endLine > 0 && startLine != endLine -> "$label $startLine-$endLine"
             startLine > 0 -> "$label $startLine"
@@ -390,24 +391,29 @@ class ChatToolWindow(private val project: Project) {
         chipPanel.repaint()
     }
 
-    fun addRefChip(label: String, fullPath: String, content: String, startLine: Int = 0, endLine: Int = 0) {
+    fun addRefChip(label: String, fullPath: String, startLine: Int = 0, endLine: Int = 0) {
         // 去重：完全相同的文件+行号范围才跳过
         if (refChips.any { it.fullPath == fullPath && it.startLine == startLine && it.endLine == endLine }) return
-        refChips.add(RefChip(label, fullPath, content, startLine, endLine))
+        refChips.add(RefChip(label, fullPath, startLine, endLine))
         rebuildChips()
     }
 
-    fun buildRefContent(): String {
+    /** 仅告知模型引用了哪些文件，让模型按需调用 read_file 读取，避免请求体膨胀 */
+    private fun buildRefContent(): String {
         if (refChips.isEmpty()) return ""
-        return refChips.joinToString("\n\n") { chip ->
-            val lang = chip.fullPath.substringAfterLast('.').lowercase().let { if (it.length <= 10) it else "" }
-            val lineInfo = if (chip.startLine > 0 && chip.endLine > 0) "#L${chip.startLine}-L${chip.endLine}" else ""
-            buildString {
-                append("`${chip.fullPath}$lineInfo`\n\n")
-                append("```$lang\n")
-                append(chip.content)
-                append("\n```")
+        return buildString {
+            append("用户引用了以下文件：\n")
+            for (chip in refChips) {
+                val lineInfo = when {
+                    chip.startLine > 0 && chip.endLine > 0 && chip.startLine != chip.endLine ->
+                        " 第 ${chip.startLine}-${chip.endLine} 行"
+                    chip.startLine > 0 ->
+                        " 第 ${chip.startLine} 行"
+                    else -> ""
+                }
+                append("- `${chip.fullPath}`$lineInfo\n")
             }
+            append("\n如需查看文件内容，请使用 read_file 工具。")
         }
     }
 
@@ -825,8 +831,7 @@ class ChatToolWindow(private val project: Project) {
             for (msg in displayMessages) {
                 // 用户消息带引用 chips 时，chips 嵌入气泡底部（与消息文本同属一个气泡）
                 if (msg.role == "user") {
-                    val msgIndex = viewModel.messages.indexOf(msg)
-                    val refs = messageRefChips[msgIndex]
+                    val refs = messageRefChips[msg.id]
                     if (refs != null && refs.isNotEmpty()) {
                         conversationContainer.add(createUserBubbleWithFooter(msg, buildRefChipFooter(refs)))
                         continue
@@ -1310,22 +1315,15 @@ class ChatToolWindow(private val project: Project) {
             // 添加引用芯片
             val basePath = project.basePath ?: return
             if (isDir) {
-                // 目录：生成文件列表
-                val dir = File(basePath, rawPath)
-                if (dir.isDirectory) {
-                    val listing = dir.listFiles()?.sorted()?.joinToString("\n") { f ->
-                        "${if (f.isDirectory) "/" else "  "}${f.name}"
-                    } ?: "(空目录)"
-                    addRefChip("$rawPath/", rawPath, listing)
+                // 目录：仅存路径，发送时再生成文件列表
+                if (File(basePath, rawPath).isDirectory) {
+                    addRefChip("$rawPath/", rawPath)
                 }
             } else {
-                // 文件：读取内容
+                // 文件：仅存路径和行号（无选区），发送时再读取内容
                 val file = File(basePath, rawPath)
                 if (file.isFile && file.length() < 500_000) {
-                    try {
-                        val content = file.readText()
-                        addRefChip(rawPath, rawPath, content)
-                    } catch (_: Exception) {}
+                    addRefChip(rawPath, rawPath)
                 }
             }
         }
@@ -1389,8 +1387,8 @@ class ChatToolWindow(private val project: Project) {
         fileRefPopup = popup
     }
 
-    /** 用户消息对应的引用文件（用于气泡下方显示可点击跳转的 chips），消息索引 → RefChip 列表 */
-    private val messageRefChips = mutableMapOf<Int, List<RefChip>>()
+    /** 用户消息对应的引用文件（用于气泡下方显示可点击跳转的 chips），消息 ID → RefChip 列表 */
+    private val messageRefChips = mutableMapOf<Long, List<RefChip>>()
 
     private fun sendMessage() {
         val textContent = inputArea.text.trim()
@@ -1412,17 +1410,15 @@ class ChatToolWindow(private val project: Project) {
                 }
                 hideError()
                 // 记录引用文件用于气泡下方可点击跳转的 chips 展示
-                val msgIndex = viewModel.messageCount
-                if (refChips.isNotEmpty()) {
-                    messageRefChips[msgIndex] = refChips.toList() // 快照
+                val msgId = viewModel.sendMessage(apiKey, textContent, images.ifEmpty { null }, refContent)
+                if (msgId > 0 && refChips.isNotEmpty()) {
+                    messageRefChips[msgId] = refChips.toList() // 快照
                 }
                 inputArea.text = ""
                 refChips.clear()
                 selectionRefChip = null
                 pastedImages.clear()
                 rebuildChips()
-                // 气泡只显示用户文本，引用内容通过 refContent 单独传给 LLM
-                viewModel.sendMessage(apiKey, textContent, images.ifEmpty { null }, refContent)
             }
         }
     }
@@ -1488,16 +1484,9 @@ class ChatToolWindow(private val project: Project) {
         val doc = editor.document
         val startLine = doc.getLineNumber(editor.selectionModel.selectionStart) + 1
         val endLine = doc.getLineNumber(editor.selectionModel.selectionEnd) + 1
-        // 发送文件全部内容，同时标记选中行号（LLM 可按行号聚焦关键区域）
-        val content = if (doc.textLength > 500_000) {
-            // 超大文件截断保护
-            doc.text.take(500_000) + "\n... (文件过大，已截断至 500KB)"
-        } else {
-            doc.text
-        }
-        // 选区引用最多一个：移除旧的选区引用，替换为新选区
+        // 仅存储文件路径和行号，发送时再读取文件内容
         selectionRefChip?.let { refChips.remove(it) }
-        val chip = RefChip(relativePath, relativePath, content, startLine, endLine)
+        val chip = RefChip(relativePath, relativePath, startLine, endLine)
         selectionRefChip = chip
         refChips.add(chip)
         rebuildChips()
