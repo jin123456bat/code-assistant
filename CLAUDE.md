@@ -60,17 +60,16 @@ panel (BorderLayout)
 │   │   ├── conversationHeader（"对话"标题 + 新会话按钮）
 │   │   └── planBar（置顶执行计划，不随消息滚动）
 │   └── CENTER → conversationScrollPane
-│       └── conversationWrapper (BoxLayout.Y_AXIS，无 glue → 内容顶部对齐)
-│           └── conversationContainer (BoxLayout.Y_AXIS)
-│               ├── 用户气泡 row（[glue] [ChatBubble] → 靠右）
-│               ├── AI 气泡 row（[ChatBubble] [glue] → 靠左）
-│               ├── 工具行 / 思考行 / 审批选项 / 选择卡
-│               └── 空态提示 / 流式气泡
+│       └── conversationContainer (BoxLayout.Y_AXIS, JBScrollPane 强制视图宽=视口宽)
+│           ├── 用户气泡 row（[glue] [ChatBubble] → 靠右）
+│           ├── AI 气泡 row（[ChatBubble] [glue] → 靠左）
+│           ├── 工具行 / 思考行 / 审批选项 / 选择卡
+│           └── 空态提示 / 流式气泡
 └── SOUTH  → inputPanel（引用芯片 + textarea + 发送按钮）
 ```
 
 **关键布局机制：**
-- `conversationWrapper`：BoxLayout.Y_AXIS **无 vertical glue**，内容天然从顶部开始，多余空间留白在底部。这是 web `flex-direction: column` 的 Swing 等价
+- `conversationContainer`：直接作为 `JBScrollPane` 视图。`HORIZONTAL_SCROLLBAR_NEVER` 强制视图宽度 = 视口宽，确保 rowPanel 的 X_AXIS glue 有足够空间把气泡推到正确对侧
 - 气泡行对齐：`rowPanel`（X_AXIS）+ `Box.createHorizontalGlue()`。用户气泡 `[glue][bubble]` → 靠右；AI 气泡 `[bubble][glue]` → 靠左。等价 CSS `justify-content: flex-end / flex-start`
 - `ChatBubble.getMaximumSize() = preferredSize`（hug content），确保气泡不被拉伸，glue 才能把它推到对侧
 

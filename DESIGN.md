@@ -211,18 +211,18 @@ panel (BorderLayout)
 ├── CENTER → conversationPanel
 │   ├── NORTH  → northStack（conversationHeader + planBar）
 │   └── CENTER → conversationScrollPane
-│       └── conversationWrapper (BoxLayout.Y_AXIS, 无 glue)
-│           └── conversationContainer (BoxLayout.Y_AXIS)
-│               ├── rowPanel [glue] [ChatBubble]  ← 用户靠右
-│               ├── rowPanel [ChatBubble] [glue]  ← AI 靠左
-│               ├── ToolRowFactory 折叠行
-│               ├── SelectionCard（ask_user 选择卡）
-│               └── 流式气泡
+│       └── conversationContainer (BoxLayout.Y_AXIS, JBScrollPane 强制视图宽=视口宽)
+│           ├── rowPanel [glue] [ChatBubble]  ← 用户靠右
+│           ├── rowPanel [ChatBubble] [glue]  ← AI 靠左
+│           ├── ToolRowFactory 折叠行
+│           ├── SelectionCard（ask_user 选择卡）
+│           └── 流式气泡
 └── SOUTH  → inputPanel（引用芯片 + 图片芯片 + textarea + 发送按钮）
 ```
 
 **关键机制：**
-- `conversationWrapper` 无 vertical glue → 内容自然从顶部开始，等价 web `flex-direction: column`
+- `conversationContainer`：直接作为 `JBScrollPane` 视图。`HORIZONTAL_SCROLLBAR_NEVER` 强制视图宽度 = 视口宽，确保 rowPanel 的 X_AXIS glue 有足够空间把气泡推到正确对侧
+- `BoxLayout.Y_AXIS` 无 vertical glue → 内容从顶部开始，多余空间留白在底部，等价 web `flex-direction: column`
 - 气泡对齐：`rowPanel`（X_AXIS）+ `Box.createHorizontalGlue()`，等价 CSS `justify-content`
 - 滚动到末尾：双重 `invokeLater` 确保 revalidate 完成后再读取 scrollBar.maximum
 

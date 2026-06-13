@@ -187,21 +187,15 @@ class ChatToolWindow(private val project: Project) {
     }
 
     // ---- conversation area ----
+    // conversationContainer 直接作为 JBScrollPane 视图。
+    // JBScrollPane(HORIZONTAL_SCROLLBAR_NEVER) 强制视图宽度 = 视口宽，
+    // 确保内部 X_AXIS 行的水平 glue 有足够空间把气泡推到正确对侧。
     private val conversationContainer = JPanel().apply {
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
         border = JBUI.Borders.empty(4, 4, 8, 4)
     }
-    // 外套：BoxLayout.Y_AXIS 无 glue → 内容天然顶部对齐，同时拉伸子组件到满宽。
-    // 横向：BoxLayout 将唯一子组件 conversationContainer 拉伸到 wrapper 宽度（=视口宽），
-    //       确保内部 X_AXIS 行的水平 glue 有足够空间把气泡推到正确对侧。
-    // 纵向：无 glue → BoxLayout 只用子组件的 preferred 高度，多余空间留白在底部。
-    private val conversationWrapper = JPanel().apply {
-        layout = BoxLayout(this, BoxLayout.Y_AXIS)
-        isOpaque = false
-        add(conversationContainer)
-    }
     private val conversationScrollPane = JBScrollPane(
-        conversationWrapper,
+        conversationContainer,
         ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
         ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER
     ).apply {
@@ -807,12 +801,9 @@ class ChatToolWindow(private val project: Project) {
                 lingmaSubmitBtn.toolTipText = if (streaming) "停止" else "发送 (Enter)"
                 if (!streaming) {
                     lingmaSubmitBtn.foreground = ChatTheme.submitBtnFg
-                    // P1-2: 清除流式引用，补偿 rebuildConversation 渲染流式期间积压的消息
-                    streamingBubble = null
-                    streamingContentPane = null
-                    streamingThinkingRow = null
-                    streamingThinkingTextArea = null
-                    rebuildConversation()
+                    // 流式结束，触发一次布局失效；自测量气泡会按最终内容/宽度重测。
+                    conversationContainer.revalidate()
+                    conversationContainer.repaint()
                 }
             }
         }
@@ -877,10 +868,6 @@ class ChatToolWindow(private val project: Project) {
     private var needFullRebuild = true
 
     private fun rebuildConversation() {
-        // P1-2: 流式进行中不触发全量/增量重建，防止 removeAll 摧毁流式气泡导致布局闪动。
-        // 流式结束后的 onStreamingStateChanged(false) 会补偿调用 rebuildConversation() 统一渲染积压消息。
-        if (viewModel.isStreaming) return
-
         val displayMessages = viewModel.messages.filter { it.role != "system" }
         val hasMessages = displayMessages.isNotEmpty() || viewModel.streamingContent.isNotEmpty() || viewModel.streamingThinking.isNotEmpty()
 
@@ -894,6 +881,23 @@ class ChatToolWindow(private val project: Project) {
         }
 
         if (hasMessages) {
+            // 从空态 → 有消息的转换：清理旧的 hintPanel，防止与新增消息并存
+            if (renderedMsgVersions.isEmpty()) {
+                conversationContainer.removeAll()
+                msgIdToComponent.clear()
+            }
+
+            // 流式刚结束时 streamingContent 已清空，但旧 streamingBubble 仍在容器中，
+            // 需显式移除——否则 rebuildConversation 从 messages 渲染的 AI 气泡会与它重复
+            if (viewModel.streamingContent.isEmpty()) {
+                streamingBubble?.let { conversationContainer.remove(it) }
+                streamingBubble = null
+                streamingContentPane = null
+                streamingThinkingRow?.let { conversationContainer.remove(it) }
+                streamingThinkingRow = null
+                streamingThinkingTextArea = null
+            }
+
             // 增量渲染：只渲染版本号变更的消息（新增消息 version=0 不在 map 中，原地更新 version 递增触发重渲染）
             for (msg in displayMessages) {
                 val lastVersion = renderedMsgVersions[msg.id]
