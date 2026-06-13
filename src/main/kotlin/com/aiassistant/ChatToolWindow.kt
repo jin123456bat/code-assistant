@@ -455,8 +455,14 @@ class ChatToolWindow(private val project: Project) {
                                         .selectedTextEditor
                                     if (textEditor != null) {
                                         val doc = textEditor.document
-                                        val offset = doc.getLineStartOffset((ref.startLine - 1).coerceAtLeast(0))
-                                        textEditor.caretModel.moveToOffset(offset)
+                                        val startOffset = doc.getLineStartOffset((ref.startLine - 1).coerceAtLeast(0))
+                                        val endOffset = if (ref.endLine > 0 && ref.endLine != ref.startLine) {
+                                            doc.getLineEndOffset((ref.endLine - 1).coerceAtMost(doc.lineCount - 1))
+                                        } else {
+                                            startOffset
+                                        }
+                                        textEditor.selectionModel.setSelection(startOffset, endOffset)
+                                        textEditor.caretModel.moveToOffset(startOffset)
                                         textEditor.scrollingModel.scrollToCaret(com.intellij.openapi.editor.ScrollType.CENTER)
                                     }
                                 }
@@ -845,9 +851,10 @@ class ChatToolWindow(private val project: Project) {
 
             // 流式思考行：重建并跟踪引用，供 updateStreamingThinking() 原地更新
             if (viewModel.streamingThinking.isNotEmpty()) {
-                val row = toolRowFactory.thinkingRow(viewModel.streamingThinking, initiallyExpanded = true, streaming = true)
+                val textAreaRef = java.util.concurrent.atomic.AtomicReference<JTextArea>()
+                val row = toolRowFactory.thinkingRow(viewModel.streamingThinking, initiallyExpanded = true, streaming = true, textAreaRef = textAreaRef)
                 streamingThinkingRow = row
-                streamingThinkingTextArea = findDeepestTextArea(row)
+                streamingThinkingTextArea = textAreaRef.get()
                 conversationContainer.add(row)
             }
 
@@ -947,9 +954,10 @@ class ChatToolWindow(private val project: Project) {
         if (streamingThinkingRow == null) {
             // 首次：创建思考行（已展开）。
             // 如果 assistant 流式气泡已在容器中，思考行插入到它之前（思考→回复 的自然顺序）
-            val row = toolRowFactory.thinkingRow(content, initiallyExpanded = true, streaming = true)
+            val textAreaRef = java.util.concurrent.atomic.AtomicReference<JTextArea>()
+            val row = toolRowFactory.thinkingRow(content, initiallyExpanded = true, streaming = true, textAreaRef = textAreaRef)
             streamingThinkingRow = row
-            streamingThinkingTextArea = findDeepestTextArea(row)
+            streamingThinkingTextArea = textAreaRef.get()
             val assistantIdx = streamingBubble?.let { b ->
                 conversationContainer.components.indexOfFirst { it === b }.takeIf { it >= 0 }
             }
@@ -971,18 +979,6 @@ class ChatToolWindow(private val project: Project) {
             }
             scrollToBottom(force = false)
         }
-    }
-
-    /** 递归查找组件树中最深的 JTextArea（用于原地更新流式思考文本） */
-    private fun findDeepestTextArea(component: java.awt.Component): JTextArea? {
-        if (component is JTextArea) return component
-        if (component is java.awt.Container) {
-            for (child in component.components) {
-                val found = findDeepestTextArea(child)
-                if (found != null) return found
-            }
-        }
-        return null
     }
 
     private fun createMessageBubble(message: AgentMessage): JPanel {
@@ -1481,9 +1477,12 @@ class ChatToolWindow(private val project: Project) {
                 file.path.removePrefix(basePath).removePrefix("/")
             } else file.name
         } else "unknown"
-        val doc = editor.document
-        val startLine = doc.getLineNumber(editor.selectionModel.selectionStart) + 1
-        val endLine = doc.getLineNumber(editor.selectionModel.selectionEnd) + 1
+        // 纯文本换行计数计算行号，不依赖 Editor/Document 内部索引
+        val docText = editor.document.immutableCharSequence
+        val selStart = editor.selectionModel.selectionStart
+        val selEnd = editor.selectionModel.selectionEnd
+        val startLine = docText.subSequence(0, selStart).count { it == '\n' } + 1
+        val endLine = docText.subSequence(0, selEnd).count { it == '\n' } + 1
         // 仅存储文件路径和行号，发送时再读取文件内容
         selectionRefChip?.let { refChips.remove(it) }
         val chip = RefChip(relativePath, relativePath, startLine, endLine)

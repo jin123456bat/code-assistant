@@ -339,7 +339,8 @@ class ToolRowFactory(private val availableWidth: () -> Int) {
      * @param initiallyExpanded 流式展示时传 true，让用户实时看到思考过程
      * @param streaming 流式接收中时传 true，展开标题显示"思考中..."
      */
-    fun thinkingRow(content: String, initiallyExpanded: Boolean = false, streaming: Boolean = false): JPanel {
+    /** @param textAreaRef 用于外部获取内部 JTextArea 引用，避免递归查找 */
+    fun thinkingRow(content: String, initiallyExpanded: Boolean = false, streaming: Boolean = false, textAreaRef: java.util.concurrent.atomic.AtomicReference<JTextArea>? = null): JPanel {
         val summary = content.lines().take(2).joinToString(" ").take(ChatTheme.THINKING_PREVIEW_MAX_CHARS)
             .let { if (content.length > ChatTheme.THINKING_PREVIEW_MAX_CHARS) "$it…" else it }
 
@@ -408,6 +409,7 @@ class ToolRowFactory(private val availableWidth: () -> Int) {
                     border = JBUI.Borders.empty(4, 20, 4, 0)
                     foreground = ChatTheme.textSecondary
                 }
+                textAreaRef?.set(textArea)
                 container.add(textArea, BorderLayout.CENTER)
             }
         }
