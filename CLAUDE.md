@@ -27,7 +27,7 @@ IntelliJ IDEA 的开源 AI 编程 Agent 插件（IntelliJ Platform plugin，type
 请求从上到下的调用链：
 
 ```
-ChatToolWindowFactory → ChatToolWindow (Swing UI, ~1567 行)
+ChatToolWindowFactory → ChatToolWindow (Swing UI, ~1590 行)
     → ChatViewModel  (UI 桥接，轻量 ViewModel，含 Activity 状态机)
         → AgentLoop (agent，Agent 主循环)
             → AnthropicAdapter (构建请求 / 解析 SSE 事件)
@@ -39,16 +39,16 @@ ChatToolWindowFactory → ChatToolWindow (Swing UI, ~1567 行)
 
 | 组件 | 行数 | 职责 |
 |---|---|---|
-| `ChatBubble` | 168 | **自测量气泡**：`getPreferredSize/getMaximumSize` 实时按 viewport 宽度计算尺寸，hug content + max-width 上限。画圆角背景+描边 |
-| `BubbleFactory` | 99 | 气泡工厂：构造内容（用户 HTML JTextPane / AI markdown）+ 包进 ChatBubble + 放进 rowPanel（X_AXIS + glue 做左右对齐） |
-| `ChatTheme` | ~200 | 设计 token 单一来源：语义色（JBColor 明暗双值）、间距、圆角、字体、宽度约束。所有 UI 代码禁止硬编码值 |
-| `ToolRowFactory` | ~550 | 工具/思考行 + 审批选项 + RefChip：统一左栏竖线 + 折叠/展开。含 toolCallRow、toolResultRow、thinkingRow、runningRow、errorCardRow、buildApprovalOptions |
+| `ChatBubble` | 176 | **自测量气泡**：`getPreferredSize/getMaximumSize` 实时按 viewport 宽度计算尺寸，hug content + max-width 上限。画圆角背景+描边 |
+| `BubbleFactory` | 123 | 气泡工厂：构造内容（用户 HTML JTextPane / AI markdown）+ 包进 ChatBubble + 放进 rowPanel（X_AXIS + glue 做左右对齐） |
+| `ChatTheme` | 278 | 设计 token 单一来源：语义色（JBColor 明暗双值）、间距、圆角、字体、宽度约束。所有 UI 代码禁止硬编码值 |
+| `ToolRowFactory` | 604 | 工具/思考行 + 审批选项 + RefChip：统一左栏竖线 + 折叠/展开。含 toolCallRow、toolResultRow、thinkingRow、runningRow、errorCardRow、buildApprovalOptions |
 | `SelectionCard` | 452 | ask_user 选择卡：单选/多选模式，cheveron 高亮 + hover |
-| `PlanBar` | 282 | 置顶计划条：折叠看摘要（标题+进度+迷你进度条），展开看步骤列表 |
+| `PlanBar` | 331 | 置顶计划条：折叠看摘要（标题+进度+迷你进度条），展开看步骤列表 |
 | `SimpleDiff` | 140 | 行级 diff 计算（LCS 算法），由测试驱动 |
-| `PathUtils` | ~30 | 路径安全：canonical path 前缀校验，供 AgentLoop 审批 + 工具执行复用 |
-| `AskUserBridge` | 89 | ask_user 工具与 UI 之间的桥接：全局 handler + CountDownLatch 同步 |
-| `MarkdownRenderer` | ~290 | Markdown → Swing JPanel 渲染（标题、列表、代码块、内联代码） |
+| `PathUtils` | 30 | 路径安全：canonical path 前缀校验，供 AgentLoop 审批 + 工具执行复用 |
+| `AskUserBridge` | 87 | ask_user 工具与 UI 之间的桥接：全局 handler + CountDownLatch 同步 |
+| `MarkdownRenderer` | 405 | Markdown → Swing JPanel 渲染（标题、列表、代码块、内联代码） |
 
 ### 布局架构
 
@@ -74,11 +74,40 @@ panel (BorderLayout)
 - 气泡行对齐：`rowPanel`（X_AXIS）+ `Box.createHorizontalGlue()`。用户气泡 `[glue][bubble]` → 靠右；AI 气泡 `[bubble][glue]` → 靠左。等价 CSS `justify-content: flex-end / flex-start`
 - `ChatBubble.getMaximumSize() = preferredSize`（hug content），确保气泡不被拉伸，glue 才能把它推到对侧
 
+**会话渲染（`rebuildConversation`，增量 + 版本号变更检测）：**
+
+`rebuildConversation()` 负责将 `viewModel.messages` 同步到 `conversationContainer`。渲染策略分为两种：
+
+| 触发条件 | 策略 | 说明 |
+|---------|------|------|
+| `needFullRebuild = true` | 全量重建 | `removeAll()` + 清空追踪后重新渲染所有消息 |
+| `renderedMsgVersions.size > displayMessages.size` | 全量重建 | 消息减少（clear/delete）自动触发 |
+| 其他（新增消息、原地更新） | 增量渲染 | 仅处理版本号变化的消息 |
+
+**增量渲染核心机制：**
+
+```
+AgentMessage.version (Int, 默认 0)
+    ↓ copy() 时递增（onToolResult / onConfirmTool / addThinkingMessage）
+renderedMsgVersions: Map<msgId → version>   ← 上次渲染的版本号
+msgIdToComponent:    Map<msgId → Component>  ← 已渲染组件引用
+```
+
+增量循环逻辑：
+1. 遍历 `displayMessages`，比较 `renderedMsgVersions[msg.id]` vs `msg.version`
+2. 新消息（map 中无记录）→ 创建组件并添加到容器
+3. 版本号不匹配（原地更新）→ 先从容器移除旧组件（`msgIdToComponent`），再创建新组件
+4. 版本号匹配 → 跳过
+
+**回调精简**：`onMessagesChanged` 是 `rebuildConversation()` 的**唯一驱动入口**。`onToolExecute`/`onToolResult` 回调已删除（原先它们设置 `needFullRebuild = true` 并重复调用 `rebuildConversation()`，导致每次工具事件 2 次全量重建）。
+
+**流式组件管理**：`streamingThinkingRow` 和 `streamingBubble` 由 `updateStreamingThinking()`/`updateStreamingBubble()` 驱动更新。`rebuildConversation()` 在创建新流式组件前会显式移除旧引用（`.parent` 为 null 时回调方法会自动重建），避免增量模式下重复。
+
 ### Agent 层
 
 **Agent 循环**（`agent/AgentLoop.kt`，核心）：在后台 `Thread` 上跑 `while` 循环（`MAX_LOOPS=100`，连续失败 `MAX_FAILURES=3` 即中止）。每轮调用模型 → 若返回 `tool_use` 则执行工具并把结果回填到 `history` 继续下一轮 → 若返回纯文本则结束。所有 UI 更新通过回调（`onMessage`/`onStreaming`/`onToolExecute`…）经 `invokeLater`/`invokeAndWait` 切回 EDT。
 
-**agent 包**（`agent/`）：包含 Agent 核心实现和共享类型——`AgentLoop`、`AgentContext`（贯穿生命周期的共享上下文，含 `Plan`/`Step`/`ImageData`/`AgentMessage`）、`ToolRegistryV3`、`SkillEngine`、`AgentTool` 接口。
+**agent 包**（`agent/`）：包含 Agent 核心实现和共享类型——`AgentLoop`、`AgentContext`（贯穿生命周期的共享上下文，含 `Plan`/`Step`/`ImageData`/`AgentMessage`（`id: Long` 消息唯一标识 + `version: Int` 增量渲染版本号））、`ToolRegistryV3`、`SkillEngine`、`AgentTool` 接口。
 
 **ViewModel 状态机**：`ChatViewModel.Activity` 密封类表达 Agent 当前活动：
 - `Idle` → 无指示器
@@ -106,7 +135,7 @@ panel (BorderLayout)
 
 - **DeepSeek V4 兼容**：`AnthropicAdapter.buildRequest()` 在每个 `tool_use` content block 前**预置一个空 `thinking` block**（`{"type":"thinking","thinking":""}`），这是 DeepSeek V4 API 的硬性要求，不要删。
 - **SSE 解析手写**：`AnthropicAdapter.parseSseEvent()` 和 `extractJsonString()` 用字符串扫描而非 JSON 库解析事件；`SseClient` 已剥离 `data: ` 前缀，传入的是裸 JSON。修改事件格式时两边都要动。
-- **工具参数解析用正则**：`AgentLoop.parseParams()` 用正则 `"(\w+)"\s*:\s*(...)` 从模型返回的 JSON 里抽参数，**不是完整 JSON 解析**——嵌套对象/数组参数会失效，新工具尽量用扁平的字符串/数字参数。
+- **工具参数解析使用 Gson**：`AgentLoop.parseParams()` 使用 `Gson.fromJson(json, Map::class.java)` 完整解析 JSON，嵌套对象/数组序列化为 JSON 字符串存入 `Map<String, String>`。
 - **JSON 转义统一走 `shared/JsonUtils`**：`escapeJson` / `unescapeJson` 在适配器和工具 schema 里复用，不要再就地手写转义。
 - **文件写入边界**：`write_file` 限制在项目目录内，防止越界。
 - **API Key**：存于 IntelliJ PasswordSafe（CredentialStore），通过 `AppSettingsService` 读写，不落明文。

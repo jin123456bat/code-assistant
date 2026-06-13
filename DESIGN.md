@@ -45,11 +45,17 @@ IntelliJ IDEA 插件 — Swing UI 设计规范。Token 定义与 `ChatTheme.kt` 
 |-------|-------|------|------|
 | `codeBg` | `#F7F8FA` | `#1E1F22` | 代码块/工具结果背景 |
 | `codeBorder` | `#EBECF0` | `#393B40` | 代码块边框 |
+| `codeHeaderBg` | `#F0F0F0` | `#32323A` | 代码块头部栏（语言标签+复制按钮） |
+| `codeLangFg` | `#888888` | `#999999` | 代码块语言标签色 |
+| `codeEditorBg` | `#FAFAFA` | `#2B2B2B` | 代码块编辑器域背景 |
 | `inputBg` | `#FFFFFF` | `#1E1F22` | 输入文本区背景（ChatTheme token） |
-| `inputBorder` | `#C9CCD6` | `#4E5157` | 输入面板边框（默认） |
-| `inputFocus` | `#4A90D9` | `#4A90D9` | 输入面板边框（聚焦） |
-
-注：`inputPanel` 整体背景使用 `#FAFBFC` / `#2B2D30`（硬编码），与 `inputBg` token 不同。
+| `inputBorder` | `#D0D0D0` | `#505050` | 输入面板边框（默认） |
+| `inputFocus` | `#4A90D9` | `#5A9FD4` | 输入面板边框（聚焦） |
+| `chipBg` | `#E3E8EE` | `#3A3E48` | 引用/图片芯片背景（chipPanel、气泡底部 RefChip） |
+| `chipBorder` | `#C0C8D0` | `#505560` | 引用/图片芯片边框 |
+| `chipFg` | `#333333` | `#CCCCCC` | 引用/图片芯片文字色 |
+| `chipHoverBg` | `#D0D8E8` | `#4A4E58` | 引用芯片 hover 背景（气泡底部 RefChip） |
+| `submitBtnFg` | `#888888` | `#AAAAAA` | 发送/删除按钮前景（lingmaSubmitBtn、芯片 × 按钮） |
 
 ### 文字颜色
 
@@ -65,6 +71,12 @@ IntelliJ IDEA 插件 — Swing UI 设计规范。Token 定义与 `ChatTheme.kt` 
 |-------|-------|------|------|
 | `winBg` | `#FFFFFF` | `#2B2D30` | 窗口/面板背景 |
 | `divider` | `#EBECF0` | `#393B40` | 分割线 |
+| `accentHover` | `#2674B4` | `#5A9FD4` | 按钮 hover 强调色（newSessionBtn、plusButton、lingmaSubmitBtn、RefChip） |
+| `headerTitleFg` | `#666666` | `#AAAAAA` | 标题/描述文字色（conversationHeader、welcomePanel descLabel） |
+| `inputPanelBg` | `#FAFBFC` | `#2B2D30` | 输入面板整体背景（inputPanel、welcomePanel） |
+| `welcomeMutedFg` | `#888888` | `#888888` | 欢迎面板弱文字（poweredLabel） |
+| `emptyHintFg` | `#767676` | `#AAAAAA` | 空态提示文字（对话区无消息时 hint） |
+| `menuSelectedBg` | `#E0E8F0` | `#3A4048` | 弹窗菜单选中项背景（斜杠命令菜单、文件引用菜单） |
 
 ### 状态/语义色
 
@@ -76,6 +88,19 @@ IntelliJ IDEA 插件 — Swing UI 设计规范。Token 定义与 `ChatTheme.kt` 
 | `error` | `#B5503E` | `#E08A72` | 错误文字 |
 | `errorCardBg` | `rgba(181,80,62,0.06)` | `rgba(224,138,114,0.10)` | 错误卡背景 |
 | `doneCheck` | `#5AA86A` | `#5AA86A` | 已完成 ✓ 对勾（PlanBar DONE 步骤、SelectionCard 已选、审批选项 允许/始终允许） |
+| `rejectedFg` | `#C0392B` | `#E08A72` | 审批拒绝后的文字色（light 暖浅红，dark 与 error 边框一致） |
+| `errorBannerBg` | `#FFEBEE` | `#462828` | 错误横幅背景 |
+| `errorBannerFg` | `#B00020` | `#FFB4B4` | 错误横幅文字 |
+| `warningBannerBg` | `#FFF3CD` | `#3C3214` | 警告横幅背景 |
+| `warningBannerFg` | `#856404` | `#FFE696` | 警告横幅文字 |
+
+### Markdown 渲染色
+
+| Token | 值 | 用途 |
+|-------|----|------|
+| `inlineCodeBgLight` | `#F0F0F0` | 内联代码背景（亮色主题） |
+| `inlineCodeBgDark` | `#3C3C3C` | 内联代码背景（暗色主题） |
+| `markdownLinkFg` | `#2674B4` | Markdown 链接色 |
 
 ### 审批选择卡（ToolRowFactory.approvalCard）
 
@@ -99,8 +124,13 @@ ask_user SelectionCard 同款样式，tool 行下方显示三个选项。
 - 字号层级（`ChatTheme` + IDE 编辑器字号自适应）：
   - `bodyFont`: `JBFont.regular()`（~13px，对话内容）
   - `metaFont`: `JBFont.small()`（~11px，标签、角色名、工具行）
+  - `largeFont`: `JBFont.regular().deriveFont(BOLD, size+6)`（标题/大按钮）
+  - `headerFont`: `JBFont.regular().deriveFont(BOLD)`（对话头标题）
   - `codeFont`: `Font.MONOSPACED` 跟随 body 字号
-  - `ToolRowFactory` 中：工具行字号 = `editorFontSize - 1`（含思考行、代码块、粗体变体）
+  - `ToolRowFactory` 中：工具行字号 = `editorFontSize - TOOL_FONT_OFFSET`（含思考行、代码块、粗体变体），`TOOL_FONT_OFFSET=1`
+  - PlanBar 描述文字：`metaFont.size - META_FONT_OFFSET`，`META_FONT_OFFSET=2`
+  - Markdown 标题偏移：`HEADING_FONT_OFFSET_H1=3`、`H2=2`、`H3=1`（相对于 bodyFont 的 pt 增量）
+  - 代码块语言标签：`CODE_LANG_FONT_SIZE=10`
 - 行高：Swing 默认（~1.2-1.4x），HTML JTextPane 自然换行
 
 ## Spacing
@@ -115,10 +145,44 @@ ask_user SelectionCard 同款样式，tool 行下方显示三个选项。
 | `PAD_BUBBLE_H` | 12 | 气泡内左右 padding |
 | `RADIUS` | 14 | 气泡/卡片圆角 |
 | `RADIUS_TIGHT` | 5 | 微信式小尖角 |
+| `RADIUS_INNER` | 8 | 内部元素圆角（tool 行/审批选项/SelectionCard 选项 hover 高亮） |
+| `RADIUS_PROGRESS` | 4 | PlanBar 进度条圆角 |
 
 - 基础单位：4px（IntelliJ `JBUI` 工具类）
 - 输入区最小高度：80px
 - 对话区最小宽度：100px
+
+### 图标/控件尺寸
+
+| Token | 值 | 用途 |
+|------|----|------|
+| `ARROW_WIDTH` | 14 | 箭头/chevron 图标最小宽度（ToolRowFactory、SelectionCard） |
+| `CHECK_WIDTH` | 16 | 选择卡复选框宽度（SelectionCard 多选模式） |
+| `SPINNER_MIN_W` | 14 | 盲文 spinner 标签最小宽度（防抖动） |
+
+### PlanBar 尺寸约束
+
+| Token | 值 | 用途 |
+|------|----|------|
+| `PLAN_STEP_MAX_H` | 168 | 弹出步骤列表最大高度 |
+| `PLAN_STEP_ROW_H` | 24 | 单步最大高度 |
+| `PLAN_PROGRESS_W` | 60 | 迷你进度条宽度 |
+| `PLAN_PROGRESS_H` | 5 | 迷你进度条高度 |
+
+### 气泡/工具行宽度约束
+
+| Token | 值 | 用途 |
+|------|----|------|
+| `BUBBLE_WIDTH_DEDUCT` | 20 | BubbleFactory 气泡宽度扣除量 |
+| `TOOL_PREVIEW_DEDUCT` | 24 | ToolRowFactory args 预览扣除量 |
+
+### 文本截断限制
+
+| Token | 值 | 用途 |
+|------|----|------|
+| `ARGS_PREVIEW_MAX_CHARS` | 120 | 工具 args 参数预览最大字符数 |
+| `RESULT_MAX_CHARS` | 2000 | 工具 result 内容展示最大字符数 |
+| `THINKING_PREVIEW_MAX_CHARS` | 100 | 思考行折叠摘要最大字符数（双行截断） |
 
 ## Border Radius
 

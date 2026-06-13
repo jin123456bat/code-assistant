@@ -31,12 +31,14 @@ Code Assistant 是 IntelliJ IDEA 的开源 AI 编程 Agent 插件（IntelliJ Pla
 
 ```
 src/main/kotlin/com/aiassistant/
-├── ChatToolWindow.kt          # Swing UI 主窗口 (工厂 + 窗口, ~1567 行)
+├── ChatToolWindow.kt          # Swing UI 主窗口 (工厂 + 窗口, ~1590 行)
 ├── ChatViewModel.kt           # UI 桥接 ViewModel (Activity 状态机)
 ├── AppSettingsService.kt      # 应用级配置: API Key, MCP Config, 白名单, 模型选择
 ├── AnthropicAdapter.kt        # Anthropic Messages API 适配器 (请求构建/SSE 解析)
 ├── SseClient.kt               # SSE 流式 HTTP 客户端 (HttpURLConnection)
 ├── MarkdownRenderer.kt        # Markdown → Swing JPanel 渲染器
+├── AiAssistantBundle.kt       # i18n 资源包读取器
+├── AppLogger.kt               # 插件日志（com.intellij.diagnostic.Logger 封装）
 │
 ├── agent/                     # Agent 核心实现 + 共享类型
 │   ├── AgentLoop.kt           # Agent 主循环 (while 循环 + 工具调用分发)
@@ -51,9 +53,7 @@ src/main/kotlin/com/aiassistant/
 │   ├── SearchCodeTool.kt      # 搜索代码
 │   ├── ListDirectoryTool.kt   # 列出目录
 │   ├── ExecuteCommandTool.kt  # 执行命令
-│   ├── GitDiffTool.kt         # Git diff
-│   ├── GitLogTool.kt          # Git log
-│   ├── GitStatusTool.kt       # Git status
+│   ├── GitTool.kt             # Git diff / Git log / Git status（三个工具合并在一个文件）
 │   ├── AskUserTool.kt         # 用户交互
 │   ├── WebSearchTool.kt       # 网络搜索
 │   ├── WebFetchTool.kt        # 获取网页（支持断线重连、编码检测）
@@ -66,7 +66,7 @@ src/main/kotlin/com/aiassistant/
 │   ├── McpClient.kt           # JSON-RPC stdio 客户端
 │   └── McpServerConfig.kt     # 服务器配置解析
 │
-├── ui/                        # UI 组件 (~2200 行)
+├── ui/                        # UI 组件 (~2600 行)
 │   ├── ChatTheme.kt           # 设计 token 单一来源
 │   ├── ChatBubble.kt          # 自测量聊天气泡
 │   ├── BubbleFactory.kt       # 气泡工厂
@@ -96,7 +96,7 @@ src/main/kotlin/com/aiassistant/
 ### 请求流程
 
 ```
-ChatToolWindowFactory → ChatToolWindow (Swing UI, ~1568 行)
+ChatToolWindowFactory → ChatToolWindow (Swing UI, ~1590 行)
     → ChatViewModel  (UI 桥接，轻量 ViewModel，含 Activity 状态机)
         → AgentLoop (agent，Agent 主循环)
             → AnthropicAdapter (构建请求 / 解析 SSE 事件)
@@ -220,6 +220,6 @@ AgentLoop 内置两个不由 ToolRegistryV3 管理的元工具，以硬编码 JS
 
 - **DeepSeek V4 兼容**：`AnthropicAdapter.buildRequest()` 在每个 `tool_use` content block 前预置一个空 `thinking` block（`{"type":"thinking","thinking":""}`），这是 DeepSeek V4 API 的硬性要求
 - **SSE 解析手写**：`AnthropicAdapter.parseSseEvent()` 和 `extractJsonString()` 用字符串扫描而非 JSON 库解析事件；`SseClient` 已剥离 `data:` 前缀
-- **工具参数解析用正则**：`AgentLoop.parseParams()` 用正则 `"(\w+)"\s*:\s*("[^"]*"|\d+|true|false|null)` 从模型返回的 JSON 里抽参数，不是完整 JSON 解析，嵌套对象/数组参数会失效
+- **工具参数解析使用 Gson**：`AgentLoop.parseParams()` 使用 `Gson.fromJson(json, Map::class.java)` 完整解析 JSON，嵌套对象/数组序列化为 JSON 字符串
 - **JSON 转义统一走 `shared/JsonUtils`**：`escapeJson` / `unescapeJson` 在适配器和工具 schema 里复用
 - **i18n**：用户可见文案走 `messages/AiAssistantBundle*.properties`，通过 `AiAssistantBundle` 读取

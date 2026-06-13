@@ -166,14 +166,14 @@ class ChatToolWindow(private val project: Project) {
     // ---- conversation header ----
     private val newSessionBtn = JLabel("+").apply {
         font = ChatTheme.largeFont.deriveFont(18f)
-        foreground = JBColor(0x888888, 0x999999)
+        foreground = ChatTheme.codeLangFg
         cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
         toolTipText = "新会话"
         border = JBUI.Borders.empty(2, 6, 2, 6)
         addMouseListener(object : MouseAdapter() {
             override fun mouseClicked(e: MouseEvent) { needFullRebuild = true; viewModel.clearConversation(); messageRefChips.clear(); planBar.updatePlan(null); rebuildConversation() }
-            override fun mouseEntered(e: MouseEvent) { foreground = JBColor(0x2674B4, 0x5A9FD4) }
-            override fun mouseExited(e: MouseEvent) { foreground = JBColor(0x888888, 0x999999) }
+            override fun mouseEntered(e: MouseEvent) { foreground = ChatTheme.accentHover }
+            override fun mouseExited(e: MouseEvent) { foreground = ChatTheme.codeLangFg }
         })
     }
     private val conversationHeader = JPanel(BorderLayout()).apply {
@@ -181,7 +181,7 @@ class ChatToolWindow(private val project: Project) {
         border = JBUI.Borders.empty(4, 10, 4, 8)
         add(JLabel("对话").apply {
             font = ChatTheme.headerFont
-            foreground = JBColor(0x666666, 0xAAAAAA)
+            foreground = ChatTheme.headerTitleFg
         }, BorderLayout.WEST)
         add(newSessionBtn, BorderLayout.EAST)
     }
@@ -337,20 +337,20 @@ class ChatToolWindow(private val project: Project) {
         // 图片芯片
         for ((idx, img) in pastedImages.withIndex()) {
             val chipComp = JPanel(FlowLayout(FlowLayout.LEFT, 2, 0)).apply {
-                background = JBColor(0xE3E8EE, 0x3A3E48)
+                background = ChatTheme.chipBg
                 border = BorderFactory.createCompoundBorder(
-                    roundedBorder(JBColor(0xC0C8D0, 0x505560)),
+                    roundedBorder(ChatTheme.chipBorder),
                     BorderFactory.createEmptyBorder(1, 6, 1, 4)
                 )
                 toolTipText = "已粘贴图片 (${img.mediaType})"
             }
             chipComp.add(JLabel("图片 ${idx + 1}").apply {
                 font = ChatTheme.metaFont
-                foreground = JBColor(0x333333, 0xCCCCCC)
+                foreground = ChatTheme.chipFg
             })
             val removeBtn = JLabel("×").apply {
                 font = ChatTheme.metaFont.deriveFont(Font.BOLD)
-                foreground = JBColor(0x888888, 0xAAAAAA)
+                foreground = ChatTheme.submitBtnFg
                 cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
                 border = BorderFactory.createEmptyBorder(0, 2, 0, 2)
                 toolTipText = "移除图片"
@@ -367,9 +367,9 @@ class ChatToolWindow(private val project: Project) {
         // 文件引用芯片
         for (chip in refChips) {
             val chipComp = JPanel(FlowLayout(FlowLayout.LEFT, 2, 0)).apply {
-                background = JBColor(0xE3E8EE, 0x3A3E48)
+                background = ChatTheme.chipBg
                 border = BorderFactory.createCompoundBorder(
-                    roundedBorder(JBColor(0xC0C8D0, 0x505560)),
+                    roundedBorder(ChatTheme.chipBorder),
                     BorderFactory.createEmptyBorder(1, 6, 1, 4)
                 )
                 toolTipText = chip.fullPath
@@ -382,11 +382,11 @@ class ChatToolWindow(private val project: Project) {
             }
             chipComp.add(JLabel(displayText).apply {
                 font = ChatTheme.metaFont
-                foreground = JBColor(0x333333, 0xCCCCCC)
+                foreground = ChatTheme.chipFg
             })
             val removeBtn = JLabel("×").apply {
                 font = ChatTheme.metaFont.deriveFont(Font.BOLD)
-                foreground = JBColor(0x888888, 0xAAAAAA)
+                foreground = ChatTheme.submitBtnFg
                 cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
                 border = BorderFactory.createEmptyBorder(0, 2, 0, 2)
                 toolTipText = "移除引用"
@@ -447,11 +447,11 @@ class ChatToolWindow(private val project: Project) {
                 font = ChatTheme.metaFont
                 foreground = ChatTheme.textSecondary
                 border = BorderFactory.createCompoundBorder(
-                    BorderFactory.createLineBorder(JBColor(0xC0C8D0, 0x505560), 1),
+                    BorderFactory.createLineBorder(ChatTheme.chipBorder, 1),
                     JBUI.Borders.empty(2, 8, 2, 8)
                 )
                 isOpaque = true
-                background = JBColor(0xE3E8EE, 0x3A3E48)
+                background = ChatTheme.chipBg
                 cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
                 toolTipText = "点击打开: ${ref.fullPath}${if (ref.startLine > 0) " (第${ref.startLine}行)" else ""}"
             }
@@ -485,12 +485,12 @@ class ChatToolWindow(private val project: Project) {
                     }
                 }
                 override fun mouseEntered(e: MouseEvent) {
-                    labelRef.foreground = JBColor(0x2674B4, 0x5A9FD4)
-                    labelRef.background = JBColor(0xD0D8E8, 0x4A4E58)
+                    labelRef.foreground = ChatTheme.accentHover
+                    labelRef.background = ChatTheme.chipHoverBg
                 }
                 override fun mouseExited(e: MouseEvent) {
                     labelRef.foreground = ChatTheme.textSecondary
-                    labelRef.background = JBColor(0xE3E8EE, 0x3A3E48)
+                    labelRef.background = ChatTheme.chipBg
                 }
             })
             chipRow.add(chip)
@@ -501,7 +501,7 @@ class ChatToolWindow(private val project: Project) {
     // ---- plus button（点击后在输入框插入 @，复用 @ 文件引用弹窗及筛选机制）----
     private val plusButton = JLabel("+").apply {
         font = ChatTheme.largeFont
-        foreground = JBColor(0x888888, 0x999999)
+        foreground = ChatTheme.codeLangFg
         cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
         border = BorderFactory.createEmptyBorder(0, 4, 0, 4)
         toolTipText = "添加文件引用"
@@ -519,7 +519,7 @@ class ChatToolWindow(private val project: Project) {
     // ---- submit/stop button (arrow → stop) ----
     private val lingmaSubmitBtn = JLabel("→").apply {
         font = ChatTheme.largeFont
-        foreground = JBColor(0x888888, 0xAAAAAA)
+        foreground = ChatTheme.submitBtnFg
         cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
         border = BorderFactory.createEmptyBorder(0, 4, 4, 6)
         toolTipText = "发送 (Enter)"
@@ -528,22 +528,22 @@ class ChatToolWindow(private val project: Project) {
                 if (viewModel.isStreaming) viewModel.stopGeneration() else sendMessage()
             }
             override fun mouseEntered(e: MouseEvent) {
-                if (!viewModel.isStreaming) foreground = JBColor(0x2674B4, 0x5A9FD4)
+                if (!viewModel.isStreaming) foreground = ChatTheme.accentHover
             }
             override fun mouseExited(e: MouseEvent) {
-                if (!viewModel.isStreaming) foreground = JBColor(0x888888, 0xAAAAAA)
+                if (!viewModel.isStreaming) foreground = ChatTheme.submitBtnFg
             }
         })
     }
 
     // ---- main input panel (Lingma style) ----
     private val lingmaInputBorder = BorderFactory.createCompoundBorder(
-        roundedBorder(JBColor(0xD0D0D0, 0x505050)),
+        roundedBorder(ChatTheme.inputBorder),
         BorderFactory.createEmptyBorder(7, 10, 7, 10)
     )
     private val lingmaInputBorderFocused = BorderFactory.createCompoundBorder(
-        roundedBorder(JBColor(0x4A90D9, 0x5A9FD4), 2),
-        BorderFactory.createEmptyBorder(6, 9, 6, 9)
+        roundedBorder(ChatTheme.inputFocus),  // 1px 同默认，仅颜色切换，面板尺寸不变消除跳动
+        BorderFactory.createEmptyBorder(7, 10, 7, 10)
     )
 
     private val inputPanel = object : JPanel(BorderLayout(0, 0)) {
@@ -555,7 +555,7 @@ class ChatToolWindow(private val project: Project) {
         minimumSize = Dimension(150, 80)
         border = lingmaInputBorder
         isOpaque = true
-        background = JBColor(0xFAFBFC, 0x2B2D30)
+        background = ChatTheme.inputPanelBg
 
         // top row: plus + chips (wrapping)
         val topRow = JPanel().apply {
@@ -586,13 +586,29 @@ class ChatToolWindow(private val project: Project) {
         })
     }
 
-    // ---- error banner ----
-    private val errorBanner = JLabel().apply {
+    // ---- error/warning banner（双独立标签，支持 error + warning 互不覆盖）----
+    private val errorBannerPanel = JPanel().apply {
+        layout = BoxLayout(this, BoxLayout.Y_AXIS)
+        isOpaque = false
+        isVisible = false
+    }
+    private val errorLabel = JLabel().apply {
         isVisible = false
         isOpaque = true
         border = JBUI.Borders.empty(6, 12)
-        font = font.deriveFont(Font.PLAIN, 12f)
+        font = ChatTheme.bodyFont
         horizontalAlignment = SwingConstants.CENTER
+        background = ChatTheme.errorBannerBg
+        foreground = ChatTheme.errorBannerFg
+    }
+    private val warningLabel = JLabel().apply {
+        isVisible = false
+        isOpaque = true
+        border = JBUI.Borders.empty(6, 12)
+        font = ChatTheme.bodyFont
+        horizontalAlignment = SwingConstants.CENTER
+        background = ChatTheme.warningBannerBg
+        foreground = ChatTheme.warningBannerFg
     }
 
     private var welcomePanel: JPanel? = null
@@ -602,6 +618,14 @@ class ChatToolWindow(private val project: Project) {
     private var streamingContentPane: JComponent? = null
     private var streamingThinkingRow: JPanel? = null
     private var streamingThinkingTextArea: JTextArea? = null
+
+    /** 滚动节流器：50ms 内多次请求只执行一次实际滚动，避免流式 token 高频排队 EDT */
+    private val scrollThrottle = javax.swing.Timer(50) {
+        val bar = conversationScrollPane.verticalScrollBar
+        val atBottom = bar.value + bar.visibleAmount >= bar.maximum - 80
+        if (atBottom) bar.value = bar.maximum
+    }.apply { isRepeats = false }
+
     // 自动引用去重
     private var lastAutoInsertedHash: Int = 0
     private var lastAutoInsertTime: Long = 0
@@ -639,7 +663,9 @@ class ChatToolWindow(private val project: Project) {
     // ---- main panel ----
     // 注意：不能混用绝对定位(SOUTH)和相对定位(PAGE_END)，相对定位会覆盖绝对定位
     val panel = JPanel(BorderLayout()).apply {
-        add(errorBanner, BorderLayout.NORTH)
+        errorBannerPanel.add(errorLabel)
+        errorBannerPanel.add(warningLabel)
+        add(errorBannerPanel, BorderLayout.NORTH)
         add(createWelcomePanel(), BorderLayout.CENTER)
         add(inputPanel, BorderLayout.SOUTH)
     }
@@ -728,24 +754,24 @@ class ChatToolWindow(private val project: Project) {
 
     private fun createWelcomePanel(): JPanel {
         return JPanel(GridBagLayout()).apply {
-            background = JBColor(0xFAFBFC, 0x2B2D30)
+            background = ChatTheme.inputPanelBg
             val inner = JPanel().apply {
                 layout = BoxLayout(this, BoxLayout.Y_AXIS)
                 isOpaque = false
             }
             val titleLabel = JLabel(AiAssistantBundle.message("chat.welcome.title")).apply {
                 font = ChatTheme.largeFont
-                foreground = JBColor(0x333333, 0xCCCCCC)
+                foreground = ChatTheme.chipFg
                 alignmentX = Component.CENTER_ALIGNMENT
             }
             val descLabel = JLabel(AiAssistantBundle.message("chat.welcome.desc")).apply {
                 font = ChatTheme.bodyFont
-                foreground = JBColor(0x666666, 0xAAAAAA)
+                foreground = ChatTheme.headerTitleFg
                 alignmentX = Component.CENTER_ALIGNMENT
             }
             val poweredLabel = JLabel(AiAssistantBundle.message("chat.welcome.powered")).apply {
                 font = ChatTheme.metaFont
-                foreground = JBColor(0x888888, 0x888888)
+                foreground = ChatTheme.welcomeMutedFg
                 alignmentX = Component.CENTER_ALIGNMENT
             }
             inner.add(titleLabel)
@@ -780,10 +806,13 @@ class ChatToolWindow(private val project: Project) {
                 lingmaSubmitBtn.text = if (streaming) "■" else "→"
                 lingmaSubmitBtn.toolTipText = if (streaming) "停止" else "发送 (Enter)"
                 if (!streaming) {
-                    lingmaSubmitBtn.foreground = JBColor(0x888888, 0xAAAAAA)
-                    // 流式结束，触发一次布局失效；自测量气泡会按最终内容/宽度重测。
-                    conversationContainer.revalidate()
-                    conversationContainer.repaint()
+                    lingmaSubmitBtn.foreground = ChatTheme.submitBtnFg
+                    // P1-2: 清除流式引用，补偿 rebuildConversation 渲染流式期间积压的消息
+                    streamingBubble = null
+                    streamingContentPane = null
+                    streamingThinkingRow = null
+                    streamingThinkingTextArea = null
+                    rebuildConversation()
                 }
             }
         }
@@ -848,6 +877,10 @@ class ChatToolWindow(private val project: Project) {
     private var needFullRebuild = true
 
     private fun rebuildConversation() {
+        // P1-2: 流式进行中不触发全量/增量重建，防止 removeAll 摧毁流式气泡导致布局闪动。
+        // 流式结束后的 onStreamingStateChanged(false) 会补偿调用 rebuildConversation() 统一渲染积压消息。
+        if (viewModel.isStreaming) return
+
         val displayMessages = viewModel.messages.filter { it.role != "system" }
         val hasMessages = displayMessages.isNotEmpty() || viewModel.streamingContent.isNotEmpty() || viewModel.streamingThinking.isNotEmpty()
 
@@ -916,7 +949,7 @@ class ChatToolWindow(private val project: Project) {
             hintPanel.add(
                 JLabel(AiAssistantBundle.message("chat.empty.hint")).apply {
                     font = font.deriveFont(Font.PLAIN, 13f)
-                    foreground = JBColor(0x767676, 0xAAAAAA)
+                    foreground = ChatTheme.emptyHintFg
                     horizontalAlignment = SwingConstants.CENTER
                 },
                 GridBagConstraints()
@@ -1234,7 +1267,7 @@ class ChatToolWindow(private val project: Project) {
                     preferredSize = Dimension(inputPanel.width, 28)
                     minimumSize = Dimension(inputPanel.width, 28)
                     maximumSize = Dimension(inputPanel.width, 28)
-                    if (idx == 0) background = JBColor(0xE0E8F0, 0x3A4048)
+                    if (idx == 0) background = ChatTheme.menuSelectedBg
                 }
                 if (cmd != null) item.addActionListener { executeCommand(cmd) }
                 else item.addActionListener {
@@ -1252,7 +1285,7 @@ class ChatToolWindow(private val project: Project) {
             val items = popup.components.filterIsInstance<JMenuItem>()
             if (items.isEmpty()) return
             selectedIndex = (selectedIndex + delta).coerceIn(0, items.lastIndex)
-            items.forEachIndexed { i, it -> it.background = if (i == selectedIndex) JBColor(0xE0E8F0, 0x3A4048) else null }
+            items.forEachIndexed { i, it -> it.background = if (i == selectedIndex) ChatTheme.menuSelectedBg else null }
         }
 
         // 文本框内容变化时实时筛选（先隐后显，确保弹窗高度随内容自适应、始终紧贴输入框）
@@ -1349,7 +1382,7 @@ class ChatToolWindow(private val project: Project) {
                     preferredSize = Dimension(inputPanel.width, 28)
                     minimumSize = Dimension(inputPanel.width, 28)
                     maximumSize = Dimension(inputPanel.width, 28)
-                    if (idx == 0) background = JBColor(0xE0E8F0, 0x3A4048)
+                    if (idx == 0) background = ChatTheme.menuSelectedBg
                 }
                 item.addActionListener { doSelect() }
                 popup.add(item)
@@ -1361,7 +1394,7 @@ class ChatToolWindow(private val project: Project) {
             val items = popup.components.filterIsInstance<JMenuItem>()
             if (items.isEmpty()) return
             selectedIndex = (selectedIndex + delta).coerceIn(0, items.lastIndex)
-            items.forEachIndexed { i, it -> it.background = if (i == selectedIndex) JBColor(0xE0E8F0, 0x3A4048) else null }
+            items.forEachIndexed { i, it -> it.background = if (i == selectedIndex) ChatTheme.menuSelectedBg else null }
         }
 
         fileRefFilter = { text ->
@@ -1554,37 +1587,37 @@ class ChatToolWindow(private val project: Project) {
     }
 
     private fun showError(message: String) {
-        errorBanner.text = message
-        errorBanner.background = JBColor(0xFFEBEE, 0x462828)
-        errorBanner.foreground = JBColor(0xB00020, 0xFFB4B4)
-        errorBanner.isVisible = true
+        errorLabel.text = message
+        errorLabel.isVisible = true
+        errorBannerPanel.isVisible = true
+        // 互斥：显示 error 时隐藏 warning
+        warningLabel.isVisible = false
     }
 
     private fun showWarning(message: String) {
-        errorBanner.text = message
-        errorBanner.background = JBColor(0xFFF3CD, 0x3C3214)
-        errorBanner.foreground = JBColor(0x856404, 0xFFE696)
-        errorBanner.isVisible = true
+        warningLabel.text = message
+        warningLabel.isVisible = true
+        errorBannerPanel.isVisible = true
+        // 互斥：显示 warning 时隐藏 error
+        errorLabel.isVisible = false
     }
 
     private fun hideError() {
-        errorBanner.isVisible = false
+        errorLabel.isVisible = false
+        warningLabel.isVisible = false
+        errorBannerPanel.isVisible = false
     }
 
     /** 仅当用户已在底部附近时才自动滚动，避免打断浏览历史消息 */
     private fun scrollToBottom(force: Boolean = false) {
-        // 双重 invokeLater：确保 revalidate() 触发的 layout 在 EDT 上完成后再读 bar.maximum，
-        // 否则滚动基于旧布局高度，导致末尾内容被遮挡。
-        SwingUtilities.invokeLater {
+        if (force) {
+            // 强制滚动（发送消息后）立即执行，不节流
             SwingUtilities.invokeLater {
-                val bar = conversationScrollPane.verticalScrollBar
-                if (force) {
-                    bar.value = bar.maximum
-                } else {
-                    val atBottom = bar.value + bar.visibleAmount >= bar.maximum - 80
-                    if (atBottom) bar.value = bar.maximum
-                }
+                conversationScrollPane.verticalScrollBar.value = conversationScrollPane.verticalScrollBar.maximum
             }
+        } else {
+            // 节流：50ms 内多次调用只执行最后一次，减少 EDT 排队
+            scrollThrottle.restart()
         }
     }
 }

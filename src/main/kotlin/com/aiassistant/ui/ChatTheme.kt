@@ -35,6 +35,24 @@ object ChatTheme {
     /** 辅助/弱化文字 — 折叠文字、时间戳、args 预览、Markdown 引用块 */
     val textMuted = JBColor(0x989AA2, 0x7A7D85)
 
+    /** 按钮 hover 强调色 — newSessionBtn、plusButton、lingmaSubmitBtn、RefChip hover */
+    val accentHover = JBColor(0x2674B4, 0x5A9FD4)
+
+    /** 标题/描述文字色 — conversationHeader "对话"标题、welcomePanel descLabel */
+    val headerTitleFg = JBColor(0x666666, 0xAAAAAA)
+
+    /** 输入面板整体背景 — inputPanel、welcomePanel */
+    val inputPanelBg = JBColor(0xFAFBFC, 0x2B2D30)
+
+    /** 欢迎面板弱文字 — welcomePanel poweredLabel */
+    val welcomeMutedFg = JBColor(0x888888, 0x888888)
+
+    /** 空态提示文字 — 对话区无消息时 hint */
+    val emptyHintFg = JBColor(0x767676, 0xAAAAAA)
+
+    /** 弹窗菜单选中项背景 — 斜杠命令菜单、文件引用菜单 */
+    val menuSelectedBg = JBColor(0xE0E8F0, 0x3A4048)
+
 
     // ═══════════════════════════════════════════════════════════════
     // 气泡 — 用户/AI 对话气泡
@@ -90,10 +108,25 @@ object ChatTheme {
     val inputBg = JBColor(0xFFFFFF, 0x1E1F22)
 
     /** 输入面板边框（默认）— ChatToolWindow inputPanel */
-    val inputBorder = JBColor(0xC9CCD6, 0x4E5157)
+    val inputBorder = JBColor(0xD0D0D0, 0x505050)
 
     /** 输入面板边框（聚焦）— ChatToolWindow inputPanel */
-    val inputFocus = JBColor(0x4A90D9, 0x4A90D9)
+    val inputFocus = JBColor(0x4A90D9, 0x5A9FD4)
+
+    /** 引用/图片芯片背景 — chipPanel chips、气泡底部 RefChip 按钮 */
+    val chipBg = JBColor(0xE3E8EE, 0x3A3E48)
+
+    /** 引用/图片芯片边框 — chipPanel chips、气泡底部 RefChip 按钮 */
+    val chipBorder = JBColor(0xC0C8D0, 0x505560)
+
+    /** 引用/图片芯片文字色 — chipPanel 芯片标签、welcomePanel 标题 */
+    val chipFg = JBColor(0x333333, 0xCCCCCC)
+
+    /** 引用芯片 hover 背景 — 气泡底部 RefChip 按钮 hover */
+    val chipHoverBg = JBColor(0xD0D8E8, 0x4A4E58)
+
+    /** 发送/删除按钮前景 — lingmaSubmitBtn、芯片 × 按钮 */
+    val submitBtnFg = JBColor(0x888888, 0xAAAAAA)
 
 
     // ═══════════════════════════════════════════════════════════════
@@ -139,6 +172,18 @@ object ChatTheme {
      * Dark:  与 error 边框 dark 一致
      */
     val rejectedFg = JBColor(0xC0392B, 0xE08A72)
+
+    /** 错误横幅背景 — errorBanner showError */
+    val errorBannerBg = JBColor(0xFFEBEE, 0x462828)
+
+    /** 错误横幅文字 — errorBanner showError */
+    val errorBannerFg = JBColor(0xB00020, 0xFFB4B4)
+
+    /** 警告横幅背景 — errorBanner showWarning */
+    val warningBannerBg = JBColor(0xFFF3CD, 0x3C3214)
+
+    /** 警告横幅文字 — errorBanner showWarning */
+    val warningBannerFg = JBColor(0x856404, 0xFFE696)
 
 
     // ═══════════════════════════════════════════════════════════════
@@ -206,7 +251,7 @@ object ChatTheme {
     const val PLAN_PROGRESS_W = 60
 
     /** PlanBar 迷你进度条高度 — PlanBar.buildSummary */
-    const val PLAN_PROGRESS_H = 12
+    const val PLAN_PROGRESS_H = 5
 
 
     // ═══════════════════════════════════════════════════════════════

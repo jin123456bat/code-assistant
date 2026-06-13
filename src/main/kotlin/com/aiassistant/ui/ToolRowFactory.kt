@@ -185,9 +185,8 @@ class ToolRowFactory(private val availableWidth: () -> Int) {
 
         val argsPreview = argsPart.replace('\n', ' ').replace('\r', ' ').take(40)
             .let { if (argsPart.length > 40) "$it…" else it }
-        val resultText = resultPart.let {
-            if (it.length > ChatTheme.RESULT_MAX_CHARS) it.take(ChatTheme.RESULT_MAX_CHARS) + "\n… (已截断)" else it
-        }
+        val isTruncated = resultPart.length > ChatTheme.RESULT_MAX_CHARS
+        val displayText = if (isTruncated) resultPart.take(ChatTheme.RESULT_MAX_CHARS) + "\n… (已截断)" else resultPart
         val lineCount = resultPart.count { it == '\n' } + 1
 
         val outerRow = outerRow()
@@ -242,7 +241,7 @@ class ToolRowFactory(private val availableWidth: () -> Int) {
             }
 
             if (!isCollapsed && hasResult) {
-                val textArea = JTextArea(resultText).apply {
+                val textArea = JTextArea(displayText).apply {
                     isEditable = false; lineWrap = true; wrapStyleWord = true
                     font = toolCodeFont; background = ChatTheme.codeBg
                     foreground = ChatTheme.textSecondary; border = JBUI.Borders.empty(4, 6)
@@ -254,6 +253,24 @@ class ToolRowFactory(private val availableWidth: () -> Int) {
                         JBUI.Borders.empty(0, 0)
                     )
                     add(textArea, BorderLayout.CENTER)
+                }
+                // 截断时添加"展开全部"按钮，保留完整 resultPart 引用
+                if (isTruncated) {
+                    val expandBtn = JLabel("展开全部 ▼").apply {
+                        font = ChatTheme.metaFont
+                        foreground = ChatTheme.toolFg
+                        cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
+                        border = JBUI.Borders.empty(4, 6, 4, 6)
+                        addMouseListener(object : java.awt.event.MouseAdapter() {
+                            override fun mouseClicked(e: java.awt.event.MouseEvent) {
+                                textArea.text = resultPart  // 完整原文
+                                codePanel.remove(this@apply)
+                                bubble.revalidate()
+                                bubble.repaint()
+                            }
+                        })
+                    }
+                    codePanel.add(expandBtn, BorderLayout.SOUTH)
                 }
                 bubble.add(codePanel, BorderLayout.CENTER)
             }
