@@ -20,7 +20,7 @@ class ExecuteCommandTool : AgentTool {
     )
 
     override fun execute(params: Map<String, String>, project: Project): ToolResult {
-        val command = params["command"] ?: return ToolResult.err("缺少 command 参数")
+        val command = params["command"]?.takeIf { it.isNotBlank() } ?: return ToolResult.err("command 不能为空")
         val basePath = project.basePath ?: return ToolResult.err("项目路径不可用")
         val workingDir = params["working_dir"]?.let { wd ->
             if (File(wd).isAbsolute) File(wd) else File(basePath, wd)
@@ -40,7 +40,7 @@ class ExecuteCommandTool : AgentTool {
                 .redirectErrorStream(true)
                 .start()
 
-            val output = process.inputStream.bufferedReader().readText()
+            val output = process.inputStream.bufferedReader().use { it.readText() }
             val finished = process.waitFor(30, TimeUnit.SECONDS)
             if (!finished) {
                 process.destroyForcibly()

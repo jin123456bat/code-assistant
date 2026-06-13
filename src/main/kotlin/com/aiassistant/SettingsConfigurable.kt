@@ -189,7 +189,7 @@ class SettingsConfigurable : Configurable {
 
     override fun isModified(): Boolean {
         val service = AppSettingsService.getInstance()
-        val savedApiKey = cachedApiKey ?: ""
+        val savedApiKey = service.getApiKey() ?: ""
         val inputApiKey = String(apiKeyField.password)
         if (savedApiKey != inputApiKey) return true
 
@@ -198,7 +198,8 @@ class SettingsConfigurable : Configurable {
         if (savedPrompt != inputPrompt) return true
 
         val savedModel = service.getModel()
-        val selectedModel = AppSettingsService.AVAILABLE_MODELS[modelCombo.selectedIndex].first
+        val idx = modelCombo.selectedIndex
+        val selectedModel = if (idx >= 0) AppSettingsService.AVAILABLE_MODELS[idx].first else ""
         if (savedModel != selectedModel) return true
 
         return false
@@ -225,8 +226,11 @@ class SettingsConfigurable : Configurable {
         val prompt = promptArea.text.trim()
         service.setPrompt(prompt.ifBlank { null })
 
-        val model = AppSettingsService.AVAILABLE_MODELS[modelCombo.selectedIndex].first
-        service.setModel(model)
+        val idx = modelCombo.selectedIndex
+        if (idx >= 0) {
+            val model = AppSettingsService.AVAILABLE_MODELS[idx].first
+            service.setModel(model)
+        }
 
         statusLabel.text = AiAssistantBundle.message("settings.key.saved")
         statusLabel.foreground = JBColor(0x1B5E20, 0x80C080)

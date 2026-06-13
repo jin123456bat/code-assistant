@@ -53,7 +53,7 @@ private fun runGit(project: Project, vararg args: String): ToolResult {
         val process = ProcessBuilder("git", "-C", basePath, *args)
             .redirectErrorStream(true)
             .start()
-        val output = process.inputStream.bufferedReader().readText()
+        val output = process.inputStream.bufferedReader().use { it.readText() }
         val finished = process.waitFor(10, TimeUnit.SECONDS); if (!finished) { process.destroyForcibly(); process.waitFor(2, TimeUnit.SECONDS) }
         ToolResult.ok(output.ifBlank { "(无输出)" })
     } catch (e: Exception) {

@@ -25,7 +25,7 @@ class ReadFileTool : AgentTool {
     )
 
     override fun execute(params: Map<String, String>, project: Project): ToolResult {
-        val relativePath = params["path"] ?: return ToolResult.err("缺少 path 参数")
+        val relativePath = params["path"]?.takeIf { it.isNotBlank() } ?: return ToolResult.err("path 不能为空")
         val basePath = project.basePath ?: return ToolResult.err("项目路径不可用")
         val file = if (File(relativePath).isAbsolute) File(relativePath) else File(basePath, relativePath)
 

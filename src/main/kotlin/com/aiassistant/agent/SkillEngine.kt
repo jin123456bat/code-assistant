@@ -40,7 +40,9 @@ object SkillEngine {
                     if (skill != null) {
                         tools.add(SkillTool(skill.name, skill.description, skill.prompt, file.parentFile))
                     }
-                } catch (_: Throwable) {}  // 包括 StackOverflowError
+                } catch (e: Exception) {
+                    // 单个 skill 解析失败不影响其他 skill 加载
+                }
             }
         }
     }

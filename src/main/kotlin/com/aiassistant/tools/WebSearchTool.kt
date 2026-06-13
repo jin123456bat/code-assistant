@@ -21,7 +21,7 @@ class WebSearchTool : AgentTool {
     )
 
     override fun execute(params: Map<String, String>, project: Project): ToolResult {
-        val query = params["query"] ?: return ToolResult.err("缺少 query 参数")
+        val query = params["query"]?.takeIf { it.isNotBlank() } ?: return ToolResult.err("query 不能为空")
         val maxResults = params["max_results"]?.toIntOrNull() ?: 10
 
         return try {
@@ -33,7 +33,7 @@ class WebSearchTool : AgentTool {
                 setRequestProperty("User-Agent", "CodeAssistant/1.0")
             }
 
-            val html = connection.inputStream.bufferedReader().readText()
+            val html = connection.inputStream.bufferedReader().use { it.readText() }
             connection.disconnect()
 
             val results = parseResults(html, maxResults)

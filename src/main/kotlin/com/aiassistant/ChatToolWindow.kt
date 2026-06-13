@@ -94,6 +94,9 @@ class ChatToolWindow(private val project: Project) {
         fun addRefreshListener(listener: () -> Unit) {
             refreshListeners.add(listener)
         }
+        fun removeRefreshListener(listener: () -> Unit) {
+            refreshListeners.remove(listener)
+        }
 
         fun notifySettingsChanged() {
             refreshListeners.toList().forEach { it.invoke() }
@@ -117,6 +120,7 @@ class ChatToolWindow(private val project: Project) {
         }
     }
 
+    private val checkEmptyListener: () -> Unit = { checkEmptyState() }
     private val viewModel = ChatViewModel()
 
     /** 本窗口注册到 AskUserBridge 的 handler 引用，dispose 时据此安全解绑。 */
@@ -139,6 +143,12 @@ class ChatToolWindow(private val project: Project) {
     /** 工具窗关闭时调用：解绑全局 handler，停止 agent，避免回调打到失效 UI / 线程泄漏。 */
     fun dispose() {
         KeyboardFocusManager.getCurrentKeyboardFocusManager().removeKeyEventDispatcher(popupKeyDispatcher)
+        removeRefreshListener(checkEmptyListener)
+        // 清理所有 editor selection listeners
+        editorListeners.forEach { (editor, listener) ->
+            editor.selectionModel.removeSelectionListener(listener)
+        }
+        editorListeners.clear()
         com.intellij.openapi.util.Disposer.dispose(editorListenerDisposable)
         trackedEditors.clear()
         if (askUserHandler != null && AskUserBridge.handler === askUserHandler) {
@@ -597,6 +607,7 @@ class ChatToolWindow(private val project: Project) {
     private val editorListenerDisposable = com.intellij.openapi.Disposable { }
     /** 已注册 SelectionListener 的编辑器集合，用于 dispose 时清理 */
     private val trackedEditors = mutableSetOf<com.intellij.openapi.editor.Editor>()
+    private val editorListeners = mutableMapOf<com.intellij.openapi.editor.Editor, com.intellij.openapi.editor.event.SelectionListener>()
 
     // ---- plan bar（置顶，不随消息滚动）----
     private val planBar = PlanBar().also { it.updatePlan(null) }
@@ -658,7 +669,7 @@ class ChatToolWindow(private val project: Project) {
             }
         }
         bindViewModel()
-        addRefreshListener { checkEmptyState() }
+        addRefreshListener(checkEmptyListener)
         ApplicationManager.getApplication().invokeLater { checkEmptyState() }
 
         // viewport 宽度变化时重算气泡：仅在宽度真正改变时触发。这样首次 viewport
@@ -683,7 +694,7 @@ class ChatToolWindow(private val project: Project) {
                 override fun editorCreated(event: com.intellij.openapi.editor.event.EditorFactoryEvent) {
                     val editor = event.editor
                     trackedEditors.add(editor)
-                    editor.selectionModel.addSelectionListener(object : com.intellij.openapi.editor.event.SelectionListener {
+                    val sl = object : com.intellij.openapi.editor.event.SelectionListener {
                         override fun selectionChanged(e: com.intellij.openapi.editor.event.SelectionEvent) {
                             if (e.newRange != null && e.newRange!!.length > 0) {
                                 if (System.currentTimeMillis() - lastAutoInsertTime < 100) return
@@ -697,9 +708,14 @@ class ChatToolWindow(private val project: Project) {
                                 }
                             }
                         }
-                    })
+                    }
+                    editor.selectionModel.addSelectionListener(sl)
+                    editorListeners[editor] = sl
                 }
                 override fun editorReleased(event: com.intellij.openapi.editor.event.EditorFactoryEvent) {
+                    editorListeners.remove(event.editor)?.let {
+                        event.editor.selectionModel.removeSelectionListener(it)
+                    }
                     trackedEditors.remove(event.editor)
                 }
             },

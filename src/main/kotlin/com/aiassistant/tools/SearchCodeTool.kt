@@ -21,14 +21,15 @@ class SearchCodeTool : AgentTool {
     )
 
     override fun execute(params: Map<String, String>, project: Project): ToolResult {
-        val query = params["query"] ?: return ToolResult.err("缺少 query 参数")
+        val query = params["query"]?.takeIf { it.isNotBlank() } ?: return ToolResult.err("query 不能为空")
         val basePath = project.basePath ?: return ToolResult.err("项目路径不可用")
         val filePattern = params["file_pattern"]
         val caseSensitive = params["case_sensitive"]?.toBoolean() ?: false
         val maxResults = params["max_results"]?.toIntOrNull() ?: 30
 
         return try {
-            val args = mutableListOf("grep", "-rn", "--include=$filePattern")
+            val args = mutableListOf("grep", "-rn")
+            if (filePattern != null) args.add("--include=$filePattern")
             if (!caseSensitive) args.add("-i")
             args.addAll(listOf("-m", maxResults.toString(), query, "."))
 
@@ -37,7 +38,7 @@ class SearchCodeTool : AgentTool {
                 .redirectErrorStream(true)
                 .start()
 
-            val output = process.inputStream.bufferedReader().readText()
+            val output = process.inputStream.bufferedReader().use { it.readText() }
             val finished = process.waitFor(10, TimeUnit.SECONDS); if (!finished) { process.destroyForcibly(); process.waitFor(2, TimeUnit.SECONDS) }
 
             val lines = output.lines().filter { it.isNotBlank() }.take(maxResults)

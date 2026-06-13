@@ -107,6 +107,8 @@ class NotebookEditTool : AgentTool {
             }
             if (!done) clone.add(newCell)
         }
+        // 先清空再追加：避免 addAll 导致数组膨胀
+        for (i in cells.size() - 1 downTo 0) cells.remove(i)
         cells.addAll(clone)
     }
 
@@ -118,6 +120,7 @@ class NotebookEditTool : AgentTool {
             }
         }
         if (clone.size() == cells.size()) throw IllegalStateException("未找到 cell id: $cellId")
+        for (i in cells.size() - 1 downTo 0) cells.remove(i)
         cells.addAll(clone)
     }
 }
