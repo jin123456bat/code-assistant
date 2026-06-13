@@ -84,6 +84,8 @@ open class SseClient {
                         }
                     }
                 }
+                // EOF（服务器正常关流但未发 [DONE]）也视为完成，避免调用方 120s 超时等待
+                if (!cancelled) callback.onDone()
             } catch (e: Exception) {
                 if (!cancelled) {
                     AppLogger.requestFailed(0, "${e.javaClass.simpleName}: ${e.message}")

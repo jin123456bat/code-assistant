@@ -256,6 +256,12 @@ object ChatTheme {
     /** PlanBar 小字相对于 metaFont 的偏移 — PlanBar 描述步骤文字 */
     const val META_FONT_OFFSET = 2
 
+    /** 标题/大按钮字号 — ChatToolWindow newSessionBtn/plusButton/lingmaSubmitBtn/welcome 标题 */
+    val largeFont: Font get() = JBFont.regular().deriveFont(Font.BOLD, JBFont.regular().size + 6f)
+
+    /** 对话头字号 — ChatToolWindow conversationHeader 标题 */
+    val headerFont: Font get() = JBFont.regular().deriveFont(Font.BOLD)
+
 
     // ═══════════════════════════════════════════════════════════════
     // 文本截断/预览长度

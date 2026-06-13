@@ -447,7 +447,7 @@ $claudeMdContent
         // 2. 项目根 CLAUDE.md
         val projectRoot = java.io.File(basePath, "CLAUDE.md")
         if (projectRoot.exists()) {
-            try { parts.add(projectRoot.readText().removePrefix("<!--").also { /* strip HTML comments */ }) } catch (_: Exception) {}
+            try { parts.add(projectRoot.readText()) } catch (_: Exception) {}
         }
 
         // 3. .claude/CLAUDE.md

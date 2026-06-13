@@ -161,7 +161,7 @@ class ChatToolWindow(private val project: Project) {
 
     // ---- conversation header ----
     private val newSessionBtn = JLabel("+").apply {
-        font = Font(Font.SANS_SERIF, Font.PLAIN, 18)
+        font = ChatTheme.largeFont.deriveFont(18f)
         foreground = JBColor(0x888888, 0x999999)
         cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
         toolTipText = "新会话"
@@ -176,7 +176,7 @@ class ChatToolWindow(private val project: Project) {
         isOpaque = false
         border = JBUI.Borders.empty(4, 10, 4, 8)
         add(JLabel("对话").apply {
-            font = Font(Font.SANS_SERIF, Font.BOLD, 12)
+            font = ChatTheme.headerFont
             foreground = JBColor(0x666666, 0xAAAAAA)
         }, BorderLayout.WEST)
         add(newSessionBtn, BorderLayout.EAST)
@@ -264,7 +264,7 @@ class ChatToolWindow(private val project: Project) {
     private val inputArea = JTextArea(3, 20).apply {
         lineWrap = true
         wrapStyleWord = true
-        font = Font(Font.SANS_SERIF, Font.PLAIN, 14)
+        font = ChatTheme.bodyFont
         border = JBUI.Borders.empty(4, 4)
         addKeyListener(object : KeyAdapter() {
             override fun keyPressed(e: KeyEvent) {
@@ -341,11 +341,11 @@ class ChatToolWindow(private val project: Project) {
                 toolTipText = "已粘贴图片 (${img.mediaType})"
             }
             chipComp.add(JLabel("图片 ${idx + 1}").apply {
-                font = Font(Font.SANS_SERIF, Font.PLAIN, 11)
+                font = ChatTheme.metaFont
                 foreground = JBColor(0x333333, 0xCCCCCC)
             })
             val removeBtn = JLabel("×").apply {
-                font = Font(Font.SANS_SERIF, Font.BOLD, 13)
+                font = ChatTheme.metaFont.deriveFont(Font.BOLD)
                 foreground = JBColor(0x888888, 0xAAAAAA)
                 cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
                 border = BorderFactory.createEmptyBorder(0, 2, 0, 2)
@@ -377,11 +377,11 @@ class ChatToolWindow(private val project: Project) {
                 chip.label
             }
             chipComp.add(JLabel(displayText).apply {
-                font = Font(Font.SANS_SERIF, Font.PLAIN, 11)
+                font = ChatTheme.metaFont
                 foreground = JBColor(0x333333, 0xCCCCCC)
             })
             val removeBtn = JLabel("×").apply {
-                font = Font(Font.SANS_SERIF, Font.BOLD, 13)
+                font = ChatTheme.metaFont.deriveFont(Font.BOLD)
                 foreground = JBColor(0x888888, 0xAAAAAA)
                 cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
                 border = BorderFactory.createEmptyBorder(0, 2, 0, 2)
@@ -496,7 +496,7 @@ class ChatToolWindow(private val project: Project) {
 
     // ---- plus button（点击后在输入框插入 @，复用 @ 文件引用弹窗及筛选机制）----
     private val plusButton = JLabel("+").apply {
-        font = Font(Font.SANS_SERIF, Font.BOLD, 20)
+        font = ChatTheme.largeFont
         foreground = JBColor(0x888888, 0x999999)
         cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
         border = BorderFactory.createEmptyBorder(0, 4, 0, 4)
@@ -514,7 +514,7 @@ class ChatToolWindow(private val project: Project) {
 
     // ---- submit/stop button (arrow → stop) ----
     private val lingmaSubmitBtn = JLabel("→").apply {
-        font = Font(Font.SANS_SERIF, Font.BOLD, 20)
+        font = ChatTheme.largeFont
         foreground = JBColor(0x888888, 0xAAAAAA)
         cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
         border = BorderFactory.createEmptyBorder(0, 4, 4, 6)
@@ -731,17 +731,17 @@ class ChatToolWindow(private val project: Project) {
                 isOpaque = false
             }
             val titleLabel = JLabel(AiAssistantBundle.message("chat.welcome.title")).apply {
-                font = Font(Font.SANS_SERIF, Font.BOLD, 20)
+                font = ChatTheme.largeFont
                 foreground = JBColor(0x333333, 0xCCCCCC)
                 alignmentX = Component.CENTER_ALIGNMENT
             }
             val descLabel = JLabel(AiAssistantBundle.message("chat.welcome.desc")).apply {
-                font = Font(Font.SANS_SERIF, Font.PLAIN, 13)
+                font = ChatTheme.bodyFont
                 foreground = JBColor(0x666666, 0xAAAAAA)
                 alignmentX = Component.CENTER_ALIGNMENT
             }
             val poweredLabel = JLabel(AiAssistantBundle.message("chat.welcome.powered")).apply {
-                font = Font(Font.SANS_SERIF, Font.PLAIN, 11)
+                font = ChatTheme.metaFont
                 foreground = JBColor(0x888888, 0x888888)
                 alignmentX = Component.CENTER_ALIGNMENT
             }
@@ -1002,15 +1002,7 @@ class ChatToolWindow(private val project: Project) {
             "thinking" -> createCollapsibleThinkingBubble(message.content)
             "tool" -> createToolResultBubble(message)    // 工具调用+结果，可折叠
             "user" -> createUserBubble(message)
-            "assistant" -> {
-                if (message.toolCalls != null && message.toolCalls.isNotEmpty()) {
-                    // 文本用 ChatBubble，工具调用仅展示不重复创建工具块
-                    // 真正的执行+结果由 onToolExecute/onToolResult → "tool" 消息处理
-                    createAssistantBubble(message)
-                } else {
-                    createAssistantBubble(message)
-                }
-            }
+            "assistant" -> createAssistantBubble(message)
             else -> createAssistantBubble(message)
         }
     }
@@ -1027,9 +1019,6 @@ class ChatToolWindow(private val project: Project) {
             }
         }
     }
-
-    private val BODY_FONT = Font(Font.SANS_SERIF, Font.PLAIN, 13)
-    private val SMALL_FONT = Font(Font.SANS_SERIF, Font.PLAIN, 11)
 
     private fun createUserBubble(message: AgentMessage): JPanel {
         val (row, bubble, content) = bubbleFactory.userBubble(message)
@@ -1050,13 +1039,6 @@ class ChatToolWindow(private val project: Project) {
         return row
     }
 
-    /**
-     * 工具调用行 — 委托给 ToolRowFactory（单色折叠行，替代紫色气泡）
-     */
-    private fun createToolCallBubble(message: AgentMessage): JPanel {
-        return toolRowFactory.toolCallRow(message)
-    }
-
     /** 工具结果行 — 委托给 ToolRowFactory（默认折叠），待审批时附加审批按钮 */
     private fun createToolResultBubble(message: AgentMessage): JPanel {
         val name = message.toolName ?: "tool"
@@ -1073,22 +1055,6 @@ class ChatToolWindow(private val project: Project) {
             )
         } else null
         return toolRowFactory.toolResultRow(message, approvals)
-    }
-
-    /** 思考中轻量指示器 — textMuted 斜体，FlowLayout 自然左对齐无需 glue */
-    private fun createThinkingBubble(text: String): JPanel {
-        val panel = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
-            isOpaque = false
-            alignmentX = Component.LEFT_ALIGNMENT
-            border = JBUI.Borders.empty(2, 0)
-        }
-        val label = JLabel(text).apply {
-            font = ChatTheme.metaFont.deriveFont(java.awt.Font.ITALIC)
-            foreground = ChatTheme.textMuted
-            border = JBUI.Borders.empty(2, 4)
-        }
-        panel.add(label)
-        return panel
     }
 
     /** 可折叠的思考内容行 — 委托给 ToolRowFactory（替代薰衣草色气泡） */
@@ -1479,10 +1445,6 @@ class ChatToolWindow(private val project: Project) {
         inputArea.requestFocus()
     }
 
-    private fun insertCodeReference() {
-        addSelectionToChips()
-    }
-
     private fun addSelectionToChips() {
         val editor = FileEditorManager.getInstance(project).selectedTextEditor ?: return
         if (!editor.selectionModel.hasSelection()) return
@@ -1506,10 +1468,6 @@ class ChatToolWindow(private val project: Project) {
         refChips.add(chip)
         rebuildChips()
         activateToolWindow()
-    }
-
-    private fun insertFileReference() {
-        showFileRefPopup()
     }
 
     /** 取消选中时移除选区芯片 */

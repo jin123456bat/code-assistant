@@ -213,6 +213,15 @@ class ChatViewModel(
                     onMessagesChanged?.invoke()
                 }
             }
+        } else {
+            // agent 未初始化（initialize() 未被调用），恢复状态并向用户展示错误
+            isStreaming = false
+            streamingContent = ""
+            runOnEdt {
+                messages.add(AgentMessage("assistant", "Agent 未初始化，请重新打开对话窗口"))
+                activity = Activity.Idle
+                onMessagesChanged?.invoke()
+            }
         }
         return msg.id
     }
