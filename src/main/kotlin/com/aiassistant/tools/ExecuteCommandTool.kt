@@ -12,7 +12,7 @@ import java.util.concurrent.TimeUnit
  */
 class ExecuteCommandTool : AgentTool {
     override val name = "execute_command"
-    override val description = "在项目根目录执行终端命令。首次执行通过内联 PermissionCard 确认，确认后自动加入白名单。"
+    override val description = "在项目根目录执行终端命令。首次执行通过内联审批选择卡确认，确认后自动加入白名单。"
     override val parameters = listOf(
         ToolParameter("command", "string", "要执行的 shell 命令", required = true),
         ToolParameter("working_dir", "string", "工作目录，相对于项目根目录（可选）")
@@ -43,7 +43,7 @@ class ExecuteCommandTool : AgentTool {
             }
         }
 
-        // 确认由 AgentLoop.onConfirmTool → PermissionCard 统一处理，工具层不再弹窗
+        // 确认由 AgentLoop.onConfirmTool → 审批选择卡统一处理，工具层不再弹窗
         return try {
             val shell = if (System.getProperty("os.name").lowercase().contains("win")) {
                 arrayOf("cmd.exe", "/c", command)

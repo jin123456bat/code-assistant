@@ -10,7 +10,7 @@ import javax.swing.border.AbstractBorder
 /**
  * ask_user 工具的选择卡片（M5-A / M5-B 多选扩展）。
  *
- * 外观与 [PermissionCard] 一致：
+ * 外观与审批选择卡一致：
  * - 圆角卡片，toolBg 淡填充 + toolBar 色边框
  * - 头部行：问题文字（粗体 toolFg）
  *
@@ -232,7 +232,7 @@ object SelectionCard {
     }
 
     /**
-     * 单选模式：构建单个选项行（与 PermissionCard.buildOptionRow 视觉一致）。
+     * 单选模式：构建单个选项行。
      */
     private fun buildSingleOptionRow(
         option: String,
@@ -430,7 +430,7 @@ object SelectionCard {
         card.repaint()
     }
 
-    // ---- 圆角边框（与 PermissionCard.CardBorder 相同实现）----
+    // ---- 圆角边框 ----
 
     private class CardBorder(private val color: Color) : AbstractBorder() {
         override fun paintBorder(c: Component, g: Graphics, x: Int, y: Int, w: Int, h: Int) {

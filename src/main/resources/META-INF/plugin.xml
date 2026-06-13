@@ -29,7 +29,7 @@
         <toolWindow
             id="Code Assistant"
             anchor="right"
-            icon="AllIcons.Actions.Annotate"
+            icon="/icons/icon.svg"
             factoryClass="com.aiassistant.ChatToolWindowFactory"/>
 
         <applicationConfigurable
@@ -56,7 +56,7 @@
             class="com.aiassistant.actions.GenerateCommitAction"
             text="action.generate.commit"
             description="action.generate.commit.desc"
-            icon="AllIcons.Actions.Annotate">
+            icon="/icons/icon.svg">
             <add-to-group group-id="Vcs.MessageActionGroup" anchor="last"/>
         </action>
 
@@ -65,7 +65,7 @@
             class="com.aiassistant.actions.SendToChatAction"
             text="action.send.to.chat"
             description="action.send.to.chat.desc"
-            icon="AllIcons.Actions.Annotate">
+            icon="/icons/icon.svg">
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
             <keyboard-shortcut keymap="$default" first-keystroke="control shift ENTER"/>
         </action>

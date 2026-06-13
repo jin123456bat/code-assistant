@@ -42,6 +42,8 @@ object ChatTheme {
     val error = JBColor(0xB5503E, 0xE08A72)
     val errorCardBg = JBColor(Color(181, 80, 62, 15), Color(224, 138, 114, 25))
     val doneCheck = JBColor(0x5AA86A, 0x5AA86A)
+    /** 审批拒绝色：light 红（区别于边框 error 色）/ dark 与边框 error 一致 */
+    val rejectedFg = JBColor(0xC0392B, 0xE08A72)
 
     // ---- 间距（逻辑 px，交给 JBUI.Borders/scale 再缩放）----
     const val GAP_BUBBLE = 10

@@ -206,11 +206,10 @@ LLM 通过 `create_plan` 元工具自主创建执行计划，`update_plan_step` 
 - `thinkingRow`: 默认折叠，摘要取前 100 chars 双行截断；展开显示全文。流式展示时 `initiallyExpanded=true`，通过 `updateStreamingThinking()` 原地更新 JTextArea 文本（`area.text = content`），避免 remove/add 布局震荡
 - `runningRow`: 盲文 spinner（⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏）+ "执行中 · toolName"
 - `errorCardRow`: 失败时红色左栏 + "✕ toolName 失败" + errorCodeBg 详情
-- **审批选择卡**（`approvalActions != null` 时启用）：
-  - 在 tool 行下方附加一个 `approvalCard`（与 `toolResultRow` 同一返回容器）
-  - 卡片样式：圆角 `toolBg` 背景 + `toolBar` 色圆角边框，与 SelectionCard 统一
-  - 头部 "审批 · toolName"，下跟三个纵向排列的 chevron 选项行
-  - 点击选项 → 卡片标记为已选（✓ 绿）→ 所有行禁用 → 回调执行
+- **审批选项**（`approvalActions != null` 时启用）：
+  - 审批选项直接内联到 tool 结果 bubble 内，紧接头部行下方，不创建独立卡片
+  - 三个纵向排列的 chevron 选项行：`❯ 允许本次` / `❯ 始终允许` / `❯ 拒绝`
+  - 点击选项 → 标记为已选（✓ 绿）→ 所有行禁用 → 回调执行
   - 交互模式：单选，点击即提交，不可撤销
 
 ## Input Commands（输入命令）

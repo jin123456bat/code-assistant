@@ -31,7 +31,7 @@ class WriteFileTool : AgentTool {
             return ToolResult.err("安全限制：不能写入项目目录之外的文件")
         }
 
-        // 确认由 AgentLoop.onConfirmTool → PermissionCard 统一处理，工具层不再弹窗
+        // 确认由 AgentLoop.onConfirmTool → 审批选择卡统一处理，工具层不再弹窗
         return try {
             val file = File(normalizedPath)
             file.parentFile?.mkdirs()

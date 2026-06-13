@@ -235,7 +235,11 @@ class ToolRowFactory(private val availableWidth: () -> Int) {
             })
             bubble.add(headerRow, BorderLayout.NORTH)
 
-            if (approvalActions != null) return
+            // 审批模式：选项行直接内联到 bubble 中，不创建独立卡片
+            if (approvalActions != null) {
+                bubble.add(buildApprovalOptions(approvalActions), BorderLayout.CENTER)
+                return
+            }
 
             if (!isCollapsed && hasResult) {
                 val textArea = JTextArea(resultText).apply {
@@ -258,19 +262,6 @@ class ToolRowFactory(private val availableWidth: () -> Int) {
         rebuild(true)
         outerRow.add(bubble)
         outerRow.add(Box.createHorizontalGlue())
-
-        // 审批模式：在 tool 行下方附加 ask_user 风格的选择卡
-        if (approvalActions != null) {
-            val container = JPanel().apply {
-                layout = BoxLayout(this, BoxLayout.Y_AXIS)
-                isOpaque = false
-                alignmentX = Component.LEFT_ALIGNMENT
-            }
-            container.add(outerRow)
-            container.add(approvalCard(toolName, approvalActions))
-            return container
-        }
-
         return outerRow
     }
 
@@ -491,66 +482,28 @@ class ToolRowFactory(private val availableWidth: () -> Int) {
     /** 水平间隔 */
     private fun hGap(px: Int): Component = Box.createRigidArea(Dimension(px, 0))
 
-    // ---- 审批浮层 ----
+    // ---- 审批选项（内联到 tool 结果行） ----
 
     /**
-     * 审批选择卡 — ask_user SelectionCard 同款样式。
-     * tool 行下方显示三个选项：允许本次 / 始终允许 / 拒绝，点击即提交。
+     * 构建审批选项行列表，直接内联到 tool 结果 bubble 的 CENTER 区域。
+     * 三个选项：允许本次 / 始终允许 / 拒绝，点击即提交。
      */
-    private fun approvalCard(
-        toolName: String,
-        approvalActions: ApprovalActions
-    ): JPanel {
-        // 圆角卡片，toolBg 背景
-        val card = object : JPanel(BorderLayout()) {
-            override fun paintComponent(g: Graphics) {
-                val g2 = g.create() as Graphics2D
-                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
-                g2.color = ChatTheme.toolBg
-                g2.fillRoundRect(0, 0, width, height, ChatTheme.RADIUS, ChatTheme.RADIUS)
-                g2.dispose()
-                super.paintComponent(g)
-            }
-        }.apply {
-            isOpaque = false
-            border = BorderFactory.createCompoundBorder(
-                RoundedBorder(ChatTheme.toolBar),
-                JBUI.Borders.empty(0, 0, 6, 0)
-            )
-            maximumSize = Dimension(Int.MAX_VALUE, Int.MAX_VALUE)
-            alignmentX = Component.LEFT_ALIGNMENT
-        }
-
-        // 头部：审批 · toolName
-        val header = JPanel().apply {
-            layout = BoxLayout(this, BoxLayout.X_AXIS)
-            isOpaque = false
-            border = JBUI.Borders.empty(8, 10, 6, 10)
-            add(JLabel("审批 · $toolName").apply {
-                font = toolFontBold
-                foreground = ChatTheme.toolFg
-            })
-            add(Box.createHorizontalGlue())
-        }
-        card.add(header, BorderLayout.NORTH)
-
-        // 选项列表
+    private fun buildApprovalOptions(approvalActions: ApprovalActions): JPanel {
         val optionList = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
             isOpaque = false
-            border = JBUI.Borders.empty(0, 6, 2, 6)
+            border = JBUI.Borders.empty(2, 8, 4, 6)
         }
 
         var confirmed = false
 
-        data class ApprovalOption(val text: String, val action: () -> Unit)
         val options = listOf(
-            ApprovalOption("❯  允许本次", approvalActions.onAllowOnce),
-            ApprovalOption("❯  始终允许", approvalActions.onAlwaysAllow),
-            ApprovalOption("❯  拒绝", approvalActions.onReject)
+            "❯  允许本次" to approvalActions.onAllowOnce,
+            "❯  始终允许" to approvalActions.onAlwaysAllow,
+            "❯  拒绝" to approvalActions.onReject
         )
 
-        options.forEachIndexed { idx, opt ->
+        options.forEachIndexed { idx, (text, action) ->
             val isDefault = idx == 0
             var hovered = isDefault
 
@@ -565,14 +518,14 @@ class ToolRowFactory(private val availableWidth: () -> Int) {
                     }
                     super.paintComponent(g)
                 }
+                override fun getMaximumSize(): Dimension = Dimension(Int.MAX_VALUE, preferredSize.height)
             }.apply {
                 isOpaque = false
                 border = JBUI.Borders.empty(4, 4, 4, 8)
                 cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
-                maximumSize = Dimension(Int.MAX_VALUE, Int.MAX_VALUE)
             }
 
-            val lbl = JLabel(opt.text).apply {
+            val lbl = JLabel(text).apply {
                 font = ChatTheme.metaFont
                 foreground = if (isDefault) ChatTheme.textPrimary else ChatTheme.textSecondary
             }
@@ -582,14 +535,15 @@ class ToolRowFactory(private val availableWidth: () -> Int) {
                 override fun mouseClicked(e: MouseEvent) {
                     if (confirmed) return
                     confirmed = true
-                    lbl.text = "✓  ${opt.text}"
-                    lbl.foreground = ChatTheme.doneCheck
+                    val isReject = idx == 2
+                    lbl.text = if (isReject) "✕  $text" else "✓  $text"
+                    lbl.foreground = if (isReject) ChatTheme.rejectedFg else ChatTheme.doneCheck
                     optionList.components.forEach { c ->
                         c.isEnabled = false
                         c.cursor = Cursor.getDefaultCursor()
                     }
-                    card.repaint()
-                    opt.action()
+                    optionList.repaint()
+                    action()
                 }
                 override fun mouseEntered(e: MouseEvent) {
                     if (!confirmed) { hovered = true; row.repaint() }
@@ -602,29 +556,10 @@ class ToolRowFactory(private val availableWidth: () -> Int) {
             optionList.add(row)
         }
 
-        card.add(optionList, BorderLayout.CENTER)
-        return card
+        return optionList
     }
 
     // ---- 边框实现 ----
-
-    /** 圆角矩形边框（用于审批选项卡等卡片） */
-    private inner class RoundedBorder(private val color: Color) : AbstractBorder() {
-        override fun paintBorder(c: Component, g: Graphics, x: Int, y: Int, w: Int, h: Int) {
-            val g2 = g.create() as Graphics2D
-            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
-            g2.color = color
-            g2.stroke = BasicStroke(1f)
-            g2.drawRoundRect(x, y, w - 1, h - 1, ChatTheme.RADIUS, ChatTheme.RADIUS)
-            g2.dispose()
-        }
-        override fun getBorderInsets(c: Component) = Insets(1, 1, 1, 1)
-        override fun getBorderInsets(c: Component, insets: Insets): Insets {
-            insets.set(1, 1, 1, 1)
-            return insets
-        }
-        override fun isBorderOpaque() = false
-    }
 
     /**
      * 左栏边框：
