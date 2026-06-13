@@ -49,7 +49,7 @@ class BubbleFactory(private val scrollPane: JBScrollPane) {
         val vw = scrollPane.viewport.width
         if (vw > 10) return vw
         val sw = scrollPane.width
-        if (sw > 40) return sw - JBUI.scale(20)
+        if (sw > 40) return sw - JBUI.scale(ChatTheme.BUBBLE_WIDTH_DEDUCT)
         return 0
     }
 

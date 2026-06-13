@@ -158,15 +158,15 @@ class MarkdownRenderer {
             panel.border = JBUI.Borders.customLine(JBColor.border(), 1)
 
             val headerPanel = JPanel(FlowLayout(FlowLayout.LEFT, 8, 2)).apply {
-                background = JBColor(0xF0F0F0, 0x32323A)
+                background = ChatTheme.codeHeaderBg
                 border = JBUI.Borders.empty(4, 8)
             }
             val langLabel = JLabel(language.uppercase()).apply {
-                font = font.deriveFont(Font.BOLD, 10f)
-                foreground = JBColor(0x888888, 0x999999)
+                font = font.deriveFont(Font.BOLD, ChatTheme.CODE_LANG_FONT_SIZE.toFloat())
+                foreground = ChatTheme.codeLangFg
             }
             val copyButton = JButton("Copy").apply {
-                font = font.deriveFont(Font.PLAIN, 10f)
+                font = font.deriveFont(Font.PLAIN, ChatTheme.CODE_LANG_FONT_SIZE.toFloat())
                 addActionListener {
                     val clipboard = Toolkit.getDefaultToolkit().systemClipboard
                     clipboard.setContents(StringSelection(code), null)
@@ -178,7 +178,7 @@ class MarkdownRenderer {
             val editorField = EditorTextField().apply {
                 setOneLineMode(false)
                 isViewer = true
-                background = JBColor(0xFAFAFA, 0x2B2B2B)
+                background = ChatTheme.codeEditorBg
             }
             editorField.document.setText(code)
 
@@ -260,9 +260,9 @@ class MarkdownRenderer {
                 p { margin: 4px 0; }
                 ul, ol { margin: 4px 0; }
                 li { margin: 2px 0; }
-                h1 { font-size: ${fontSize + 3}px; margin: 12px 0 4px 0; }
-                h2 { font-size: ${fontSize + 2}px; margin: 12px 0 4px 0; }
-                h3 { font-size: ${fontSize + 1}px; margin: 12px 0 4px 0; }
+                h1 { font-size: ${fontSize + ChatTheme.HEADING_FONT_OFFSET_H1}px; margin: 12px 0 4px 0; }
+                h2 { font-size: ${fontSize + ChatTheme.HEADING_FONT_OFFSET_H2}px; margin: 12px 0 4px 0; }
+                h3 { font-size: ${fontSize + ChatTheme.HEADING_FONT_OFFSET_H3}px; margin: 12px 0 4px 0; }
                 h4 { margin: 12px 0 4px 0; }
                 blockquote {
                     border-left: 3px solid $borderColor;

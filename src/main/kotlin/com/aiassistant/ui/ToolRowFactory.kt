@@ -38,7 +38,7 @@ private class BrailleSpinnerLabel(color: Color) : JLabel() {
         foreground = color
         text = frames[0]
         // 固定宽度，防止盲文字符宽度变化引起抖动
-        val w = preferredSize.width.coerceAtLeast(14)
+        val w = preferredSize.width.coerceAtLeast(ChatTheme.SPINNER_MIN_W)
         minimumSize = Dimension(w, preferredSize.height)
         preferredSize = Dimension(w, preferredSize.height)
         maximumSize = Dimension(w, preferredSize.height)
@@ -72,10 +72,10 @@ private class BrailleSpinnerLabel(color: Color) : JLabel() {
 class ToolRowFactory(private val availableWidth: () -> Int) {
 
     private val editorFontSize get() = runCatching { EditorColorsManager.getInstance().globalScheme.editorFontSize }.getOrDefault(14)
-    private val toolFont get() = Font(Font.SANS_SERIF, Font.PLAIN, editorFontSize - 1)
+    private val toolFont get() = Font(Font.SANS_SERIF, Font.PLAIN, editorFontSize - ChatTheme.TOOL_FONT_OFFSET)
     private val toolFontBold get() = toolFont.deriveFont(Font.BOLD)
-    private val toolCodeFont get() = Font(Font.MONOSPACED, Font.PLAIN, editorFontSize - 1)
-    private val thinkFont get() = Font(Font.SANS_SERIF, Font.PLAIN, editorFontSize - 1)
+    private val toolCodeFont get() = Font(Font.MONOSPACED, Font.PLAIN, editorFontSize - ChatTheme.TOOL_FONT_OFFSET)
+    private val thinkFont get() = Font(Font.SANS_SERIF, Font.PLAIN, editorFontSize - ChatTheme.TOOL_FONT_OFFSET)
     private val thinkFontItalic get() = thinkFont.deriveFont(Font.ITALIC)
 
     // ---- 公开 API ----
@@ -87,8 +87,8 @@ class ToolRowFactory(private val availableWidth: () -> Int) {
         row.add(arrowLabel(false))
         row.add(hGap(4))
         row.add(toolNameLabel(name))
-        val argsPreview = args.replace('\n', ' ').replace('\r', ' ').take(120)
-            .let { if (args.length > 120) "$it…" else it }
+        val argsPreview = args.replace('\n', ' ').replace('\r', ' ').take(ChatTheme.ARGS_PREVIEW_MAX_CHARS)
+            .let { if (args.length > ChatTheme.ARGS_PREVIEW_MAX_CHARS) "$it…" else it }
         if (argsPreview.isNotBlank()) {
             row.add(hGap(6))
             row.add(argsPreviewLabel(argsPreview))
@@ -144,8 +144,8 @@ class ToolRowFactory(private val availableWidth: () -> Int) {
             val argsPreview = tc.arguments
                 .replace('\n', ' ')
                 .replace('\r', ' ')
-                .take(120)
-                .let { if (tc.arguments.length > 120) "$it…" else it }
+                .take(ChatTheme.ARGS_PREVIEW_MAX_CHARS)
+                .let { if (tc.arguments.length > ChatTheme.ARGS_PREVIEW_MAX_CHARS) "$it…" else it }
             if (argsPreview.isNotBlank()) {
                 row.add(argsPreviewLabel(argsPreview))
             }
@@ -186,7 +186,7 @@ class ToolRowFactory(private val availableWidth: () -> Int) {
         val argsPreview = argsPart.replace('\n', ' ').replace('\r', ' ').take(40)
             .let { if (argsPart.length > 40) "$it…" else it }
         val resultText = resultPart.let {
-            if (it.length > 2000) it.take(2000) + "\n… (已截断)" else it
+            if (it.length > ChatTheme.RESULT_MAX_CHARS) it.take(ChatTheme.RESULT_MAX_CHARS) + "\n… (已截断)" else it
         }
         val lineCount = resultPart.count { it == '\n' } + 1
 
@@ -340,8 +340,8 @@ class ToolRowFactory(private val availableWidth: () -> Int) {
      * @param streaming 流式接收中时传 true，展开标题显示"思考中..."
      */
     fun thinkingRow(content: String, initiallyExpanded: Boolean = false, streaming: Boolean = false): JPanel {
-        val summary = content.lines().take(2).joinToString(" ").take(100)
-            .let { if (content.length > 100) "$it…" else it }
+        val summary = content.lines().take(2).joinToString(" ").take(ChatTheme.THINKING_PREVIEW_MAX_CHARS)
+            .let { if (content.length > ChatTheme.THINKING_PREVIEW_MAX_CHARS) "$it…" else it }
 
         val outerRow = outerRow()
         val collapsed = AtomicBoolean(!initiallyExpanded)
@@ -395,7 +395,7 @@ class ToolRowFactory(private val availableWidth: () -> Int) {
                 // 与 ChatBubble 设计一致——getPreferredSize 在已知宽度的前提下计算高度。
                 val textArea = object : JTextArea(content) {
                     override fun getPreferredSize(): Dimension {
-                        val w = availableWidth() - JBUI.scale(24)  // 扣除容器边框(4) + textArea 水平 padding(20)
+                        val w = availableWidth() - JBUI.scale(ChatTheme.TOOL_PREVIEW_DEDUCT)  // 扣除容器边框(4) + textArea 水平 padding(20)
                         if (w > 10) size = Dimension(w, Short.MAX_VALUE.toInt())
                         return super.getPreferredSize()
                     }
@@ -455,7 +455,7 @@ class ToolRowFactory(private val availableWidth: () -> Int) {
         font = toolFont
         foreground = ChatTheme.toolFg
         // 宽度固定，防止切换时闪烁
-        preferredSize = Dimension(10, preferredSize.height)
+        preferredSize = Dimension(ChatTheme.ARROW_WIDTH, preferredSize.height)
         minimumSize = preferredSize
         maximumSize = preferredSize
     }
@@ -513,7 +513,7 @@ class ToolRowFactory(private val availableWidth: () -> Int) {
                         val g2 = g.create() as Graphics2D
                         g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
                         g2.color = ChatTheme.toolBg
-                        g2.fillRoundRect(0, 0, width, height, 8, 8)
+                        g2.fillRoundRect(0, 0, width, height, ChatTheme.RADIUS_INNER, ChatTheme.RADIUS_INNER)
                         g2.dispose()
                     }
                     super.paintComponent(g)

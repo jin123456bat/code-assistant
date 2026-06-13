@@ -247,7 +247,7 @@ object SelectionCard {
                     val g2 = g.create() as Graphics2D
                     g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
                     g2.color = ChatTheme.toolBg
-                    g2.fillRoundRect(0, 0, width, height, 8, 8)
+                    g2.fillRoundRect(0, 0, width, height, ChatTheme.RADIUS_INNER, ChatTheme.RADIUS_INNER)
                     g2.dispose()
                 }
                 super.paintComponent(g)
@@ -269,9 +269,9 @@ object SelectionCard {
         val chevron = JLabel(if (isDefault) "❯" else " ").apply {
             font = ChatTheme.metaFont.deriveFont(Font.BOLD)
             foreground = ChatTheme.toolFg
-            preferredSize = Dimension(14, preferredSize.height)
-            minimumSize = Dimension(14, minimumSize.height)
-            maximumSize = Dimension(14, Int.MAX_VALUE)
+            preferredSize = Dimension(ChatTheme.ARROW_WIDTH, preferredSize.height)
+            minimumSize = Dimension(ChatTheme.ARROW_WIDTH, minimumSize.height)
+            maximumSize = Dimension(ChatTheme.ARROW_WIDTH, Int.MAX_VALUE)
             border = JBUI.Borders.empty(0, 2, 0, 6)
         }
         inner.add(chevron)
@@ -331,7 +331,7 @@ object SelectionCard {
                     val g2 = g.create() as Graphics2D
                     g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
                     g2.color = ChatTheme.toolBg
-                    g2.fillRoundRect(0, 0, width, height, 8, 8)
+                    g2.fillRoundRect(0, 0, width, height, ChatTheme.RADIUS_INNER, ChatTheme.RADIUS_INNER)
                     g2.dispose()
                 }
                 super.paintComponent(g)
@@ -353,9 +353,9 @@ object SelectionCard {
         val checkLabel = JLabel("☐").apply {
             font = ChatTheme.metaFont.deriveFont(Font.BOLD)
             foreground = ChatTheme.toolFg
-            preferredSize = Dimension(16, preferredSize.height)
-            minimumSize = Dimension(16, minimumSize.height)
-            maximumSize = Dimension(16, Int.MAX_VALUE)
+            preferredSize = Dimension(ChatTheme.CHECK_WIDTH, preferredSize.height)
+            minimumSize = Dimension(ChatTheme.CHECK_WIDTH, minimumSize.height)
+            maximumSize = Dimension(ChatTheme.CHECK_WIDTH, Int.MAX_VALUE)
             border = JBUI.Borders.empty(0, 2, 0, 6)
         }
         inner.add(checkLabel)

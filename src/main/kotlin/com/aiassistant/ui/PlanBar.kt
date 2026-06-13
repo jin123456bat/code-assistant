@@ -89,7 +89,7 @@ class PlanBar : JPanel(BorderLayout()) {
         if (expanded) {
             val stepScroll = buildStepList(plan)
             stepScroll.border = BorderFactory.createLineBorder(ChatTheme.divider, 1)
-            stepScroll.background = JBColor(0xFFFFFF, 0x2B2D30)
+            stepScroll.background = ChatTheme.winBg
             stepScroll.isOpaque = true
             overlay = stepScroll
             val rootPane = SwingUtilities.getRootPane(this)
@@ -100,7 +100,7 @@ class PlanBar : JPanel(BorderLayout()) {
                 // 定位：紧贴 dividerLine 下方
                 SwingUtilities.invokeLater {
                     val pt = SwingUtilities.convertPoint(this, 0, height, rootPane.layeredPane)
-                    stepScroll.setBounds(pt.x, pt.y, rootPane.layeredPane.width, minOf(stepScroll.preferredSize.height, 168))
+                    stepScroll.setBounds(pt.x, pt.y, rootPane.layeredPane.width, minOf(stepScroll.preferredSize.height, ChatTheme.PLAN_STEP_MAX_H))
                 }
                 // 点击外部关闭
                 rootPane.layeredPane.addMouseListener(object : MouseAdapter() {
@@ -229,8 +229,8 @@ class PlanBar : JPanel(BorderLayout()) {
             border = JBUI.Borders.empty()
             isOpaque = false
             viewport.isOpaque = false
-            maximumSize = Dimension(Int.MAX_VALUE, 168)
-            preferredSize = Dimension(preferredSize.width, minOf(listPanel.preferredSize.height + 4, 168))
+            maximumSize = Dimension(Int.MAX_VALUE, ChatTheme.PLAN_STEP_MAX_H)
+            preferredSize = Dimension(preferredSize.width, minOf(listPanel.preferredSize.height + 4, ChatTheme.PLAN_STEP_MAX_H))
         }
     }
 
@@ -246,7 +246,7 @@ class PlanBar : JPanel(BorderLayout()) {
             layout = BoxLayout(this, BoxLayout.X_AXIS)
             isOpaque = false
             border = JBUI.Borders.empty(2, 4, 2, 4)
-            maximumSize = Dimension(Int.MAX_VALUE, 24)
+            maximumSize = Dimension(Int.MAX_VALUE, ChatTheme.PLAN_STEP_ROW_H)
         }
 
         // 标记符号
@@ -279,7 +279,7 @@ class PlanBar : JPanel(BorderLayout()) {
         // 详细描述（可选，灰色小字）
         if (step.description.isNotBlank()) {
             row.add(JLabel("  ${step.description}").apply {
-                font = ChatTheme.metaFont.deriveFont(Font.PLAIN, ChatTheme.metaFont.size2D - 2)
+                font = ChatTheme.metaFont.deriveFont(Font.PLAIN, ChatTheme.metaFont.size2D - ChatTheme.META_FONT_OFFSET)
                 foreground = ChatTheme.textMuted
                 horizontalAlignment = SwingConstants.LEFT
             })
@@ -295,9 +295,9 @@ class PlanBar : JPanel(BorderLayout()) {
     private inner class MiniProgressBar(private val done: Int, private val total: Int) : JPanel() {
         init {
             isOpaque = false
-            preferredSize = Dimension(60, 12)
-            minimumSize = Dimension(60, 12)
-            maximumSize = Dimension(60, 12)
+            preferredSize = Dimension(ChatTheme.PLAN_PROGRESS_W, ChatTheme.PLAN_PROGRESS_H)
+            minimumSize = Dimension(ChatTheme.PLAN_PROGRESS_W, ChatTheme.PLAN_PROGRESS_H)
+            maximumSize = Dimension(ChatTheme.PLAN_PROGRESS_W, ChatTheme.PLAN_PROGRESS_H)
             border = JBUI.Borders.empty(0, 8, 0, 0)
         }
 
@@ -311,14 +311,14 @@ class PlanBar : JPanel(BorderLayout()) {
 
             // 背景轨道
             g2.color = ChatTheme.divider
-            g2.fillRoundRect(0, barY, barW, 4, 4, 4)
+            g2.fillRoundRect(0, barY, barW, 4, ChatTheme.RADIUS_PROGRESS, ChatTheme.RADIUS_PROGRESS)
 
             // 填充部分
             if (total > 0) {
                 val filledW = (barW * done.toFloat() / total).toInt()
                 if (filledW > 0) {
                     g2.color = ChatTheme.toolBar
-                    g2.fillRoundRect(0, barY, filledW, 4, 4, 4)
+                    g2.fillRoundRect(0, barY, filledW, 4, ChatTheme.RADIUS_PROGRESS, ChatTheme.RADIUS_PROGRESS)
                 }
             }
 
