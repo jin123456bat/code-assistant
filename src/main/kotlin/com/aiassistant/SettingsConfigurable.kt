@@ -2,6 +2,7 @@ package com.aiassistant
 
 import com.intellij.openapi.options.Configurable
 import com.intellij.ui.JBColor
+import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBPasswordField
 import com.intellij.ui.components.JBScrollPane
@@ -34,6 +35,9 @@ class SettingsConfigurable : Configurable {
     private val modelCombo = JComboBox(AppSettingsService.AVAILABLE_MODELS.map { it.second }.toTypedArray())
     private val statusLabel = JBLabel().apply {
         foreground = JBColor(0x666666, 0x8C8C8C)
+    }
+    private val thinkingCheckbox = JBCheckBox(AiAssistantBundle.message("settings.thinking")).apply {
+        isSelected = true
     }
     // ---- whitelist ----
     private val toolWhitelistPanel = JPanel()
@@ -135,30 +139,36 @@ class SettingsConfigurable : Configurable {
         gbc.gridx = 1; gbc.weightx = 1.0
         contentPanel.add(modelCombo, gbc)
 
+        // Thinking mode (checkbox)
+        gbc.gridy = 5; gbc.gridx = 0; gbc.weightx = 0.0
+        contentPanel.add(JLabel(AiAssistantBundle.message("settings.thinking.label")), gbc)
+        gbc.gridx = 1; gbc.weightx = 1.0
+        contentPanel.add(thinkingCheckbox, gbc)
+
         // Prompt label
-        gbc.gridy = 5; gbc.gridx = 0; gbc.gridwidth = 2
+        gbc.gridy = 6; gbc.gridx = 0; gbc.gridwidth = 2
         gbc.insets = JBUI.insets(12, 8, 4, 8)
         contentPanel.add(JLabel(AiAssistantBundle.message("settings.prompt.label")), gbc)
         gbc.insets = JBUI.insets(6, 8)
 
         // Prompt editor
-        gbc.gridy = 6; gbc.weightx = 1.0; gbc.fill = GridBagConstraints.BOTH
+        gbc.gridy = 7; gbc.weightx = 1.0; gbc.fill = GridBagConstraints.BOTH
         contentPanel.add(promptScrollPane, gbc)
 
         // Reset button
-        gbc.gridy = 7; gbc.weightx = 0.0; gbc.fill = GridBagConstraints.NONE
+        gbc.gridy = 8; gbc.weightx = 0.0; gbc.fill = GridBagConstraints.NONE
         gbc.anchor = GridBagConstraints.EAST
         val resetBtn = JButton(AiAssistantBundle.message("settings.prompt.reset"))
         resetBtn.addActionListener { promptArea.text = AppSettingsService.DEFAULT_COMMIT_PROMPT_ZH }
         contentPanel.add(resetBtn, gbc)
 
         // Status
-        gbc.gridy = 8; gbc.gridx = 0; gbc.gridwidth = 2; gbc.anchor = GridBagConstraints.NORTHWEST
+        gbc.gridy = 9; gbc.gridx = 0; gbc.gridwidth = 2; gbc.anchor = GridBagConstraints.NORTHWEST
         gbc.fill = GridBagConstraints.HORIZONTAL
         contentPanel.add(statusLabel, gbc)
 
         // ---- Whitelist section ----
-        gbc.gridy = 9; gbc.gridx = 0; gbc.gridwidth = 2; gbc.weighty = 0.0; gbc.fill = GridBagConstraints.HORIZONTAL
+        gbc.gridy = 10; gbc.gridx = 0; gbc.gridwidth = 2; gbc.weighty = 0.0; gbc.fill = GridBagConstraints.HORIZONTAL
         gbc.insets = JBUI.insets(16, 8, 4, 8)
         contentPanel.add(JLabel("<html><b>${AiAssistantBundle.message("settings.whitelist.header")}</b></html>"), gbc)
         gbc.insets = JBUI.insets(2, 8, 2, 8)
@@ -202,6 +212,8 @@ class SettingsConfigurable : Configurable {
         val selectedModel = if (idx >= 0) AppSettingsService.AVAILABLE_MODELS[idx].first else ""
         if (savedModel != selectedModel) return true
 
+        if (service.isThinkingEnabled() != thinkingCheckbox.isSelected) return true
+
         return false
     }
 
@@ -232,6 +244,8 @@ class SettingsConfigurable : Configurable {
             service.setModel(model)
         }
 
+        service.setThinkingEnabled(thinkingCheckbox.isSelected)
+
         statusLabel.text = AiAssistantBundle.message("settings.key.saved")
         statusLabel.foreground = JBColor(0x1B5E20, 0x80C080)
         ChatToolWindow.notifySettingsChanged()
@@ -245,6 +259,7 @@ class SettingsConfigurable : Configurable {
         val savedModel = service.getModel()
         val idx = AppSettingsService.AVAILABLE_MODELS.indexOfFirst { it.first == savedModel }
         if (idx >= 0) modelCombo.selectedIndex = idx
+        thinkingCheckbox.isSelected = service.isThinkingEnabled()
         statusLabel.text = ""
         refreshWhitelistUI()
     }

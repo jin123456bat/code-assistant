@@ -13,7 +13,7 @@ class AnthropicAdapterTest {
         val messages = listOf(AnthropicMessage("user", "hello"))
         val body = adapter.buildRequest("sys", messages, toolsJson)
 
-        assertTrue(body.contains("deepseek-v4-flash"))
+        assertTrue(body.contains("deepseek-v4-pro"))
         assertTrue(body.contains("tools"))
         assertTrue(body.contains("messages"))
         assertTrue(body.contains("tool_choice"))

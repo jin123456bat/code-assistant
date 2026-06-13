@@ -370,68 +370,60 @@ class ToolRowFactory(private val availableWidth: () -> Int) {
             border = JBUI.Borders.empty(2, 4, 2, 0)
         }
 
-        fun rebuild(isCollapsed: Boolean) {
-            container.removeAll()
-            val headerRow = JPanel().apply {
-                layout = BoxLayout(this, BoxLayout.X_AXIS)
-                isOpaque = false
-                cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
-            }
-            headerRow.add(arrowLabel(!isCollapsed))
-            headerRow.add(hGap(4))
-
-            if (isCollapsed) {
-                val lbl = JLabel(summary).apply {
-                    font = thinkFontItalic
-                    foreground = ChatTheme.textMuted
-                }
-                headerRow.add(lbl)
-            } else {
-                val title = if (streaming) "思考中..." else "思考过程"
-                val lbl = JLabel(title).apply {
-                    font = thinkFontItalic
-                    foreground = ChatTheme.textMuted
-                }
-                headerRow.add(lbl)
-            }
-            headerRow.add(Box.createHorizontalGlue())
-
-            // 点击整行切换折叠状态
-            headerRow.addMouseListener(object : MouseAdapter() {
-                override fun mouseClicked(e: MouseEvent) {
-                    collapsed.set(!collapsed.get())
-                    rebuild(collapsed.get())
-                    container.revalidate()
-                    container.repaint()
-                }
-            })
-
-            container.add(headerRow, BorderLayout.NORTH)
-
-            if (!isCollapsed) {
-                // 自测量 textArea：先按可用宽度设 size，再取换行后的真实高度。
-                // 与 ChatBubble 设计一致——getPreferredSize 在已知宽度的前提下计算高度。
-                val textArea = object : JTextArea(content) {
-                    override fun getPreferredSize(): Dimension {
-                        val w = availableWidth() - JBUI.scale(ChatTheme.TOOL_PREVIEW_DEDUCT)  // 扣除容器边框(4) + textArea 水平 padding(20)
-                        if (w > 10) size = Dimension(w, Short.MAX_VALUE.toInt())
-                        return super.getPreferredSize()
-                    }
-                }.apply {
-                    isEditable = false
-                    lineWrap = true
-                    wrapStyleWord = true
-                    font = thinkFont
-                    isOpaque = false
-                    border = JBUI.Borders.empty(4, 20, 4, 0)
-                    foreground = ChatTheme.textSecondary
-                }
-                textAreaRef?.set(textArea)
-                container.add(textArea, BorderLayout.CENTER)
-            }
+        // headerRow 和 textArea 只创建一次，展开/收起时仅切换可见性 + 更新 header 内容
+        val headerLabel = JLabel().apply {
+            font = thinkFontItalic
+            foreground = ChatTheme.textMuted
         }
 
-        rebuild(!initiallyExpanded)
+        // 自测量 textArea：只创建一次，通过 visibility 切换
+        val textArea = object : JTextArea(content) {
+            override fun getPreferredSize(): Dimension {
+                val w = availableWidth() - JBUI.scale(ChatTheme.TOOL_PREVIEW_DEDUCT)
+                if (w > 10) size = Dimension(w, Short.MAX_VALUE.toInt())
+                return super.getPreferredSize()
+            }
+        }.apply {
+            isEditable = false
+            lineWrap = true
+            wrapStyleWord = true
+            font = thinkFont
+            isOpaque = false
+            border = JBUI.Borders.empty(4, 20, 4, 0)
+            foreground = ChatTheme.textSecondary
+        }
+        textAreaRef?.set(textArea)
+
+        val headerRow = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.X_AXIS)
+            isOpaque = false
+            cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+            add(arrowLabel(initiallyExpanded))
+            add(hGap(4))
+            add(headerLabel)
+            add(Box.createHorizontalGlue())
+        }
+
+        fun applyCollapsedState(isCollapsed: Boolean) {
+            val arrow = headerRow.getComponent(0) as? JLabel
+            arrow?.text = if (isCollapsed) "▸" else "▾"
+            headerLabel.text = if (isCollapsed) summary else (if (streaming) "思考中..." else "思考过程")
+            textArea.isVisible = !isCollapsed
+        }
+
+        headerRow.addMouseListener(object : MouseAdapter() {
+            override fun mouseClicked(e: MouseEvent) {
+                collapsed.set(!collapsed.get())
+                applyCollapsedState(collapsed.get())
+                container.revalidate()
+                container.repaint()
+            }
+        })
+
+        container.add(headerRow, BorderLayout.NORTH)
+        container.add(textArea, BorderLayout.CENTER)
+
+        applyCollapsedState(!initiallyExpanded)
         outerRow.add(container)
         outerRow.add(Box.createHorizontalGlue())
         return outerRow

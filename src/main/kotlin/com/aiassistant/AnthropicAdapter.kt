@@ -13,7 +13,7 @@ class AnthropicAdapter(
 ) {
     companion object {
         const val DEFAULT_ENDPOINT = "https://api.deepseek.com/anthropic/v1/messages"
-        const val DEFAULT_MODEL = "deepseek-v4-flash"
+        const val DEFAULT_MODEL = "deepseek-v4-pro"
         const val MAX_TOKENS = 4096
     }
 
@@ -28,7 +28,8 @@ class AnthropicAdapter(
         toolChoice: String = "auto",
         maxTokens: Int = MAX_TOKENS,
         stream: Boolean = true,
-        modelOverride: String? = null
+        modelOverride: String? = null,
+        thinkingEnabled: Boolean = true
     ): String {
         val effectiveModel = modelOverride ?: model
         val systemEscaped = JsonUtils.escapeJson(systemPrompt)
@@ -78,7 +79,13 @@ class AnthropicAdapter(
             else -> ""","tool_choice":{"type":"auto"}"""
         }
 
-        return """{"model":"$effectiveModel","max_tokens":$maxTokens,"system":"$systemEscaped","messages":[$msgs],"tools":$toolsJson$toolChoiceBlock,"stream":$stream}"""
+        val thinkingBlock = if (thinkingEnabled) {
+            ""","thinking":{"type":"enabled"}"""
+        } else {
+            ""","thinking":{"type":"disabled"}"""
+        }
+
+        return """{"model":"$effectiveModel","max_tokens":$maxTokens,"system":"$systemEscaped","messages":[$msgs],"tools":$toolsJson$toolChoiceBlock,"stream":$stream$thinkingBlock}"""
     }
 
     /**

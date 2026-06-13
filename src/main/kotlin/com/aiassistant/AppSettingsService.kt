@@ -18,6 +18,7 @@ class AppSettingsService {
         private const val PROMPT_KEY = "$SERVICE_NAME.PROMPT"
         private const val WHITELIST_KEY = "$SERVICE_NAME.COMMAND_WHITELIST"
         private const val MODEL_KEY = "$SERVICE_NAME.MODEL"
+        private const val THINKING_KEY = "$SERVICE_NAME.THINKING"
 
         val AVAILABLE_MODELS = listOf(
             "deepseek-v4-flash" to "DeepSeek V4 Flash (快速/工具调用)",
@@ -216,5 +217,15 @@ feat(新功能) | fix(修复) | chore(杂项) | docs(文档) | style(格式) | r
 
     fun setModel(model: String) {
         com.intellij.ide.util.PropertiesComponent.getInstance().setValue(MODEL_KEY, model)
+    }
+
+    /** 思考模式开关，默认开启 */
+    fun isThinkingEnabled(): Boolean {
+        val raw = com.intellij.ide.util.PropertiesComponent.getInstance().getValue(THINKING_KEY)
+        return raw == null || raw.toBooleanStrictOrNull() != false
+    }
+
+    fun setThinkingEnabled(enabled: Boolean) {
+        com.intellij.ide.util.PropertiesComponent.getInstance().setValue(THINKING_KEY, enabled.toString())
     }
 }

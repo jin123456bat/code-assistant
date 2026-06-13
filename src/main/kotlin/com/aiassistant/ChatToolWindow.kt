@@ -887,16 +887,14 @@ class ChatToolWindow(private val project: Project) {
                 msgIdToComponent.clear()
             }
 
-            // 流式刚结束时 streamingContent 已清空，但旧 streamingBubble 仍在容器中，
-            // 需显式移除——否则 rebuildConversation 从 messages 渲染的 AI 气泡会与它重复
-            if (viewModel.streamingContent.isEmpty()) {
-                streamingBubble?.let { conversationContainer.remove(it) }
-                streamingBubble = null
-                streamingContentPane = null
-                streamingThinkingRow?.let { conversationContainer.remove(it) }
-                streamingThinkingRow = null
-                streamingThinkingTextArea = null
-            }
+            // 无条件清理所有流式组件：消息已固化到 messages 列表，
+            // 流式组件是冗余的——无论 streamingContent 是否为空都做清理（防御性兜底）
+            streamingBubble?.let { conversationContainer.remove(it) }
+            streamingBubble = null
+            streamingContentPane = null
+            streamingThinkingRow?.let { conversationContainer.remove(it) }
+            streamingThinkingRow = null
+            streamingThinkingTextArea = null
 
             // 增量渲染：只渲染版本号变更的消息（新增消息 version=0 不在 map 中，原地更新 version 递增触发重渲染）
             for (msg in displayMessages) {

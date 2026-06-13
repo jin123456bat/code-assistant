@@ -106,8 +106,12 @@ class AgentLoop(
                         }
                         if (textContent.isNotEmpty()) {
                             edt {
-                                onMessage?.invoke(AgentMessage("assistant", textContent))
+                                // 先清空流式状态，再添加消息。
+                                // 如果顺序反过来，onMessage 触发 rebuildConversation 时
+                                // streamingContent 尚未清空，会导致同一个 AI 回复同时出现在
+                                // 流式气泡和正式消息气泡中（两份重复渲染）。
                                 onStreaming?.invoke("")
+                                onMessage?.invoke(AgentMessage("assistant", textContent))
                             }
                         }
                         consecutiveFailures = 0
@@ -291,7 +295,8 @@ class AgentLoop(
         val planPrompt = buildPlanPrompt() // 动态注入当前计划状态
         val effectivePrompt = if (planPrompt.isNotEmpty()) ctx.systemPrompt + "\n\n" + planPrompt else ctx.systemPrompt
         val toolsJson = buildToolsJsonWithPlan()
-        val requestBody = adapter.buildRequest(effectivePrompt, history, toolsJson, modelOverride = model)
+        val thinkingEnabled = com.aiassistant.AppSettingsService.getInstance().isThinkingEnabled()
+        val requestBody = adapter.buildRequest(effectivePrompt, history, toolsJson, modelOverride = model, thinkingEnabled = thinkingEnabled)
 
         val textBuffer = StringBuilder()
         val thinkingBuffer = StringBuilder()
