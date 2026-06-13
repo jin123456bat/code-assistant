@@ -12,6 +12,11 @@ import kotlin.math.pow
 
 /**
  * Web 页面获取工具，支持断线重连、编码检测、响应大小限制。
+ *
+ * 安全说明：此工具从用户本地 IDE 发起 HTTP 请求，与 Claude Code 的
+ * 服务端 fetch 不同。回环地址（localhost/127.0.0.1）和内网地址
+ * （192.168.x.x/10.x.x.x）均可达，属于预期行为——用户可以访问本机
+ * 和内网服务获取内容。不视为 SSRF 漏洞。
  */
 class WebFetchTool : AgentTool {
 

@@ -172,7 +172,10 @@ class AgentLoop(
                             val params = parseParams(tc.arguments)
                             // skill 工具不执行实际文件操作，只是 prompt 注入包装器，无需审批
                             val isSkillTool = ctx.toolRegistry.isSkill(tc.name)
-                            val approved = if (isSkillTool || tc.name in SAFE_TOOLS || tc.name in AppSettingsService.getInstance().getToolWhitelist()) {
+                            // read_file 特殊处理：仅在项目目录内自动放行，跨目录需用户确认
+                            val readFileOutside = tc.name == "read_file" && params["path"] != null &&
+                                !com.aiassistant.shared.PathUtils.isInsideProject(params["path"]!!, project.basePath)
+                            val approved = if (!readFileOutside && (isSkillTool || tc.name in SAFE_TOOLS || tc.name in AppSettingsService.getInstance().getToolWhitelist())) {
                                 true
                             } else {
                                 // 内联确认：通过回调 + CountDownLatch 等待用户操作。
@@ -180,9 +183,16 @@ class AgentLoop(
                                 val latch = CountDownLatch(1)
                                 val userChoice = AtomicBoolean(false)
                                 pendingConfirmLatch = latch
+                                // 二次检查：防止 stop() 在赋值前被调用导致 countDown 空操作
+                                if (cancelled) latch.countDown()
                                 onConfirmTool?.invoke(tc.name, tc.arguments, latch, userChoice)
                                 try {
-                                    latch.await(10, java.util.concurrent.TimeUnit.MINUTES)
+                                    val confirmed = latch.await(10, java.util.concurrent.TimeUnit.MINUTES)
+                                    if (!confirmed) {
+                                        // 超时：用户未在 10 分钟内操作，结束本轮对话
+                                        consecutiveFailures = MAX_FAILURES
+                                        break
+                                    }
                                 } catch (_: InterruptedException) {
                                     Thread.currentThread().interrupt()
                                 } finally {
@@ -198,7 +208,11 @@ class AgentLoop(
                                 r
                             } else {
                                 consecutiveFailures++
-                                ToolResult(false, "", "用户未授权执行 ${tc.name}，请绕开此操作或向用户说明")
+                                if (readFileOutside) {
+                                    ToolResult(false, "", "文件不存在: ${params["path"]}")
+                                } else {
+                                    ToolResult(false, "", "用户未授权执行 ${tc.name}，请绕开此操作或向用户说明")
+                                }
                             }
                             val resultText = if (toolResult.success) toolResult.content else "错误: ${toolResult.error}"
 
@@ -361,12 +375,23 @@ class AgentLoop(
         return Triple(finalText, thinking, toolCalls)
     }
 
+    /** 使用 Gson 完整解析 JSON 参数，嵌套对象/数组序列化为 JSON 字符串 */
     private fun parseParams(json: String): Map<String, String> {
-        val p = mutableMapOf<String, String>()
-        Regex(""""(\w+)"\s*:\s*("[^"]*"|\d+|true|false|null)""").findAll(json).forEach { m ->
-            p[m.groupValues[1]] = m.groupValues[2].trim('"')
+        return try {
+            val gson = com.google.gson.Gson()
+            val raw = gson.fromJson(json, Map::class.java) as? Map<*, *> ?: return emptyMap()
+            raw.mapNotNull { (k, v) ->
+                if (k == null) return@mapNotNull null
+                val value = when (v) {
+                    is String -> v
+                    null -> ""
+                    else -> gson.toJson(v)  // 嵌套对象/数组 → JSON 字符串，工具可按需二次解析
+                }
+                k.toString() to value
+            }.toMap()
+        } catch (_: Exception) {
+            emptyMap()
         }
-        return p
     }
 
     private fun buildSystemPrompt(skills: List<AgentTool> = emptyList()): String {

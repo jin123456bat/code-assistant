@@ -75,7 +75,7 @@ IntelliJ IDEA 插件 — Swing UI 设计规范。Token 定义与 `ChatTheme.kt` 
 | `danger` | `#D98A3D` | `#D98A3D` | execute_command 危险边框 |
 | `error` | `#B5503E` | `#E08A72` | 错误文字 |
 | `errorCardBg` | `rgba(181,80,62,0.06)` | `rgba(224,138,114,0.10)` | 错误卡背景 |
-| `doneCheck` | `#5AA86A` | `#5AA86A` | 已完成 ✓ 对勾（PlanBar DONE 步骤、SelectionCard 已选、PermissionCard "始终允许"、approvalCard 已选） |
+| `doneCheck` | `#5AA86A` | `#5AA86A` | 已完成 ✓ 对勾（PlanBar DONE 步骤、SelectionCard 已选、审批选项 允许/始终允许） |
 
 ### 审批选择卡（ToolRowFactory.approvalCard）
 
@@ -152,7 +152,7 @@ panel (BorderLayout)
 │               ├── rowPanel [glue] [ChatBubble]  ← 用户靠右
 │               ├── rowPanel [ChatBubble] [glue]  ← AI 靠左
 │               ├── ToolRowFactory 折叠行
-│               ├── PermissionCard / SelectionCard
+│               ├── SelectionCard（ask_user 选择卡）
 │               └── 流式气泡
 └── SOUTH  → inputPanel（引用芯片 + 图片芯片 + textarea + 发送按钮）
 ```
@@ -184,15 +184,6 @@ LLM 通过 `create_plan` 元工具自主创建执行计划，`update_plan_step` 
 - 每次 API 调用前通过 `buildPlanPrompt()` 动态生成计划状态提示，注入到 system prompt
 - 包含完整步骤列表、各步骤状态标记（✅🔄⏳❌）、进度百分比
 - 强制指令：`ask_user` 或其他工具调用后必须继续执行下一步，禁止提前结束对话
-
-### PermissionCard — 权限确认卡
-- 圆角卡片 + `toolBg` 淡背景 + `toolBar`/`danger` 色边框
-- 头部：工具名（toolFg 粗体）+ args 预览（等宽 textMuted，单行截断 120 chars）
-- 选项列表：❯ chevron 高亮 + 主文本 + 副文本
-- 正常变体 3 选项："允许" / "始终允许" / "拒绝"（`alwaysAllow` 回调内部调用 `addToolToWhitelist`）
-- danger 变体（execute_command）3 选项 + ⚠ 标记 + danger 色边框
-- 点击后卡片切换为已确认静态状态，不可再交互
-- 头部含 chevron（▸/▾）展开/折叠详情（`write_file` 时展示 diff 预览，LCS 算法，超 40 行折叠）
 
 ### SelectionCard — ask_user 选择卡
 - 单选模式：点击即提交，首项默认高亮，点击后卡片切换为"已选择"静态状态
@@ -309,7 +300,7 @@ LLM 通过 `create_plan` 元工具自主创建执行计划，`update_plan_step` 
 | 工具执行中 | 盲文 spinner 动画 + "执行中 · toolName" |
 | 工具完成 | 折叠行 "✓ N 行" |
 | 工具失败 | 红色错误卡 |
-| 权限确认 | PermissionCard 内联，阻塞等待 + CountDownLatch |
+| 权限确认 | 审批选项内联，阻塞等待 + CountDownLatch |
 | ask_user | SelectionCard 内联，阻塞等待用户选择 |
 | hover（选项行） | chevron "❯" 出现 + 文字变为 textPrimary + toolBg 背景 |
 | 已确认 | 卡片替换为静态标签 "已允许 ✓" / "已拒绝 ✗" |
@@ -382,5 +373,29 @@ Java PSI API（`PsiClass`、`ClassInheritorsSearch`）通过 `com.intellij.java`
 
 ## Icons
 
-- 使用 Unicode 符号替代图片图标：❯（chevron）、▸/▾（展开/收起箭头）、⚠（危险）、✕（失败）、✓（成功）
+- 插件图标使用自定义 SVG：`src/main/resources/icons/icon.svg`
+- UI 内使用 Unicode 符号：❯（chevron）、▸/▾（展开/收起箭头）、⚠（危险）、✕（失败/拒绝）、✓（成功）
 - 盲文 spinner 帧：⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏
+
+## 颜色/尺寸管理
+
+所有颜色、间距、圆角、字号、宽度约束统一在 `ChatTheme.kt` 中管理。禁止在 UI 代码中硬编码 Hex 颜色值或 magic number。
+
+## 文件引用芯片（RefChip）
+
+芯片仅存储文件路径和行号（`fullPath` + `startLine`/`endLine`），不预载文件内容。
+发送时 `buildRefContent()` 仅告知模型引用的文件路径，模型按需调用 `read_file` 读取。
+
+## 路径安全
+
+`read_file` 工具通过 `PathUtils.isInsideProject()` 检测 canonical path 前缀。
+- 项目目录内：免审批直接读取
+- 项目目录外：触发审批卡，用户确认后执行；拒绝则返回"文件不存在"
+
+## 审批系统
+
+- `ApprovalActions` 定义审批回调（允许本次 / 始终允许 / 拒绝），由 `ToolRowFactory.buildApprovalOptions()` 渲染
+- 审批选项内联到工具结果行 bubble 中，不再创建独立卡片
+- `PermissionCard` 已废弃删除
+- `messageRefChips` 改用消息 ID（`AgentMessage.id`）索引，不再依赖消息数组位置
+- `execute_command` 不做黑名单拦截，所有命令执行前统一由审批卡确认

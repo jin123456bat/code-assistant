@@ -115,10 +115,10 @@ object ChatTheme {
     // 状态/语义色
     // ═══════════════════════════════════════════════════════════════
 
-    /** diff 删除行 — SimpleDiff、PermissionCard diff 预览 */
+    /** diff 删除行 — SimpleDiff LCS 算法 */
     val diffDelFg = JBColor(0xC0392B, 0xD97D7D)
 
-    /** diff 添加行 — SimpleDiff、PermissionCard diff 预览 */
+    /** diff 添加行 — SimpleDiff LCS 算法 */
     val diffAddFg = JBColor(0x2E7D32, 0x7BBD86)
 
     /** 危险操作边框（execute_command 等）— permission/approval card 边框 */

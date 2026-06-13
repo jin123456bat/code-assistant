@@ -132,19 +132,26 @@ class ChatBubble(
             return w to maxOf(h, JBUI.scale(20))
         }
 
-        /** JTextArea：lineWrap=false 量自然宽，超限则换行并按上限重量高度。 */
+        /** JTextArea：lineWrap=false 量自然宽，超限则换行并按上限重量高度。测量结束后恢复原始状态。 */
         private fun measureTextArea(area: JTextArea, budget: Int): Pair<Int, Int> {
+            val origLineWrap = area.lineWrap
+            val origWrapStyleWord = area.wrapStyleWord
             area.lineWrap = false
             area.wrapStyleWord = false
-            area.setSize(Short.MAX_VALUE.toInt(), Short.MAX_VALUE.toInt())
-            val naturalW = area.preferredSize.width
-            val w = if (naturalW <= budget) maxOf(naturalW, JBUI.scale(12)) else budget
-            if (naturalW > budget) {
-                area.lineWrap = true
-                area.wrapStyleWord = true
+            try {
+                area.setSize(Short.MAX_VALUE.toInt(), Short.MAX_VALUE.toInt())
+                val naturalW = area.preferredSize.width
+                val w = if (naturalW <= budget) maxOf(naturalW, JBUI.scale(12)) else budget
+                if (naturalW > budget) {
+                    area.lineWrap = true
+                    area.wrapStyleWord = true
+                }
+                area.setSize(w, Short.MAX_VALUE.toInt())
+                return w to area.preferredSize.height
+            } finally {
+                area.lineWrap = origLineWrap
+                area.wrapStyleWord = origWrapStyleWord
             }
-            area.setSize(w, Short.MAX_VALUE.toInt())
-            return w to area.preferredSize.height
         }
 
         /** markdown 容器：含代码块等非文本子节点 → 满宽；纯文本 → 按内部文本 hug。 */

@@ -41,12 +41,12 @@ ChatToolWindowFactory → ChatToolWindow (Swing UI, ~1567 行)
 |---|---|---|
 | `ChatBubble` | 168 | **自测量气泡**：`getPreferredSize/getMaximumSize` 实时按 viewport 宽度计算尺寸，hug content + max-width 上限。画圆角背景+描边 |
 | `BubbleFactory` | 99 | 气泡工厂：构造内容（用户 HTML JTextPane / AI markdown）+ 包进 ChatBubble + 放进 rowPanel（X_AXIS + glue 做左右对齐） |
-| `ChatTheme` | 66 | 设计 token 单一来源：语义色（JBColor 明暗双值）、间距、圆角、字体、宽度约束 |
-| `ToolRowFactory` | 667 | 工具/思考行：统一左栏竖线 + 折叠/展开。含 toolCallRow、toolResultRow、thinkingRow、runningRow、errorCardRow |
-| `PermissionCard` | 256 | 工具权限确认卡：圆角卡片 + 选项列表 + diff 预览 + 确认态。支持 danger 变体（execute_command） |
+| `ChatTheme` | ~200 | 设计 token 单一来源：语义色（JBColor 明暗双值）、间距、圆角、字体、宽度约束。所有 UI 代码禁止硬编码值 |
+| `ToolRowFactory` | ~550 | 工具/思考行 + 审批选项 + RefChip：统一左栏竖线 + 折叠/展开。含 toolCallRow、toolResultRow、thinkingRow、runningRow、errorCardRow、buildApprovalOptions |
 | `SelectionCard` | 452 | ask_user 选择卡：单选/多选模式，cheveron 高亮 + hover |
 | `PlanBar` | 282 | 置顶计划条：折叠看摘要（标题+进度+迷你进度条），展开看步骤列表 |
-| `SimpleDiff` | 140 | 行级 diff 计算（LCS 算法），供 PermissionCard diff 预览使用 |
+| `SimpleDiff` | 140 | 行级 diff 计算（LCS 算法），由测试驱动 |
+| `PathUtils` | ~30 | 路径安全：canonical path 前缀校验，供 AgentLoop 审批 + 工具执行复用 |
 | `AskUserBridge` | 89 | ask_user 工具与 UI 之间的桥接：全局 handler + CountDownLatch 同步 |
 | `MarkdownRenderer` | ~290 | Markdown → Swing JPanel 渲染（标题、列表、代码块、内联代码） |
 
@@ -89,7 +89,7 @@ panel (BorderLayout)
 
 **工具系统**：`tools/` 下每个工具实现 `agent.AgentTool` 接口（`name` / `description` / `parameters` / `execute()`）。14 个内置工具由 `ToolRegistryV3.registerBuiltIn()` 注册：`search_code`、`read_file`、`write_file`、`list_directory`、`execute_command`、`git_diff`、`git_log`、`git_status`、`ask_user`、`web_search`、`web_fetch`、`notebook_edit`、`task`、`code_intelligence`。三类工具来源统一管理：内置 / MCP（`registerMcp`）/ Skill（`registerSkills`）。`buildToolsJson()` 生成 Anthropic `input_schema` 并**带缓存**，注册新工具时通过 `invalidateCache()` 失效。
 
-**安全模型**：`AgentLoop.SAFE_TOOLS`（只读工具）+ 用户白名单 `AppSettingsService.getToolWhitelist()` 内的工具直接执行；其余工具（`write_file`、`execute_command` 等）触发内联确认——`onConfirmTool` 回调配合 `CountDownLatch`/`AtomicBoolean` 阻塞等待用户通过 `PermissionCard` 在 UI 上点确认。
+**安全模型**：`AgentLoop.SAFE_TOOLS`（只读工具）+ 用户白名单 `AppSettingsService.getToolWhitelist()` 内的工具直接执行；其余工具（`write_file`、`execute_command` 等）触发内联确认——`onConfirmTool` 回调配合 `CountDownLatch`/`AtomicBoolean` 阻塞等待用户通过审批选择卡在 UI 上点确认。`read_file` 额外检查路径安全：项目内免审，项目外触发审批。
 
 **MCP**（`mcp/`）：`McpManager` 从 `~/.claude.json`（用户全局）和 `.mcp.json`（项目根）读取 MCP server 配置，`McpClient` 走 stdio JSON-RPC，把远程 tool 包装成 `AgentTool` 注入注册中心。
 

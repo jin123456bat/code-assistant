@@ -8,11 +8,12 @@ import java.io.File
 import java.util.concurrent.TimeUnit
 
 /**
- * 执行终端命令的工具（带白名单沙箱防护）
+ * 执行终端命令的工具。
+ * 安全策略：所有命令执行前均触发审批卡，由用户确认。不做黑名单拦截。
  */
 class ExecuteCommandTool : AgentTool {
     override val name = "execute_command"
-    override val description = "在项目根目录执行终端命令。首次执行通过内联审批选择卡确认，确认后自动加入白名单。"
+    override val description = "在项目根目录执行终端命令。每次执行前需要用户确认。"
     override val parameters = listOf(
         ToolParameter("command", "string", "要执行的 shell 命令", required = true),
         ToolParameter("working_dir", "string", "工作目录，相对于项目根目录（可选）")
@@ -27,23 +28,6 @@ class ExecuteCommandTool : AgentTool {
 
         if (!workingDir.exists()) return ToolResult.err("工作目录不存在: ${workingDir.path}")
 
-        // 危险命令拦截
-        val dangerousPatterns = listOf(
-            "rm -rf /" to "删除根目录", "rm -rf ~" to "删除用户目录",
-            "rm -rf ./" to "删除当前目录", "rm -rf ." to "删除当前目录",
-            "dd if=" to "磁盘操作", "mkfs." to "格式化磁盘",
-            ":(){ :|:& };:" to "fork 炸弹", "> /dev/sda" to "覆写磁盘",
-            "chmod 777 /" to "危险权限修改",
-            "git push -f" to "强制推送", "git push --force" to "强制推送",
-            "> /dev/null; rm" to "管道后删除"
-        )
-        for ((pattern, desc) in dangerousPatterns) {
-            if (command.contains(pattern, ignoreCase = true)) {
-                return ToolResult.err("危险命令被拦截 [$desc]: $pattern")
-            }
-        }
-
-        // 确认由 AgentLoop.onConfirmTool → 审批选择卡统一处理，工具层不再弹窗
         return try {
             val shell = if (System.getProperty("os.name").lowercase().contains("win")) {
                 arrayOf("cmd.exe", "/c", command)

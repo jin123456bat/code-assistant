@@ -37,15 +37,18 @@ class ToolRegistryV3 {
     fun executeTool(name: String, params: Map<String, String>, project: Project): ToolResult =
         find(name)?.execute(params, project) ?: ToolResult.err("未知工具: $name")
 
-    /** 生成 Anthropic input_schema 格式的工具列表（带缓存） */
+    /** 生成 Anthropic input_schema 格式的工具列表（带缓存，线程安全） */
     fun buildToolsJson(): String {
         cachedJson?.let { return it }
-        val json = getAll().joinToString(",") { tool ->
-            val schema = buildInputSchema(tool)
-            """{"name":"${tool.name}","description":"${JsonUtils.escapeJson(tool.description)}","input_schema":$schema}"""
-        }.let { "[$it]" }
-        cachedJson = json
-        return json
+        return synchronized(this) {
+            cachedJson?.let { return it }  // 双检
+            val json = getAll().joinToString(",") { tool ->
+                val schema = buildInputSchema(tool)
+                """{"name":"${JsonUtils.escapeJson(tool.name)}","description":"${JsonUtils.escapeJson(tool.description)}","input_schema":$schema}"""
+            }.let { "[$it]" }
+            cachedJson = json
+            json
+        }
     }
 
     private fun invalidateCache() { cachedJson = null }
@@ -53,12 +56,12 @@ class ToolRegistryV3 {
     private fun buildInputSchema(tool: AgentTool): String {
         val propsJson = tool.parameters.joinToString(",") { p ->
             buildString {
-                append("\"${p.name}\":{\"type\":\"${p.type}\",\"description\":\"${JsonUtils.escapeJson(p.description)}\"")
+                append("\"${JsonUtils.escapeJson(p.name)}\":{\"type\":\"${p.type}\",\"description\":\"${JsonUtils.escapeJson(p.description)}\"")
                 if (p.enum != null) append(",\"enum\":[${p.enum.joinToString(",") { "\"$it\"" }}]")
                 append("}")
             }
         }
-        val requiredJson = tool.parameters.filter { it.required }.joinToString(",") { "\"${it.name}\"" }
+        val requiredJson = tool.parameters.filter { it.required }.joinToString(",") { "\"${JsonUtils.escapeJson(it.name)}\"" }
         val requiredBlock = if (requiredJson.isNotEmpty()) ",\"required\":[$requiredJson]" else ""
         return """{"type":"object","properties":{$propsJson},"additionalProperties":false$requiredBlock}"""
     }

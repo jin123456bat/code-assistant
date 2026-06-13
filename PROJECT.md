@@ -46,7 +46,7 @@ src/main/kotlin/com/aiassistant/
 │   └── AgentTool.kt           # 工具接口定义 (AgentTool/ToolParameter/ToolResult)
 │
 ├── tools/                     # 14 个内置工具实现
-│   ├── ReadFileTool.kt        # 读取文件
+│   ├── ReadFileTool.kt        # 读取文件（项目内免审，项目外触发审批）
 │   ├── WriteFileTool.kt       # 写入文件 (含越界防护)
 │   ├── SearchCodeTool.kt      # 搜索代码
 │   ├── ListDirectoryTool.kt   # 列出目录
@@ -70,8 +70,7 @@ src/main/kotlin/com/aiassistant/
 │   ├── ChatTheme.kt           # 设计 token 单一来源
 │   ├── ChatBubble.kt          # 自测量聊天气泡
 │   ├── BubbleFactory.kt       # 气泡工厂
-│   ├── ToolRowFactory.kt      # 工具/思考折叠行工厂
-│   ├── PermissionCard.kt      # 工具权限确认卡
+│   ├── ToolRowFactory.kt      # 工具/思考折叠行工厂 + 审批选项（含 ApprovalActions/RefChip）
 │   ├── SelectionCard.kt       # ask_user 选择卡 (单选/多选)
 │   ├── PlanBar.kt             # 置顶执行计划条
 │   ├── SimpleDiff.kt          # 行级 diff 计算
@@ -87,7 +86,8 @@ src/main/kotlin/com/aiassistant/
 │   └── OpenAiToolWindowOnStartup.kt # 启动时打开窗口
 │
 ├── shared/                    # 共享工具
-│   └── JsonUtils.kt           # JSON 转义/反转义
+│   ├── JsonUtils.kt           # JSON 转义/反转义
+│   └── PathUtils.kt           # 路径安全校验（canonical path 前缀比对）
 │
 └── SettingsConfigurable.kt     # 设置面板
 ```
@@ -213,7 +213,7 @@ AgentLoop 内置两个不由 ToolRegistryV3 管理的元工具，以硬编码 JS
 
 ### 工具白名单
 
-- 用户可通过 `PermissionCard` 的"始终允许"按钮将工具加入白名单
+- 用户可通过审批选择卡的"始终允许"按钮将工具加入白名单
 - 存储：`PropertiesComponent`，key 为 `AI_Coding_Assistant.TOOL_WHITELIST`
 - 白名单内工具直接执行，不弹出确认卡
 

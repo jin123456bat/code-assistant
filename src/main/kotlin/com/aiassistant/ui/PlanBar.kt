@@ -94,24 +94,24 @@ class PlanBar : JPanel(BorderLayout()) {
             overlay = stepScroll
             val rootPane = SwingUtilities.getRootPane(this)
             if (rootPane != null) {
+                // 先定位再添加，避免闪现（默认位置在 (0,0)）
+                val pt = SwingUtilities.convertPoint(this, 0, height, rootPane.layeredPane)
+                stepScroll.setBounds(pt.x, pt.y, rootPane.layeredPane.width, minOf(stepScroll.preferredSize.height, ChatTheme.PLAN_STEP_MAX_H))
                 rootPane.layeredPane.add(stepScroll, JLayeredPane.POPUP_LAYER)
                 rootPane.layeredPane.revalidate()
                 rootPane.layeredPane.repaint()
-                // 定位：紧贴 dividerLine 下方
-                SwingUtilities.invokeLater {
-                    val pt = SwingUtilities.convertPoint(this, 0, height, rootPane.layeredPane)
-                    stepScroll.setBounds(pt.x, pt.y, rootPane.layeredPane.width, minOf(stepScroll.preferredSize.height, ChatTheme.PLAN_STEP_MAX_H))
-                }
-                // 点击外部关闭
-                rootPane.layeredPane.addMouseListener(object : MouseAdapter() {
+                // 点击外部关闭（先移除旧监听器防累积泄漏）
+                overlayClickListener?.let { rootPane.layeredPane.removeMouseListener(it) }
+                overlayClickListener = object : MouseAdapter() {
                     override fun mouseClicked(e: MouseEvent) {
                         val comp = rootPane.layeredPane.getComponentAt(e.point)
-                        if (comp != stepScroll && !SwingUtilities.isDescendingFrom(e.component, stepScroll)) {
+                        if (comp != stepScroll && !SwingUtilities.isDescendingFrom(comp, stepScroll)) {
                             expanded = false
                             rebuild()
                         }
                     }
-                })
+                }
+                rootPane.layeredPane.addMouseListener(overlayClickListener!!)
             }
         }
 
@@ -120,10 +120,13 @@ class PlanBar : JPanel(BorderLayout()) {
     }
 
     private var overlay: JComponent? = null
+    private var overlayClickListener: MouseAdapter? = null
 
     private fun removeOverlay() {
         overlay?.let {
             val rootPane = SwingUtilities.getRootPane(this)
+            overlayClickListener?.let { rootPane?.layeredPane?.removeMouseListener(it) }
+            overlayClickListener = null
             rootPane?.layeredPane?.remove(it)
             rootPane?.layeredPane?.repaint()
         }
@@ -202,7 +205,6 @@ class PlanBar : JPanel(BorderLayout()) {
             }
         }
         row.addMouseListener(toggleListener)
-        leftPanel.addMouseListener(toggleListener)
 
         return row
     }
@@ -306,19 +308,20 @@ class PlanBar : JPanel(BorderLayout()) {
             val g2 = g.create() as Graphics2D
             g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
 
+            val barX = JBUI.scale(8)  // 左侧 padding
             val barY = (height - 4) / 2
-            val barW = width - JBUI.scale(8)  // 减去左侧 padding
+            val barW = width - JBUI.scale(8)
 
             // 背景轨道
             g2.color = ChatTheme.divider
-            g2.fillRoundRect(0, barY, barW, 4, ChatTheme.RADIUS_PROGRESS, ChatTheme.RADIUS_PROGRESS)
+            g2.fillRoundRect(barX, barY, barW, 4, ChatTheme.RADIUS_PROGRESS, ChatTheme.RADIUS_PROGRESS)
 
             // 填充部分
             if (total > 0) {
                 val filledW = (barW * done.toFloat() / total).toInt()
                 if (filledW > 0) {
                     g2.color = ChatTheme.toolBar
-                    g2.fillRoundRect(0, barY, filledW, 4, ChatTheme.RADIUS_PROGRESS, ChatTheme.RADIUS_PROGRESS)
+                    g2.fillRoundRect(barX, barY, filledW, 4, ChatTheme.RADIUS_PROGRESS, ChatTheme.RADIUS_PROGRESS)
                 }
             }
 

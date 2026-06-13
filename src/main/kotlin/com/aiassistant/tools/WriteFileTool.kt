@@ -31,11 +31,16 @@ class WriteFileTool : AgentTool {
             return ToolResult.err("安全限制：不能写入项目目录之外的文件")
         }
 
-        // 确认由 AgentLoop.onConfirmTool → 审批选择卡统一处理，工具层不再弹窗
         return try {
-            val file = File(normalizedPath)
-            file.parentFile?.mkdirs()
-            file.writeText(content, Charsets.UTF_8)
+            val targetFile = File(normalizedPath)
+            targetFile.parentFile?.mkdirs()
+            // 原子写入：先写临时文件，成功后再 rename，避免写入中断导致原文件损坏
+            val tmpFile = File(normalizedPath + ".tmp")
+            tmpFile.writeText(content, Charsets.UTF_8)
+            if (!tmpFile.renameTo(targetFile)) {
+                tmpFile.delete()
+                return ToolResult.err("写入失败: rename 失败")
+            }
             val lineCount = content.lines().size
             ToolResult.ok("文件已写入: $relativePath ($lineCount 行, ${content.length} 字符)")
         } catch (e: Exception) {

@@ -37,12 +37,15 @@ class AnthropicAdapter(
                 msg.toolCallId != null -> {
                     // tool_result
                     val content = JsonUtils.escapeJson(msg.content)
-                    """[{"type":"tool_result","tool_use_id":"${msg.toolCallId}","content":"$content"}]"""
+                    val callId = JsonUtils.escapeJson(msg.toolCallId ?: "")
+                    """[{"type":"tool_result","tool_use_id":"$callId","content":"$content"}]"""
                 }
                 msg.toolUseId != null -> {
                     // assistant with tool_use — prepend empty thinking block for DeepSeek V4 compatibility
                     val input = msg.toolInput.ifEmpty { "{}" }
-                    """[{"type":"thinking","thinking":""},{"type":"tool_use","id":"${msg.toolUseId}","name":"${msg.toolName ?: "unknown"}","input":$input}]"""
+                    val useId = JsonUtils.escapeJson(msg.toolUseId ?: "")
+                    val tName = JsonUtils.escapeJson(msg.toolName ?: "unknown")
+                    """[{"type":"thinking","thinking":""},{"type":"tool_use","id":"$useId","name":"$tName","input":$input}]"""
                 }
                 msg.role == "assistant" -> {
                     val text = JsonUtils.escapeJson(msg.content)
@@ -133,6 +136,10 @@ class AnthropicAdapter(
         }
     }
 
+    /**
+     * 从 JSON 字符串中按 key 提取紧随其后的字符串值。
+     * 注意：使用 indexOf 首匹配，调用方应使用足够特异的 key（如 "\"delta\":{\"type\":\""）以避免嵌套同名 key。
+     */
     private fun extractJsonString(json: String, key: String): String? {
         val idx = json.indexOf(key)
         if (idx == -1) return null
@@ -140,7 +147,10 @@ class AnthropicAdapter(
         var i = start
         while (i < json.length) {
             when (json[i]) {
-                '\\' -> i += 2
+                '\\' -> {
+                    if (i + 1 >= json.length) return null  // 截断的反斜杠，安全退出
+                    i += 2
+                }
                 '"' -> return JsonUtils.unescapeJson(json.substring(start, i))
                 else -> i++
             }

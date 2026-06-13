@@ -37,6 +37,8 @@ class ChatViewModel(
     @Volatile var activity: Activity = Activity.Idle
     @Volatile var currentPlan: AgentContext.Plan? = null
     @Volatile var currentModel: String = "deepseek-chat"
+    /** 每次 sendMessage/stopGeneration 递增，用于回调中校验是否已被新请求覆盖 */
+    @Volatile private var generationId = 0L
 
     /** Agent 活动状态。 */
     sealed class Activity {
@@ -103,11 +105,20 @@ class ChatViewModel(
                 onMessagesChanged?.invoke()
             }
         }
-        a.onStreaming = { text -> runOnEdt { streamingContent = text; onStreamingUpdate?.invoke(text) } }
-        a.onThinkingDelta = { text -> runOnEdt {
-            AppLogger.info("EDT onThinkingDelta thinking.len=${text.length} streamingContent.len=${streamingContent.length}")
-            streamingThinking = text; onStreamingThinkingChanged?.invoke(text)
-        } }
+        a.onStreaming = { text ->
+            val currentGen = generationId
+            runOnEdt {
+                if (generationId != currentGen) return@runOnEdt  // 已被 stop/新请求覆盖
+                streamingContent = text; onStreamingUpdate?.invoke(text)
+            }
+        }
+        a.onThinkingDelta = { text ->
+            val currentGen = generationId
+            runOnEdt {
+                if (generationId != currentGen) return@runOnEdt
+                streamingThinking = text; onStreamingThinkingChanged?.invoke(text)
+            }
+        }
         a.onToolExecute = { name, args ->
             runOnEdt {
                 activity = Activity.RunningTool(name)
@@ -173,6 +184,7 @@ class ChatViewModel(
     /** 发送用户消息，返回消息 ID（用于 messageRefChips 索引） */
     fun sendMessage(apiKey: String, content: String, images: List<ImageData>? = null, refContent: String = ""): Long {
         if (content.isBlank() || isStreaming || isRateLimited) return -1L
+        generationId++  // 新轮次，DD旧回调
         streamingContent = ""
         streamingThinking = ""
         // 气泡只显示用户文本，引用内容以 chips 形式独立展示
@@ -215,6 +227,7 @@ class ChatViewModel(
     }
 
     fun stopGeneration() {
+        generationId++  // 废弃所有 pending 回调
         agent?.stop()
         isStreaming = false
         streamingContent = ""

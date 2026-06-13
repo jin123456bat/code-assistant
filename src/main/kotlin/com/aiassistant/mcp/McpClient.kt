@@ -144,21 +144,35 @@ class McpClient(private val config: McpServerConfig) {
         try {
             process?.outputStream?.write("${json}\n".toByteArray())
             process?.outputStream?.flush()
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            // 写入失败（如进程已崩溃），标记为断开
+            initialized = false
+            throw RuntimeException("MCP 写入失败: ${config.name}", e)
+        }
     }
 
     private fun readResponse(timeoutMs: Long = 10_000): String? {
         val proc = process ?: return null
+        val expectedId = requestId  // 快照当前请求 ID
         return try {
             val future = readExecutor.submit<String> {
                 val reader = BufferedReader(InputStreamReader(proc.inputStream))
                 reader.readLine()
             }
-            future.get(timeoutMs, TimeUnit.MILLISECONDS)
+            val line = future.get(timeoutMs, TimeUnit.MILLISECONDS)
+            // 验证响应 ID 匹配发送的请求 ID（顺序调用时作为防护）
+            if (line != null && expectedId > 0) {
+                val idMatch = Regex(""""id"\s*:\s*(\d+)""").find(line)
+                val respId = idMatch?.groupValues?.get(1)?.toIntOrNull()
+                if (respId != null && respId != expectedId) {
+                    // 响应 ID 不匹配，可能是并发调用导致的错乱
+                    return null
+                }
+            }
+            line
         } catch (_: TimeoutException) {
             null
         } catch (e: Exception) {
-            // 检查 stderr 是否有错误
             try {
                 val errReader = BufferedReader(InputStreamReader(proc.errorStream))
                 val errLine = errReader.readLine()
@@ -169,32 +183,62 @@ class McpClient(private val config: McpServerConfig) {
         }
     }
 
+    /** 使用 Gson 解析 MCP tools/list 响应，提取工具名、描述和参数列表 */
     private fun parseTools(response: String): List<McpToolAdapter> {
-        val tools = mutableListOf<McpToolAdapter>()
-        // 解析 result.tools[] 中的每个工具
-        val toolPattern = Regex(""""name":"([^"]+)"[^}]*"description":"([^"]+)"[^}]*"inputSchema":\{([^}]*(?:\{[^}]*\}[^}]*)*)\}""")
-        for (match in toolPattern.findAll(response)) {
-            val name = match.groupValues[1]
-            val description = unescape(match.groupValues[2])
-            tools.add(McpToolAdapter(name, description, this))
+        return try {
+            val gson = com.google.gson.Gson()
+            val root = gson.fromJson(response, Map::class.java) as? Map<*, *> ?: return emptyList()
+            val result = root["result"] as? Map<*, *> ?: return emptyList()
+            val toolList = result["tools"] as? List<*> ?: return emptyList()
+            toolList.mapNotNull { tool ->
+                val t = tool as? Map<*, *> ?: return@mapNotNull null
+                val name = t["name"] as? String ?: return@mapNotNull null
+                val desc = t["description"] as? String ?: ""
+                val params = parseInputSchema(t["inputSchema"] as? Map<*, *>)
+                McpToolAdapter(name, desc, params, this)
+            }
+        } catch (_: Exception) {
+            emptyList()
         }
-        return tools
+    }
+
+    /** 从 inputSchema 的 properties 中提取 ToolParameter 列表 */
+    private fun parseInputSchema(schema: Map<*, *>?): List<ToolParameter> {
+        if (schema == null) return emptyList()
+        val props = schema["properties"] as? Map<*, *> ?: return emptyList()
+        val required = (schema["required"] as? List<*>)?.mapNotNull { it as? String }?.toSet() ?: emptySet()
+        return props.mapNotNull { (k, v) ->
+            val paramName = k as? String ?: return@mapNotNull null
+            val details = v as? Map<*, *>
+            val paramType = details?.get("type") as? String ?: "string"
+            val paramDesc = details?.get("description") as? String ?: ""
+            ToolParameter(paramName, paramType, paramDesc, required = paramName in required)
+        }
     }
 
     private fun extractResultContent(response: String): String {
-        // 提取 result.content[0].text
-        val textPattern = Regex(""""text"\s*:\s*"((?:[^"\\]|\\.)*)"""")
-        val match = textPattern.find(response)
-        return match?.groupValues?.get(1)?.let { unescape(it) } ?: response.take(1000)
+        return try {
+            val gson = com.google.gson.Gson()
+            @Suppress("UNCHECKED_CAST")
+            val root = gson.fromJson(response, Map::class.java) as Map<*, *>
+            val result = root["result"] as? Map<*, *>
+            val content = result?.get("content") as? List<*>
+            val first = content?.firstOrNull() as? Map<*, *>
+            first?.get("text") as? String ?: response.take(1000)
+        } catch (_: Exception) {
+            response.take(1000)
+        }
     }
 
     private fun extractErrorMessage(response: String): String {
-        val msgPattern = Regex(""""message"\s*:\s*"((?:[^"\\]|\\.)*)"""")
-        return msgPattern.find(response)?.groupValues?.get(1)?.let { unescape(it) } ?: "Unknown error"
-    }
-
-    private fun unescape(s: String): String {
-        return s.replace("\\n", "\n").replace("\\t", "\t").replace("\\\"", "\"").replace("\\\\", "\\")
+        return try {
+            val gson = com.google.gson.Gson()
+            val root = gson.fromJson(response, Map::class.java) as? Map<*, *>
+            val error = root?.get("error") as? Map<*, *>
+            error?.get("message") as? String ?: "Unknown error"
+        } catch (_: Exception) {
+            "Unknown error"
+        }
     }
 }
 
@@ -204,9 +248,9 @@ class McpClient(private val config: McpServerConfig) {
 class McpToolAdapter(
     override val name: String,
     override val description: String,
+    override val parameters: List<ToolParameter>,
     private val client: McpClient
 ) : AgentTool {
-    override val parameters: List<ToolParameter> = emptyList() // MCP 工具参数由服务器定义
 
     override fun execute(params: Map<String, String>, project: Project): ToolResult {
         return client.callTool(name, params, project)

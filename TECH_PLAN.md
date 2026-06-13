@@ -8,7 +8,7 @@
 ┌─────────────────────────────────────────────────────────────┐
 │                      UI 层 (Swing)                          │
 │  ChatToolWindow · BubbleFactory · ToolRowFactory            │
-│  PermissionCard · SelectionCard · PlanBar · MarkdownRenderer │
+│  SelectionCard · PlanBar · MarkdownRenderer · PathUtils      │
 ├─────────────────────────────────────────────────────────────┤
 │                    ViewModel 层                              │
 │  ChatViewModel (Activity 状态机 · 回调管理)                   │
@@ -269,7 +269,7 @@ private val skillTools = mutableMapOf<String, AgentTool>()  // Skill
 | 只读安全 | search_code, read_file, list_directory, git_diff, git_log, git_status, web_search, web_fetch, task, ask_user | 直接执行 |
 | 需审批 | write_file, execute_command, notebook_edit, MCP 工具 | 内联确认 |
 | Skill | 所有 SkillTool | 直接执行（仅提示词注入） |
-| 用户白名单 | 由用户通过 PermissionCard 添加 | 直接执行 |
+| 用户白名单 | 由用户通过审批选择卡添加 | 直接执行 |
 
 ### 4.2 审批流程
 
@@ -328,7 +328,7 @@ panel (BorderLayout)
 │               ├── 用户气泡 row: [glue] [ChatBubble] → 靠右
 │               ├── AI 气泡 row: [ChatBubble] [glue] → 靠左
 │               ├── 工具行 / 思考行（ToolRowFactory 折叠行）
-│               ├── 权限卡 (PermissionCard) / 选择卡 (SelectionCard)
+│               ├── 审批选项 (ToolRowFactory) / 选择卡 (SelectionCard)
 │               └── 空态提示 / 流式气泡
 └── SOUTH  → inputPanel
     ├── NORTH  → topRow (plusButton + chipPanel)
@@ -368,7 +368,7 @@ panel (BorderLayout)
 | ChatBubble | ChatBubble.kt | 168 | 自测量气泡（实时 viewport 感知尺寸） |
 | BubbleFactory | BubbleFactory.kt | 99 | 构建用户/AI 气泡行（HTML JTextPane / markdown 容器 + 左右对齐） |
 | ToolRowFactory | ToolRowFactory.kt | 668 | 工具/思考折叠行（左栏竖线 + 折叠展开 + 审批卡片 + 错误卡 + 执行中 spinner） |
-| PermissionCard | PermissionCard.kt | 256 | 权限确认卡（圆角卡片 + 按钮 + diff 预览 + danger 变体） |
+| 审批选项 | ToolRowFactory.kt | ~100 | 内联审批选项（允许本次/始终允许/拒绝） |
 | SelectionCard | SelectionCard.kt | 452 | ask_user 选择卡（单选/多选模式，cheveron 高亮 + hover） |
 | PlanBar | PlanBar.kt | 284 | 置顶计划条（折叠摘要 + 展开步骤列表 + 迷你进度条） |
 | MarkdownRenderer | MarkdownRenderer.kt | 406 | Markdown → Swing JPanel（分段渲染：文本段 JTextPane + 代码段 CodeBlockWrapper） |
