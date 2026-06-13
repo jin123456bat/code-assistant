@@ -64,7 +64,7 @@ panel (BorderLayout)
 │           └── conversationContainer (BoxLayout.Y_AXIS)
 │               ├── 用户气泡 row（[glue] [ChatBubble] → 靠右）
 │               ├── AI 气泡 row（[ChatBubble] [glue] → 靠左）
-│               ├── 工具行 / 思考行 / 权限卡 / 选择卡
+│               ├── 工具行 / 思考行 / 审批选项 / 选择卡
 │               └── 空态提示 / 流式气泡
 └── SOUTH  → inputPanel（引用芯片 + textarea + 发送按钮）
 ```

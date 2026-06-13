@@ -171,7 +171,7 @@ class ChatToolWindow(private val project: Project) {
         toolTipText = "新会话"
         border = JBUI.Borders.empty(2, 6, 2, 6)
         addMouseListener(object : MouseAdapter() {
-            override fun mouseClicked(e: MouseEvent) { viewModel.clearConversation(); messageRefChips.clear(); planBar.updatePlan(null); rebuildConversation() }
+            override fun mouseClicked(e: MouseEvent) { needFullRebuild = true; viewModel.clearConversation(); messageRefChips.clear(); planBar.updatePlan(null); rebuildConversation() }
             override fun mouseEntered(e: MouseEvent) { foreground = JBColor(0x2674B4, 0x5A9FD4) }
             override fun mouseExited(e: MouseEvent) { foreground = JBColor(0x888888, 0x999999) }
         })
@@ -797,16 +797,12 @@ class ChatToolWindow(private val project: Project) {
                 if (countdown > 0) showWarning(AiAssistantBundle.message("chat.error.ratelimit", countdown)) else hideError()
             }
         }
-        viewModel.onToolExecute = { toolName, params ->
+        // onToolExecute / onToolResult 已由 onMessagesChanged 统一驱动 rebuildConversation，
+        // 不再单独设置 needFullRebuild（新增消息由版本号增量检测，原地更新由 version 递增触发重新渲染）
+        viewModel.onToolExecute = { _, _ -> }
+        viewModel.onToolResult = { _, _ -> }
+        viewModel.onConfirmTool = { _, _, _, _ ->
             ApplicationManager.getApplication().invokeLater { rebuildConversation() }
-        }
-        viewModel.onToolResult = { toolName, result ->
-            ApplicationManager.getApplication().invokeLater { rebuildConversation() }
-        }
-        viewModel.onConfirmTool = { name, args, latch, result ->
-            ApplicationManager.getApplication().invokeLater {
-                rebuildConversation()  // 工具块内已自带审批按钮，只需刷新
-            }
         }
         viewModel.onPlanUpdate = { plan -> planBar.updatePlan(plan) }
     }
@@ -842,58 +838,80 @@ class ChatToolWindow(private val project: Project) {
         scrollToBottom(force = true)
     }
 
+    /** 已渲染的消息版本：msgId → version，用于增量更新变更检测 */
+    private val renderedMsgVersions = mutableMapOf<Long, Int>()
+
+    /** 消息 ID → 已渲染组件的映射，用于原地更新时移除旧组件 */
+    private val msgIdToComponent = mutableMapOf<Long, JComponent>()
+
+    /** 消息列表变化时的清空标记：消息被删除或 clearConversation 时设 true，下次 rebuild 全量重建 */
+    private var needFullRebuild = true
+
     private fun rebuildConversation() {
-        val scLen = viewModel.streamingContent.length
-        val stLen = viewModel.streamingThinking.length
-        val msgRoles = viewModel.messages.filter { it.role != "system" }.joinToString(",") { "${it.role}(${it.content.length})" }
-        AppLogger.info("rebuildConversation scLen=$scLen stLen=$stLen msgs=[$msgRoles] streamingB=$streamingBubble streamingT=$streamingThinkingRow")
-        conversationContainer.removeAll()
-        bubbleSizeConstraints.clear()
-        // 过滤掉 system 消息
         val displayMessages = viewModel.messages.filter { it.role != "system" }
         val hasMessages = displayMessages.isNotEmpty() || viewModel.streamingContent.isNotEmpty() || viewModel.streamingThinking.isNotEmpty()
+
+        // 消息数减少（clear 或删除）→ 全量重建
+        if (needFullRebuild || (hasMessages && renderedMsgVersions.size > displayMessages.size)) {
+            conversationContainer.removeAll()
+            bubbleSizeConstraints.clear()
+            renderedMsgVersions.clear()
+            msgIdToComponent.clear()
+            needFullRebuild = false
+        }
+
         if (hasMessages) {
+            // 增量渲染：只渲染版本号变更的消息（新增消息 version=0 不在 map 中，原地更新 version 递增触发重渲染）
             for (msg in displayMessages) {
-                // 用户消息带引用 chips 时，chips 嵌入气泡底部（与消息文本同属一个气泡）
-                if (msg.role == "user") {
+                val lastVersion = renderedMsgVersions[msg.id]
+                if (lastVersion != null && lastVersion == msg.version) continue
+
+                // 移除旧组件（原地更新场景）
+                msgIdToComponent.remove(msg.id)?.let { oldComp ->
+                    conversationContainer.remove(oldComp)
+                }
+
+                renderedMsgVersions[msg.id] = msg.version
+                val component = if (msg.role == "user") {
                     val refs = messageRefChips[msg.id]
                     if (refs != null && refs.isNotEmpty()) {
-                        conversationContainer.add(createUserBubbleWithFooter(msg, buildRefChipFooter(refs)))
-                        continue
+                        createUserBubbleWithFooter(msg, buildRefChipFooter(refs))
+                    } else {
+                        createMessageBubble(msg)
                     }
+                } else {
+                    createMessageBubble(msg)
                 }
-                conversationContainer.add(createMessageBubble(msg))
+                msgIdToComponent[msg.id] = component
+                conversationContainer.add(component)
             }
 
-            // 记录当前 bubbleSizeConstraints 条目数，用于后面捕获流式 assistant 气泡引用
-            val bubbleCountBefore = bubbleSizeConstraints.size
-
-            // 流式思考行：重建并跟踪引用，供 updateStreamingThinking() 原地更新
+            // 流式思考行 / 流式气泡：先移除旧组件再重新创建（增量渲染不会 removeAll，需显式清理避免重复）
             if (viewModel.streamingThinking.isNotEmpty()) {
+                streamingThinkingRow?.let { conversationContainer.remove(it) }
                 val textAreaRef = java.util.concurrent.atomic.AtomicReference<JTextArea>()
                 val row = toolRowFactory.thinkingRow(viewModel.streamingThinking, initiallyExpanded = true, streaming = true, textAreaRef = textAreaRef)
                 streamingThinkingRow = row
                 streamingThinkingTextArea = textAreaRef.get()
                 conversationContainer.add(row)
             }
-
-            // 流式 AI 回复气泡：重建并捕获 ChatBubble 引用，供 updateStreamingBubble() 原地更新
-            // createMessageBubble("assistant") → createAssistantBubble() 会自动把 (bubble, content)
-            // 追加到 bubbleSizeConstraints，我们从末尾取出即可
             if (viewModel.streamingContent.isNotEmpty()) {
-                conversationContainer.add(
-                    createMessageBubble(AgentMessage("assistant", viewModel.streamingContent))
-                )
-                if (bubbleSizeConstraints.size > bubbleCountBefore) {
+                // 移除旧的流式气泡组件和大小约束
+                streamingBubble?.let { conversationContainer.remove(it) }
+                streamingContentPane = null
+                val sizeBeforeAdd = bubbleSizeConstraints.size
+                conversationContainer.add(createMessageBubble(AgentMessage("assistant", viewModel.streamingContent)))
+                // 从 bubbleSizeConstraints 捕获新创建的 streamingBubble / streamingContentPane 引用
+                if (bubbleSizeConstraints.size > sizeBeforeAdd) {
                     val (b, c) = bubbleSizeConstraints.last()
                     streamingBubble = b
                     streamingContentPane = c
                 }
             }
-
-            // 状态指示器：执行中/思考中 已内化到对应块中（工具块"执行中..."、思考行"思考中..."）
-            // 不再需要独立指示器组件
         } else {
+            conversationContainer.removeAll()
+            renderedMsgVersions.clear()
+            msgIdToComponent.clear()
             val hintPanel = JPanel(GridBagLayout())
             hintPanel.add(
                 JLabel(AiAssistantBundle.message("chat.empty.hint")).apply {
@@ -1176,7 +1194,7 @@ class ChatToolWindow(private val project: Project) {
         }
 
         val commands = listOf(
-            Cmd("/new",   "新会话") { viewModel.clearConversation(); messageRefChips.clear(); planBar.updatePlan(null); rebuildConversation() },
+            Cmd("/new",   "新会话") { needFullRebuild = true; viewModel.clearConversation(); messageRefChips.clear(); planBar.updatePlan(null); rebuildConversation() },
             Cmd("/plan",  "创建执行计划") { sendQuick("请为当前任务创建执行计划。先分析需求，然后调用 create_plan 工具。") },
             Cmd("/init",  "初始化项目文档") { sendQuick("请分析当前项目结构，创建 CLAUDE.md 文档，包含项目概述、常用命令、架构说明和关键约定。") },
             Cmd("/review","审查当前改动") { sendQuick("请审查当前分支的代码改动，分析潜在问题并给出修复建议。") },

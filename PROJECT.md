@@ -40,7 +40,7 @@ src/main/kotlin/com/aiassistant/
 │
 ├── agent/                     # Agent 核心实现 + 共享类型
 │   ├── AgentLoop.kt           # Agent 主循环 (while 循环 + 工具调用分发)
-│   ├── AgentContext.kt        # 共享上下文 (Plan/Step/ImageData/AgentMessage)
+│   ├── AgentContext.kt        # 共享上下文 (Plan/Step/ImageData/AgentMessage，含 id/version 用于增量渲染)
 │   ├── ToolRegistryV3.kt      # 统一工具注册中心 (内置/MCP/Skill)
 │   ├── SkillEngine.kt         # Skill 加载引擎
 │   └── AgentTool.kt           # 工具接口定义 (AgentTool/ToolParameter/ToolResult)
@@ -75,8 +75,7 @@ src/main/kotlin/com/aiassistant/
 │   ├── PlanBar.kt             # 置顶执行计划条
 │   ├── SimpleDiff.kt          # 行级 diff 计算
 │   ├── AskUserBridge.kt       # ask_user 工具 ↔ UI 桥接
-│   ├── BubbleMetrics.kt        # 气泡宽度纯计算工具
-│   ├── MarkdownRenderer.kt     # Markdown → Swing JPanel
+│   ├── MarkdownRenderer.kt     # Markdown → Swing JPanel（位于 com.aiassistant 根包）
 │   └── WrapLayout.kt            # 可换行 FlowLayout 变体（preferredSize 基于容器宽度模拟换行）
 │
 ├── actions/                   # IntelliJ Actions

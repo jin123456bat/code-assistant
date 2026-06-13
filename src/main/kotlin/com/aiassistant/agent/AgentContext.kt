@@ -79,7 +79,8 @@ data class AgentMessage(
     val toolCalls: List<ToolCallRequest>? = null,
     val approvalPending: Boolean = false,  // 待审批状态
     val images: List<ImageData>? = null,   // 用户粘贴的图片（Claude 原生 image 块格式）
-    val id: Long = nextId()                // 消息唯一 ID，用于 messageRefChips 索引
+    val id: Long = nextId(),               // 消息唯一 ID，用于 messageRefChips 索引
+    val version: Int = 0                   // 消息版本号：原地更新（copy）时递增，用于增量渲染变更检测
 ) {
     companion object {
         private val counter = java.util.concurrent.atomic.AtomicLong(0)

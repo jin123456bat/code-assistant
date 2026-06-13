@@ -31,8 +31,8 @@ class NotebookEditTool : AgentTool {
         val basePath = project.basePath ?: return ToolResult.err("项目路径不可用")
 
         val file = if (File(notebookPath).isAbsolute) File(notebookPath) else File(basePath, notebookPath)
-        // 路径穿越防护
-        if (!file.canonicalPath.startsWith(File(basePath).canonicalPath)) {
+        // 路径穿越防护（统一使用 PathUtils）
+        if (!com.aiassistant.shared.PathUtils.isInsideProject(notebookPath, basePath)) {
             return ToolResult.err("安全限制：不能操作项目目录之外的文件")
         }
         if (!file.exists()) return ToolResult.err("文件不存在: $notebookPath")

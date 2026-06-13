@@ -88,7 +88,7 @@ class ChatViewModel(
     private fun addThinkingMessage(content: String) {
         val last = messages.lastOrNull()
         if (last != null && last.role == "thinking") {
-            messages[messages.lastIndex] = AgentMessage("thinking", last.content + "\n" + content)
+            messages[messages.lastIndex] = last.copy(content = last.content + "\n" + content, version = last.version + 1)
         } else {
             messages.add(AgentMessage("thinking", content))
         }
@@ -138,7 +138,7 @@ class ChatViewModel(
                 // 找到对应的 tool 消息（由 onToolExecute 插入），追加结果并清除审批状态
                 val idx = messages.indexOfLast { it.role == "tool" && it.toolName == name }
                 if (idx >= 0) {
-                    messages[idx] = messages[idx].copy(content = messages[idx].content + "\n---\n" + result, approvalPending = false)
+                    messages[idx] = messages[idx].copy(content = messages[idx].content + "\n---\n" + result, approvalPending = false, version = messages[idx].version + 1)
                 } else {
                     messages.add(AgentMessage("tool", result, toolName = name))
                 }
@@ -189,7 +189,7 @@ class ChatViewModel(
                 pendingApprovals[name] = ApprovalState(latch, result)
                 // 标记 tool 消息为待审批
                 val idx = messages.indexOfLast { it.role == "tool" && it.toolName == name }
-                if (idx >= 0) messages[idx] = messages[idx].copy(approvalPending = true)
+                if (idx >= 0) messages[idx] = messages[idx].copy(approvalPending = true, version = messages[idx].version + 1)
                 onConfirmTool?.invoke(name, args, latch, result)
             }
         }

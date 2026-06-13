@@ -384,7 +384,7 @@ Java PSI API（`PsiClass`、`ClassInheritorsSearch`）通过 `com.intellij.java`
 ## 文件引用芯片（RefChip）
 
 芯片仅存储文件路径和行号（`fullPath` + `startLine`/`endLine`），不预载文件内容。
-发送时 `buildRefContent()` 仅告知模型引用的文件路径，模型按需调用 `read_file` 读取。
+发送时 `buildRefContent()` 告知模型引用的文件路径和行号信息，模型按需调用 `read_file` 读取具体内容。
 
 ## 路径安全
 
