@@ -142,8 +142,7 @@ class ChatToolWindow(private val project: Project) {
     /** 工具窗关闭时调用：解绑全局 handler，停止 agent，避免回调打到失效 UI / 线程泄漏。 */
     fun dispose() {
         KeyboardFocusManager.getCurrentKeyboardFocusManager().removeKeyEventDispatcher(popupKeyDispatcher)
-        @Suppress("DEPRECATION")
-        factoryListenerRef?.let { com.intellij.openapi.editor.EditorFactory.getInstance().removeEditorFactoryListener(it) }
+        com.intellij.openapi.util.Disposer.dispose(editorListenerDisposable)
         trackedEditors.clear()
         if (askUserHandler != null && AskUserBridge.handler === askUserHandler) {
             AskUserBridge.handler = null
@@ -585,9 +584,8 @@ class ChatToolWindow(private val project: Project) {
     private var lastAutoInsertTime: Long = 0
     /** 通过 SelectionListener 自动添加的文件引用（最多一个，选区变化时更新而非新增） */
     private var selectionRefChip: RefChip? = null
-    /** EditorFactoryListener 引用，dispose 时移除（2023.3 中 addEditorFactoryListener 标记废弃但仍是唯一正确 API） */
-    @Suppress("DEPRECATION")
-    private var factoryListenerRef: com.intellij.openapi.editor.event.EditorFactoryListener? = null
+    /** EditorFactoryListener 的父 Disposable，dispose 时自动移除监听器 */
+    private val editorListenerDisposable = com.intellij.openapi.Disposable { }
     /** 已注册 SelectionListener 的编辑器集合，用于 dispose 时清理 */
     private val trackedEditors = mutableSetOf<com.intellij.openapi.editor.Editor>()
 
@@ -671,29 +669,33 @@ class ChatToolWindow(private val project: Project) {
         setupInputCompletions()
 
         // 注册编辑器文本选区监听——捕获用户在编辑器内选中文本的动作
-        @Suppress("DEPRECATION")
-        val factoryListener = object : com.intellij.openapi.editor.event.EditorFactoryListener {
-            override fun editorCreated(event: com.intellij.openapi.editor.event.EditorFactoryEvent) {
-                val editor = event.editor
-                trackedEditors.add(editor)
-                editor.selectionModel.addSelectionListener(object : com.intellij.openapi.editor.event.SelectionListener {
-                    override fun selectionChanged(e: com.intellij.openapi.editor.event.SelectionEvent) {
-                        if (e.newRange != null && e.newRange!!.length > 0) {
-                            if (System.currentTimeMillis() - lastAutoInsertTime < 100) return
-                            ApplicationManager.getApplication().invokeLater {
-                                autoInsertSelectedCode()
+        com.intellij.openapi.editor.EditorFactory.getInstance().addEditorFactoryListener(
+            object : com.intellij.openapi.editor.event.EditorFactoryListener {
+                override fun editorCreated(event: com.intellij.openapi.editor.event.EditorFactoryEvent) {
+                    val editor = event.editor
+                    trackedEditors.add(editor)
+                    editor.selectionModel.addSelectionListener(object : com.intellij.openapi.editor.event.SelectionListener {
+                        override fun selectionChanged(e: com.intellij.openapi.editor.event.SelectionEvent) {
+                            if (e.newRange != null && e.newRange!!.length > 0) {
+                                if (System.currentTimeMillis() - lastAutoInsertTime < 100) return
+                                ApplicationManager.getApplication().invokeLater {
+                                    autoInsertSelectedCode()
+                                }
+                            } else {
+                                // 取消选中 → 移除选区芯片
+                                ApplicationManager.getApplication().invokeLater {
+                                    removeSelectionChip()
+                                }
                             }
                         }
-                    }
-                })
-            }
-            override fun editorReleased(event: com.intellij.openapi.editor.event.EditorFactoryEvent) {
-                trackedEditors.remove(event.editor)
-            }
-        }
-        @Suppress("DEPRECATION")
-        com.intellij.openapi.editor.EditorFactory.getInstance().addEditorFactoryListener(factoryListener)
-        factoryListenerRef = factoryListener
+                    })
+                }
+                override fun editorReleased(event: com.intellij.openapi.editor.event.EditorFactoryEvent) {
+                    trackedEditors.remove(event.editor)
+                }
+            },
+            editorListenerDisposable
+        )
     }
 
     private fun createWelcomePanel(): JPanel {
@@ -1395,7 +1397,7 @@ class ChatToolWindow(private val project: Project) {
                 val h = (popup.components.filterIsInstance<JMenuItem>().size.coerceAtLeast(1) * 28).coerceAtMost(280)
                 popup.isVisible = false
                 popup.preferredSize = Dimension(inputPanel.width, h)
-                popup.show(inputPanel, 0, -h)
+                if (inputPanel.isShowing) popup.show(inputPanel, 0, -h)
             } else {
                 closePopup()
             }
@@ -1408,7 +1410,7 @@ class ChatToolWindow(private val project: Project) {
         popup.isFocusable = false
         popup.pack()
         popup.preferredSize = Dimension(inputPanel.width, popupHeight)
-        popup.show(inputPanel, 0, -popupHeight)
+        if (inputPanel.isShowing) popup.show(inputPanel, 0, -popupHeight)
         slashCommandPopup = popup
     }
 
@@ -1510,7 +1512,7 @@ class ChatToolWindow(private val project: Project) {
                 val h = (popup.components.filterIsInstance<JMenuItem>().size.coerceAtLeast(1) * 28).coerceAtMost(280)
                 popup.isVisible = false
                 popup.preferredSize = Dimension(inputPanel.width, h)
-                popup.show(inputPanel, 0, -h)
+                if (inputPanel.isShowing) popup.show(inputPanel, 0, -h)
             } else {
                 closePopup()
             }
@@ -1522,7 +1524,7 @@ class ChatToolWindow(private val project: Project) {
         popup.isFocusable = false
         popup.pack()
         popup.preferredSize = Dimension(inputPanel.width, popupHeight)
-        popup.show(inputPanel, 0, -popupHeight)
+        if (inputPanel.isShowing) popup.show(inputPanel, 0, -popupHeight)
         fileRefPopup = popup
     }
 
@@ -1643,6 +1645,13 @@ class ChatToolWindow(private val project: Project) {
 
     private fun insertFileReference() {
         showFileRefPopup()
+    }
+
+    /** 取消选中时移除选区芯片 */
+    private fun removeSelectionChip() {
+        selectionRefChip?.let { refChips.remove(it) }
+        selectionRefChip = null
+        rebuildChips()
     }
 
     private fun autoInsertSelectedCode() {
