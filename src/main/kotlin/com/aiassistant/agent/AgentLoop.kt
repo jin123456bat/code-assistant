@@ -10,9 +10,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import javax.swing.SwingUtilities
 
 class AgentLoop(
-    private val project: Project,
-    private val sseClient: SseClient = SseClient(),
-    private val adapter: AnthropicAdapter = AnthropicAdapter()
+    private val project: Project
 ) {
     companion object {
         const val MAX_LOOPS = 100
@@ -280,7 +278,6 @@ class AgentLoop(
 
     fun stop() {
         cancelled = true
-        sseClient.cancel()
         // 解除可能正卡在用户确认上的背景线程，避免挂起到超时
         pendingConfirmLatch?.countDown()
     }
@@ -292,86 +289,59 @@ class AgentLoop(
     private fun callAnthropic(
         apiKey: String, history: List<AnthropicMessage>
     ): Triple<String, String, List<ToolCallResult>>? {
-        val planPrompt = buildPlanPrompt() // 动态注入当前计划状态
+        val planPrompt = buildPlanPrompt()
         val effectivePrompt = if (planPrompt.isNotEmpty()) ctx.systemPrompt + "\n\n" + planPrompt else ctx.systemPrompt
-        val toolsJson = buildToolsJsonWithPlan()
         val thinkingEnabled = com.aiassistant.AppSettingsService.getInstance().isThinkingEnabled()
-        val requestBody = adapter.buildRequest(effectivePrompt, history, toolsJson, modelOverride = model, thinkingEnabled = thinkingEnabled)
 
         val textBuffer = StringBuilder()
         val thinkingBuffer = StringBuilder()
         val toolCalls = mutableListOf<ToolCallResult>()
-        var currentToolId = ""
-        var currentToolName = ""
-        val currentToolInput = StringBuilder()
-        var inToolUse = false
         val done = Object()
         var hasResponse = false
         var errorDetail: String? = null
 
-        // SSE 事件序号（单次 callAnthropic 内自增），用于追踪 content_block 顺序
-        var sseSeq = 0
-        sseClient.connect(
-            url = adapter.endpoint, apiKey = apiKey, requestBody = requestBody,
-            callback = object : SseCallback {
-                override fun onData(data: String) {
-                    val lines = data.split("\n")
-                    for (line in lines) {
-                        val trimmed = line.trim()
-                        if (trimmed.isEmpty()) continue
-                        val event = adapter.parseSseEvent(trimmed) ?: continue
-                        sseSeq++
-                        val evName = event::class.simpleName ?: "?"
-                        when (event) {
-                            is ParsedEvent.TextDelta -> {
-                                hasResponse = true
-                                textBuffer.append(event.text)
-                                edt { onStreaming?.invoke(textBuffer.toString()) }
-                            }
-                            is ParsedEvent.ToolUseStart -> {
-                                hasResponse = true
-                                inToolUse = true
-                                currentToolId = event.id
-                                currentToolName = event.name
-                                currentToolInput.clear()
-                                AppLogger.info("SSE#$sseSeq $evName id=${event.id} name=${event.name}")
-                            }
-                            is ParsedEvent.InputJsonDelta -> {
-                                currentToolInput.append(event.partial)
-                            }
-                            is ParsedEvent.ContentBlockStop -> {
-                                if (inToolUse) {
-                                    toolCalls.add(ToolCallResult(
-                                        currentToolId, currentToolName,
-                                        currentToolInput.toString().ifEmpty { "{}" }
-                                    ))
-                                    inToolUse = false
-                                }
-                            }
-                            is ParsedEvent.MessageStart -> { hasResponse = true; AppLogger.info("SSE#$sseSeq $evName") }
-                            is ParsedEvent.ThinkingStart -> { hasResponse = true }
-                            is ParsedEvent.ThinkingDelta -> {
-                                thinkingBuffer.append(event.thinking)
-                                edt { onThinkingDelta?.invoke(thinkingBuffer.toString()) }
-                            }
-                            is ParsedEvent.SignatureDelta -> {}
-                            is ParsedEvent.MessageStop -> {
-                                AppLogger.info("SSE#$sseSeq $evName → done.notifyAll")
-                                synchronized(done) { done.notifyAll() }
-                            }
-                            else -> { /* 未处理的事件类型，不记录日志 */ }
-                        }
-                    }
+        val sdkClient = com.aiassistant.AnthropicSdkClient(apiKey)
+        val tools = buildSdkToolDefs()
+
+        sdkClient.createStreaming(
+            model = model ?: "deepseek-v4-pro",
+            systemPrompt = effectivePrompt,
+            messages = history,
+            tools = tools,
+            thinkingEnabled = thinkingEnabled,
+            callback = object : com.aiassistant.AnthropicSdkClient.Callback {
+                override fun onTextDelta(fullText: String) {
+                    hasResponse = true
+                    textBuffer.clear(); textBuffer.append(fullText)
+                    edt { onStreaming?.invoke(fullText) }
                 }
-                override fun onDone() = synchronized(done) { done.notifyAll() }
-                override fun onError(code: Int, msg: String) {
-                    errorDetail = "HTTP $code: ${msg.take(200)}"
+                override fun onThinkingDelta(fullThinking: String) {
+                    thinkingBuffer.clear(); thinkingBuffer.append(fullThinking)
+                    edt { onThinkingDelta?.invoke(fullThinking) }
+                }
+                override fun onToolUseStart(id: String, name: String) {
+                    hasResponse = true
+                    AppLogger.info("SDK tool_use: id=$id name=$name")
+                }
+                override fun onToolInputDelta(partial: String) {}
+                override fun onStreamComplete(textContent: String, thinking: String, sdkToolCalls: List<com.aiassistant.AnthropicSdkClient.StreamToolCall>) {
+                    textBuffer.clear(); textBuffer.append(textContent)
+                    thinkingBuffer.clear(); thinkingBuffer.append(thinking)
+                    sdkToolCalls.forEach { tc ->
+                        toolCalls.add(ToolCallResult(tc.id, tc.name, tc.arguments))
+                    }
+                    AppLogger.info("SDK stream complete: textLen=${textContent.length} thinkingLen=${thinking.length} tools=${toolCalls.size}")
+                    synchronized(done) { done.notifyAll() }
+                }
+                override fun onError(error: Throwable) {
+                    errorDetail = error.message?.take(500) ?: "SDK error: ${error.javaClass.simpleName}"
+                    AppLogger.error("SDK streaming error: ${error.message}\n${error.stackTraceToString().take(1000)}")
                     synchronized(done) { done.notifyAll() }
                 }
             }
         )
 
-        // 先检查是否已完成（防止回调在 wait() 前已通知导致永久挂起）
+        // 等待流结束
         synchronized(done) {
             if (!hasResponse && errorDetail == null) {
                 try { done.wait(120_000) } catch (_: InterruptedException) {}
@@ -386,20 +356,36 @@ class AgentLoop(
 
         val finalText = textBuffer.toString()
         val thinking = thinkingBuffer.toString()
+        val resultToolCalls = toolCalls.toList()
 
-        AppLogger.info("callAnthropic 返回: finalText.length=${finalText.length} thinking.length=${thinking.length} toolCalls.size=${toolCalls.size}")
+        AppLogger.info("callAnthropic 返回: finalText.length=${finalText.length} thinking.length=${thinking.length} toolCalls.size=${resultToolCalls.size}")
 
-        // DeepSeek V4 行为：简单回复时可能把全部内容放进 thinking、正式 text 为空。
-        // 若这是最终回复轮（无工具调用）且 text 为空但 thinking 非空，
-        // 则把 thinking 当作正式回复返回（正常气泡显示），而不是折叠成"思考过程"后丢失结果。
-        if (toolCalls.isEmpty() && finalText.isEmpty() && thinking.isNotEmpty()) {
+        if (resultToolCalls.isEmpty() && finalText.isEmpty() && thinking.isNotEmpty()) {
             AppLogger.info("callAnthropic: thinking 降级为 text（DeepSeek V4 behavior）")
-            return Triple(thinking, "", toolCalls)
+            return Triple(thinking, "", resultToolCalls)
         }
 
-        // thinking 随返回值一起出去，由 run() 统一 dispatch，避免 callAnthropic 内部
-        // 单独 dispatch 导致 ChatViewModel 在 streamingContent 未清空时 rebuild（重复渲染同一份回复文本）。
-        return Triple(finalText, thinking, toolCalls)
+        return Triple(finalText, thinking, resultToolCalls)
+    }
+
+    /** 将 ToolRegistryV3 中的工具 + 计划元工具转换为 SDK 格式 */
+    private fun buildSdkToolDefs(): List<com.aiassistant.AnthropicToolDef> {
+        val builtIn = ctx.toolRegistry.getAll().map { tool ->
+            com.aiassistant.AnthropicToolDef(
+                name = tool.name,
+                description = tool.description,
+                properties = tool.parameters.associate { p ->
+                    p.name to com.aiassistant.PropertyDef(p.type, p.description)
+                }.ifEmpty { null },
+                required = tool.parameters.filter { it.required }.map { it.name }.ifEmpty { null }
+            )
+        }
+        // 添加计划元工具（由 AgentLoop 硬编码处理，不在 ToolRegistryV3 中）
+        val planTools = listOf(
+            com.aiassistant.AnthropicToolDef("create_plan", "创建执行计划"),
+            com.aiassistant.AnthropicToolDef("update_plan_step", "更新计划步骤状态")
+        )
+        return builtIn + planTools
     }
 
     /** 使用 Gson 完整解析 JSON 参数，嵌套对象/数组序列化为 JSON 字符串 */
@@ -494,13 +480,6 @@ $claudeMdContent
     }
 
     /** 将 create_plan 元工具拼接到 tools JSON 末尾（ToolRegistryV3 的 ToolParameter 无法表达嵌套 items 子结构） */
-    private fun buildToolsJsonWithPlan(): String {
-        val base = ctx.toolRegistry.buildToolsJson()  // "[...]"（已缓存，含 JsonUtils.escapeJson 保护）
-        val inner = base.removeSurrounding("[", "]")
-        val all = listOfNotNull(inner.takeIf { it.isNotBlank() }, CREATE_PLAN_TOOL_JSON, UPDATE_PLAN_STEP_TOOL_JSON).joinToString(",")
-        return "[$all]"
-    }
-
     // 用于解析 create_plan JSON 参数的数据类
     private data class PlanArgs(val title: String, val steps: List<StepArg>)
     private data class StepArg(val subject: String, val description: String = "")

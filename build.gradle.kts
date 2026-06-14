@@ -13,6 +13,10 @@ repositories {
 
 dependencies {
     implementation("org.jetbrains:markdown:0.7.3")
+    implementation("com.anthropic:anthropic-java:2.40.1") {
+        // 排除 SDK 自带的 Kotlin stdlib，避免与 IntelliJ Platform 内置版本冲突
+        exclude("org.jetbrains.kotlin", "kotlin-stdlib")
+    }
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlin:kotlin-test:1.9.22")
 }

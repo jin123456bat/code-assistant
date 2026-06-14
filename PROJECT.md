@@ -34,8 +34,8 @@ src/main/kotlin/com/aiassistant/
 ├── ChatToolWindow.kt          # Swing UI 主窗口 (工厂 + 窗口, ~1590 行)
 ├── ChatViewModel.kt           # UI 桥接 ViewModel (Activity 状态机)
 ├── AppSettingsService.kt      # 应用级配置: API Key, MCP Config, 白名单, 模型选择
-├── AnthropicAdapter.kt        # Anthropic Messages API 适配器 (请求构建/SSE 解析)
-├── SseClient.kt               # SSE 流式 HTTP 客户端 (HttpURLConnection)
+├── AnthropicAdapter.kt        # Anthropic Messages 类型定义 (AnthropicMessage/ParsedEvent，仅测试用)
+├── AnthropicSdkClient.kt      # Anthropic Java SDK 封装层 (streaming + 类型安全)
 ├── MarkdownRenderer.kt        # Markdown → Swing JPanel 渲染器
 ├── AiAssistantBundle.kt       # i18n 资源包读取器
 ├── AppLogger.kt               # 插件日志（com.intellij.diagnostic.Logger 封装）

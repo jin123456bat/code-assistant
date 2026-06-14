@@ -16,10 +16,7 @@ import javax.swing.SwingUtilities
  */
 data class ApprovalState(val latch: java.util.concurrent.CountDownLatch, val userChoice: java.util.concurrent.atomic.AtomicBoolean)
 
-class ChatViewModel(
-    private val sseClient: SseClient = SseClient(),
-    private val anthropicAdapter: AnthropicAdapter = AnthropicAdapter()
-) {
+class ChatViewModel {
     @Volatile var messages = mutableListOf<AgentMessage>()
     val messageCount: Int get() = messages.size
     @Volatile var streamingContent = ""
@@ -70,7 +67,7 @@ class ChatViewModel(
 
     fun initialize(project: Project, mcpTools: List<com.aiassistant.agent.AgentTool> = emptyList()) {
         this.project = project
-        val a = AgentLoop(project, sseClient, anthropicAdapter)
+        val a = AgentLoop(project)
         a.initialize(mcpTools)
         setupCallbacks(a)
         agent = a

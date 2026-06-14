@@ -594,6 +594,8 @@ class ChatToolWindow(private val project: Project) {
         horizontalAlignment = SwingConstants.CENTER
         background = ChatTheme.errorBannerBg
         foreground = ChatTheme.errorBannerFg
+        // 宽度填满父容器（BorderLayout.NORTH 自动拉伸宽度，但需确保 JLabel 本身不限制）
+        maximumSize = Dimension(Int.MAX_VALUE, Int.MAX_VALUE)
     }
     private val warningLabel = JLabel().apply {
         isVisible = false
