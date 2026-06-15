@@ -219,6 +219,11 @@ class ChatToolWindow(private val project: Project) {
      * 统一接管 UP/DOWN（列表导航）、ENTER（确认选择）、ESC（关闭弹窗）。
      */
     private val popupKeyDispatcher = KeyEventDispatcher { e ->
+        // 仅在聊天窗口聚焦时拦截键盘事件，避免干扰 IDE 编辑器中的快捷键（如 Ctrl+C）
+        val focusOwner = KeyboardFocusManager.getCurrentKeyboardFocusManager().focusOwner
+        if (focusOwner == null || !SwingUtilities.isDescendingFrom(focusOwner, panel)) {
+            return@KeyEventDispatcher false
+        }
         if (e.id == KeyEvent.KEY_PRESSED) {
             val code = e.keyCode
             when (code) {
@@ -294,19 +299,43 @@ class ChatToolWindow(private val project: Project) {
     }
 
     /** 收集项目文件列表 */
+    /** 使文件缓存失效，下次 @ 引用搜索时重新扫描 */
+    private fun invalidateFileCache() {
+        projectFilesCache = emptyList()
+    }
+
+    /** 收集项目内所有文件（排除 VCS 忽略和大型生成目录）。用于 @ 文件引用搜索。 */
     private fun collectProjectFiles(): List<String> {
         val basePath = project.basePath ?: return emptyList()
         val files = mutableListOf<String>()
         val dir = File(basePath)
         if (!dir.exists()) return files
-        val ignoreDirs = setOf(".git", ".idea", ".gradle", "build", "node_modules", ".code-assistant", "vendor", "target", "out")
-        dir.walkTopDown().maxDepth(5).forEach { f ->
-            if (f.isFile && f.name !in ignoreDirs) {
-                val relative = f.relativeTo(dir).path
-                if (!ignoreDirs.any { relative.startsWith("$it/") || relative.startsWith("$it\\") }) {
-                    files.add(relative)
+        // 排除目录：版本控制、IDE、构建产物、依赖、缓存
+        val ignoreDirs = setOf(
+            ".git", ".idea", ".gradle", "build", "node_modules",
+            ".code-assistant", "vendor", "target", "out", "dist",
+            "__pycache__", ".venv", "venv", ".tox", ".mypy_cache",
+            ".pytest_cache", ".ruff_cache", "coverage", ".next",
+            ".nuxt", ".output", "public/build"
+        )
+        // 排除文件名模式（用于跳过自动生成的大文件）
+        val ignoreNames = setOf(".DS_Store", "Thumbs.db")
+        try {
+            dir.walkTopDown()
+                .filter { f ->
+                    if (!f.isFile) return@filter true  // 继续遍历目录，不跳过
+                    val relative = f.relativeTo(dir).path.replace('\\', '/')
+                    val parts = relative.split('/')
+                    // 跳过忽略目录内的所有文件和忽略文件名
+                    parts.none { it in ignoreDirs } && f.name !in ignoreNames
                 }
-            }
+                .forEach { f ->
+                    if (f.isFile) {
+                        files.add(f.relativeTo(dir).path)
+                    }
+                }
+        } catch (_: Exception) {
+            // 权限不足等异常时返回空列表，不崩溃
         }
         return files.sorted()
     }
@@ -937,11 +966,12 @@ class ChatToolWindow(private val project: Project) {
                 streamingBubble?.let { conversationContainer.remove(it) }
                 streamingContentPane = null
                 val sizeBeforeAdd = bubbleSizeConstraints.size
-                conversationContainer.add(createMessageBubble(AgentMessage("assistant", viewModel.streamingContent)))
-                // 从 bubbleSizeConstraints 捕获新创建的 streamingBubble / streamingContentPane 引用
+                val newBubble = createMessageBubble(AgentMessage("assistant", viewModel.streamingContent))
+                conversationContainer.add(newBubble)
+                // streamingBubble 存 row（直接加到 container 的组件），不是 ChatBubble（row 的子组件）
+                streamingBubble = newBubble
                 if (bubbleSizeConstraints.size > sizeBeforeAdd) {
-                    val (b, c) = bubbleSizeConstraints.last()
-                    streamingBubble = b
+                    val (_, c) = bubbleSizeConstraints.last()
                     streamingContentPane = c
                 }
             }
@@ -991,9 +1021,11 @@ class ChatToolWindow(private val project: Project) {
             } else {
                 conversationContainer.add(bubble)
             }
+            // streamingBubble 必须存 row（container 的直接子组件），不能存 ChatBubble（row 的子组件），
+            // 否则 conversationContainer.remove(streamingBubble) 找不到直接子组件，流式气泡永远删不掉
+            streamingBubble = bubble
             val entry = bubbleSizeConstraints.lastOrNull()
             if (entry != null) {
-                streamingBubble = entry.first
                 streamingContentPane = entry.second
             }
             conversationContainer.revalidate()
@@ -1247,8 +1279,8 @@ class ChatToolWindow(private val project: Project) {
             cmd.action()
         }
 
-        val skills = viewModel.getSkillNames().sorted()
-        val allEntries: List<Pair<String, String>> = commands.map { it.name to it.desc } + skills.map { "/$it" to "skill" }
+        val skills = viewModel.getSkills().sortedBy { it.name }
+        val allEntries: List<Pair<String, String>> = commands.map { it.name to it.desc } + skills.map { "/${it.name}" to it.description }
         var selectedIndex = 0
 
         fun closePopup() { popup.isVisible = false; slashCommandFilter = null; slashCommandMoveSelection = null; slashCommandDoSelect = null }
@@ -1276,9 +1308,10 @@ class ChatToolWindow(private val project: Project) {
                 if (cmd != null) item.addActionListener { executeCommand(cmd) }
                 else item.addActionListener {
                     closePopup()
+                    // 填充到输入框而非直接发送，允许用户补充描述后再发送
                     inputListenerGuard.set(true)
-                    try { inputArea.text = "" } finally { inputListenerGuard.set(false) }
-                    sendQuick("请使用 ${name.removePrefix("/")} skill 执行任务")
+                    try { inputArea.text = "/${name.removePrefix("/")} " } finally { inputListenerGuard.set(false) }
+                    inputArea.requestFocus()
                 }
                 popup.add(item)
             }
@@ -1324,7 +1357,8 @@ class ChatToolWindow(private val project: Project) {
      * - 目录（以 / 结尾）：生成目录列表，不读取文件内容
      */
     private fun showFileRefPopup() {
-        if (projectFilesCache.isEmpty()) projectFilesCache = collectProjectFiles()
+        // 每次都重新扫描，确保新建/删除的文件能反映在列表中
+        projectFilesCache = collectProjectFiles()
         val popup = JPopupMenu()
         var selectedIndex = 0
 

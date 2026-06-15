@@ -11,16 +11,22 @@ object AppLogger {
 
     private val LOG = Logger.getInstance("#plugins.ai-assistant")
 
+    /** sandbox 模式下同时输出到 stdout，方便 runIde 时在命令行直接查看 */
+    private val sandbox = java.lang.Boolean.getBoolean("idea.plugin.in.sandbox.mode")
+
     fun info(message: String) {
         LOG.info(message)
+        if (sandbox) println("[AI-Assistant] $message")
     }
 
     fun warn(message: String) {
         LOG.warn(message)
+        if (sandbox) println("[AI-Assistant] WARN: $message")
     }
 
     fun error(message: String) {
         LOG.error(message)
+        if (sandbox) println("[AI-Assistant] ERROR: $message")
     }
 
     fun requestStarted(url: String, tokenCount: Int) {

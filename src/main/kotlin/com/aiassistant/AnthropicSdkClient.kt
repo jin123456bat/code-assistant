@@ -23,7 +23,7 @@ class AnthropicSdkClient(
         fun onThinkingDelta(fullThinking: String)
         fun onToolUseStart(id: String, name: String)
         fun onToolInputDelta(partial: String)
-        fun onStreamComplete(textContent: String, thinking: String, toolCalls: List<StreamToolCall>)
+        fun onStreamComplete(textContent: String, thinking: String, thinkingSignature: String, toolCalls: List<StreamToolCall>)
         fun onError(error: Throwable)
     }
 
@@ -71,12 +71,19 @@ class AnthropicSdkClient(
             paramsBuilder.toolChoice(ToolChoiceAuto.builder().build())
         }
 
-        for (msg in messages) {
+        // 合并连续同 role 消息为单个 MessageParam（如 thinking + text + tool_use 属于同一 assistant 轮次）
+        val mergedMessages = mergeConsecutiveSameRole(messages)
+        com.aiassistant.AppLogger.info("SDK消息合并: ${messages.size}条 → ${mergedMessages.size}条")
+        for (msg in mergedMessages) {
             val sdkMsg = buildSdkMessage(msg) ?: continue
             paramsBuilder.addMessage(sdkMsg)
         }
 
         val params = paramsBuilder.build()
+        val msgSummary = messages.joinToString(" | ") { "${it.role}:${it.content.take(80)}${if (it.content.length > 80) "..." else ""}" }
+        val toolSummary = tools.joinToString(", ") { it.name }
+        val msgsDump = messages.joinToString("\n  ") { "${it.role}: ${it.content}" }
+        com.aiassistant.AppLogger.info("SDK请求: model=$model thinking=$thinkingEnabled tools=[$toolSummary]\n  $msgsDump")
         val latch = CountDownLatch(1)
         val textBuffer = StringBuilder()
         val thinkingBuffer = StringBuilder()
@@ -84,6 +91,7 @@ class AnthropicSdkClient(
         var currentToolId: String? = null
         var currentToolName: String? = null
         val toolCalls = mutableListOf<StreamToolCall>()
+        var currentThinkingSignature: String? = null
 
         try {
             client.messages().createStreaming(params).use { response ->
@@ -109,6 +117,13 @@ class AnthropicSdkClient(
                             toolInputBuffer.clear()
                             callback.onToolUseStart(tu.id(), tu.name())
                         }
+                        block.thinking().ifPresent { th ->
+                            currentThinkingSignature = th.signature()
+                            com.aiassistant.AppLogger.info("SDK thinking block start: sigLen=${currentThinkingSignature?.length ?: 0} thinkingLen=${th.thinking().length}")
+                        }
+                        if (block.isThinking() && block.thinking().isEmpty) {
+                            com.aiassistant.AppLogger.warn("SDK: isThinking=true but thinking() is empty!")
+                        }
                     } else if (event.isContentBlockStop()) {
                         if (currentToolId != null && currentToolName != null) {
                             toolCalls.add(StreamToolCall(currentToolId!!, currentToolName!!, toolInputBuffer.toString()))
@@ -117,9 +132,11 @@ class AnthropicSdkClient(
                             toolInputBuffer.clear()
                         }
                     } else if (event.isMessageStop()) {
+                        com.aiassistant.AppLogger.info("SDK响应: text=${textBuffer}")
                         callback.onStreamComplete(
                             textBuffer.toString(),
                             thinkingBuffer.toString(),
+                            currentThinkingSignature ?: "",
                             toolCalls.toList()
                         )
                         latch.countDown()
@@ -134,21 +151,108 @@ class AnthropicSdkClient(
         latch.await(10, TimeUnit.MINUTES)
     }
 
+    /**
+     * 合并连续同 role 消息为单个消息，将多个 content block 聚合到一个 MessageParam。
+     * 例如 assistant 的 thinking + text + tool_use 需要作为同一个消息的多个 content block 传回 API。
+     */
+    private fun mergeConsecutiveSameRole(messages: List<AnthropicMessage>): List<AnthropicMessage> {
+        if (messages.isEmpty()) return messages
+        val result = mutableListOf<AnthropicMessage>()
+        var i = 0
+        while (i < messages.size) {
+            val current = messages[i]
+            // tool_result 消息不合并（必须单独作为 user 消息）
+            if (current.toolCallId != null) {
+                result.add(current)
+                i++
+                continue
+            }
+            // 收集连续同 role 的非 tool_result 消息
+            val group = mutableListOf<AnthropicMessage>()
+            while (i < messages.size && messages[i].role == current.role && messages[i].toolCallId == null) {
+                group.add(messages[i])
+                i++
+            }
+            if (group.size == 1) {
+                result.add(group[0])
+            } else {
+                // 合并：聚合 thinking + text + tool_use
+                var mergedThinking = ""
+                var mergedThinkingSig = ""
+                var mergedContent = ""
+                var mergedToolUseId: String? = null
+                var mergedToolName: String? = null
+                var mergedToolInput = ""
+                for (m in group) {
+                    if (m.thinking.isNotBlank()) {
+                        mergedThinking = m.thinking
+                        mergedThinkingSig = m.thinkingSignature
+                    }
+                    if (m.content.isNotBlank()) { mergedContent = m.content }
+                    if (m.toolUseId != null) {
+                        mergedToolUseId = m.toolUseId
+                        mergedToolName = m.toolName
+                        mergedToolInput = m.toolInput
+                    }
+                }
+                result.add(AnthropicMessage(
+                    role = current.role,
+                    content = mergedContent,
+                    toolUseId = mergedToolUseId,
+                    toolName = mergedToolName,
+                    toolInput = mergedToolInput,
+                    thinking = mergedThinking,
+                    thinkingSignature = mergedThinkingSig
+                ))
+            }
+        }
+        return result
+    }
+
     private fun buildSdkMessage(msg: AnthropicMessage): MessageParam? {
         val blocks = mutableListOf<ContentBlockParam>()
-        when {
-            msg.toolCallId != null -> {
-                blocks.add(
-                    ContentBlockParam.ofToolResult(
-                        ToolResultBlockParam.builder()
-                            .toolUseId(msg.toolCallId!!)
-                            .content(msg.content)
-                            .build()
-                    )
+
+        // 处理 tool_result（user 消息中的工具结果回传）
+        if (msg.toolCallId != null) {
+            blocks.add(
+                ContentBlockParam.ofToolResult(
+                    ToolResultBlockParam.builder()
+                        .toolUseId(msg.toolCallId!!)
+                        .content(msg.content)
+                        .build()
                 )
+            )
+            if (blocks.isNotEmpty()) {
+                return MessageParam.builder()
+                    .role(MessageParam.Role.USER)
+                    .contentOfBlockParams(blocks)
+                    .build()
             }
-            msg.toolUseId != null -> {
-                // assistant 消息中的 tool_use 块——多轮工具调用时回传到 API
+            return null
+        }
+
+        // assistant 消息：thinking + text + tool_use 按需累加（合并后单消息可能含多种 block）
+        if (msg.role == "assistant") {
+            // thinking block：thinking 模式下必须随后续请求传回（含 signature）
+            if (msg.thinking.isNotBlank() && msg.thinkingSignature.isNotBlank()) {
+                com.aiassistant.AppLogger.info("SDK构建: 添加thinking block thinkingLen=${msg.thinking.length} sigLen=${msg.thinkingSignature.length}")
+                blocks.add(ContentBlockParam.ofThinking(
+                    ThinkingBlockParam.builder()
+                        .thinking(msg.thinking)
+                        .signature(msg.thinkingSignature)
+                        .build()
+                ))
+            } else if (msg.thinking.isNotBlank() || msg.thinkingSignature.isNotBlank()) {
+                com.aiassistant.AppLogger.warn("SDK构建: thinking block不完整! thinkingLen=${msg.thinking.length} sigLen=${msg.thinkingSignature.length} — 跳过")
+            }
+            // 文本 block
+            if (msg.content.isNotBlank()) {
+                blocks.add(ContentBlockParam.ofText(
+                    TextBlockParam.builder().text(msg.content).build()
+                ))
+            }
+            // tool_use block
+            if (msg.toolUseId != null) {
                 val inputBuilder = ToolUseBlockParam.Input.builder()
                 try {
                     val gson = com.google.gson.Gson()
@@ -168,33 +272,28 @@ class AnthropicSdkClient(
                         .build()
                 ))
             }
-            msg.role == "user" -> {
-                if (msg.content.isNotBlank()) {
-                    blocks.add(ContentBlockParam.ofText(
-                        TextBlockParam.builder().text(msg.content).build()
-                    ))
-                }
-            }
-            msg.role == "assistant" -> {
-                if (msg.content.isNotBlank()) {
-                    blocks.add(ContentBlockParam.ofText(
-                        TextBlockParam.builder().text(msg.content).build()
-                    ))
-                }
-            }
-            else -> return null
+            if (blocks.isEmpty()) return null
+            return MessageParam.builder()
+                .role(MessageParam.Role.ASSISTANT)
+                .contentOfBlockParams(blocks)
+                .build()
         }
-        if (blocks.isEmpty()) return null
 
-        val role = when (msg.role) {
-            "user" -> MessageParam.Role.USER
-            "assistant" -> MessageParam.Role.ASSISTANT
-            else -> MessageParam.Role.USER
+        // user 消息：纯文本
+        if (msg.role == "user") {
+            if (msg.content.isNotBlank()) {
+                blocks.add(ContentBlockParam.ofText(
+                    TextBlockParam.builder().text(msg.content).build()
+                ))
+            }
+            if (blocks.isEmpty()) return null
+            return MessageParam.builder()
+                .role(MessageParam.Role.USER)
+                .contentOfBlockParams(blocks)
+                .build()
         }
-        return MessageParam.builder()
-            .role(role)
-            .contentOfBlockParams(blocks)
-            .build()
+
+        return null
     }
 }
 

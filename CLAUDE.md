@@ -132,7 +132,7 @@ msgIdToComponent:    Map<msgId → Component>  ← 已渲染组件引用
 ## 关键约定与坑
 
 - **DeepSeek V4 兼容**：`AnthropicAdapter.buildRequest()` 在每个 `tool_use` content block 前**预置一个空 `thinking` block**（`{"type":"thinking","thinking":""}`），这是 DeepSeek V4 API 的硬性要求，不要删。
-- **Anthropic Java SDK**：HTTP/SSE 层使用官方 `com.anthropic:anthropic-java:2.37.0`，替代手写 `SseClient` + `AnthropicAdapter.buildRequest/parseSseEvent`。`AnthropicSdkClient` 封装 SDK 并提供类型安全的 streaming 回调。
+- **Anthropic Java SDK**：HTTP/SSE 层使用官方 `com.anthropic:anthropic-java:2.40.1`，替代手写 `SseClient` + `AnthropicAdapter.buildRequest/parseSseEvent`。`AnthropicSdkClient` 封装 SDK 并提供类型安全的 streaming 回调。
 - **工具参数解析使用 Gson**：`AgentLoop.parseParams()` 使用 `Gson.fromJson(json, Map::class.java)` 完整解析 JSON，嵌套对象/数组序列化为 JSON 字符串存入 `Map<String, String>`。
 - **JSON 转义统一走 `shared/JsonUtils`**：`escapeJson` / `unescapeJson` 在适配器和工具 schema 里复用，不要再就地手写转义。
 - **文件写入边界**：`write_file` 限制在项目目录内，防止越界。

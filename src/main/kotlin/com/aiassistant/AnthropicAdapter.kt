@@ -22,7 +22,9 @@ data class AnthropicMessage(
     val toolUseId: String? = null,     // tool_use 的 id
     val toolName: String? = null,      // tool_use 的 name
     val toolInput: String = "",        // tool_use 的 input JSON
-    val images: List<ImageData>? = null // 用户消息附带的图片（Claude 原生 image 块）
+    val images: List<ImageData>? = null, // 用户消息附带的图片（Claude 原生 image 块）
+    val thinking: String = "",          // thinking 内容（DeepSeek V4 thinking 模式，必须随后续请求回传）
+    val thinkingSignature: String = ""  // thinking 签名（DeepSeek V4 thinking 模式，必须随后续请求回传）
 )
 
 /** SSE 事件解析结果 */

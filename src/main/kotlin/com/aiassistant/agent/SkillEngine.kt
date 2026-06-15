@@ -1,44 +1,51 @@
 package com.aiassistant.agent
 
-import com.aiassistant.agent.AgentTool
-import com.aiassistant.agent.ToolParameter
-import com.aiassistant.agent.ToolResult
-import com.intellij.openapi.project.Project
 import java.io.File
 
 /**
  * Skill 引擎 — 从 .claude/skills/ 和项目目录加载 skill 定义。
- * 将 skill 作为特殊工具注册到 Agent 中。
+ * 对齐 Claude Code：skill 不作为独立工具注册，而是通过统一的 Skill 元工具激活。
  */
 object SkillEngine {
 
-    private data class SkillDef(
+    /** Skill 定义 — 对齐 Claude Code SKILL.md 格式 */
+    data class SkillDef(
         val name: String,
         val description: String,
-        val prompt: String
+        val prompt: String,
+        val preferredModel: String? = null
     )
 
-    fun loadProjectSkills(projectBasePath: String): List<AgentTool> {
-        val tools = mutableListOf<AgentTool>()
+    fun loadProjectSkills(projectBasePath: String): List<SkillDef> {
+        val defs = mutableListOf<SkillDef>()
         // 从项目 .claude/skills/ 目录加载
         val skillsDir = File(projectBasePath, ".claude/skills")
         val globalSkillsDir = File(System.getProperty("user.home"), ".claude/skills")
 
-        loadFromDir(skillsDir, tools)
-        loadFromDir(globalSkillsDir, tools)
+        // 加载顺序：先全局后项目，项目同名 skill 覆盖全局（项目优先）
+        loadFromDir(globalSkillsDir, defs)
+        loadFromDir(skillsDir, defs)
 
-        return tools
+        return defs
     }
 
-    private fun loadFromDir(dir: File, tools: MutableList<AgentTool>) {
+    private fun loadFromDir(dir: File, defs: MutableList<SkillDef>) {
         if (!dir.exists()) return
-        dir.walkTopDown().maxDepth(2).forEach { file ->
+        // 遍历全深度目录树（用户 skill 可能嵌套在子目录中，如 gstack/review/SKILL.md）
+        // 跳过隐藏目录（.git、.hermes 等）中的文件
+        dir.walkTopDown().forEach { file ->
+            val relativePath = file.relativeTo(dir).path
+            val pathParts = relativePath.split(File.separator)
+            // 跳过隐藏目录内的所有文件
+            if (pathParts.any { it.startsWith(".") }) return@forEach
             if (file.name == "SKILL.md" && file.isFile && file.length() < 200_000) {
                 try {
                     val content = file.readText()
                     val skill = parseSkill(file.parentFile.name, content)
                     if (skill != null) {
-                        tools.add(SkillTool(skill.name, skill.description, skill.prompt, file.parentFile))
+                        // 项目 skill 覆盖全局同名 skill
+                        defs.removeAll { it.name == skill.name }
+                        defs.add(skill)
                     }
                 } catch (e: Exception) {
                     // 单个 skill 解析失败不影响其他 skill 加载
@@ -47,43 +54,28 @@ object SkillEngine {
         }
     }
 
+    /** 解析 SKILL.md 的 YAML front matter 和正文内容 */
     private fun parseSkill(name: String, content: String): SkillDef? {
-        // 只解析前 2000 字符提取 name/description，跳过巨型文件避免正则回溯溢出
+        // 提取 YAML front matter（--- 包裹的部分），限制 2000 字符防止正则回溯溢出
         val head = content.take(2000)
-        val nameMatch = Regex("""name:\s*(.+)""").find(head)
-        val descMatch = Regex("""description:\s*(.+)""").find(head)
+        val nameMatch = Regex("""^name:\s*(.+)$""", RegexOption.MULTILINE).find(head)
+        val descMatch = Regex("""^description:\s*(.+)$""", RegexOption.MULTILINE).find(head)
+        val modelMatch = Regex("""^model:\s*(.+)$""", RegexOption.MULTILINE).find(head)
         val skillName = nameMatch?.groupValues?.get(1)?.trim() ?: name.replace('-', ' ')
         val description = descMatch?.groupValues?.get(1)?.trim() ?: "Skill: $skillName"
-        return SkillDef(skillName, description, content)
-    }
-}
-
-/**
- * Skill 作为 AgentTool 的适配器 — 将 skill 内容注入 system prompt。
- */
-class SkillTool(
-    override val name: String,
-    override val description: String,
-    val prompt: String,
-    val sourceDir: File
-) : AgentTool {
-    override val parameters: List<ToolParameter> = listOf(
-        ToolParameter("input", "string", "传递给 skill 的输入内容")
-    )
-
-    override fun execute(params: Map<String, String>, project: Project): ToolResult {
-        val input = params["input"] ?: ""
-        // Skill 本身只是一个提示词注入，实际执行由 LLM 完成
-        return ToolResult.ok("Skill '$name' 已激活。请按照以下指引完成任务:\n\n$prompt\n\n用户输入: $input")
+        val preferredModel = modelMatch?.groupValues?.get(1)?.trim()
+        // 提取 YAML front matter 之后的正文（跳过元数据字段，LLM 不需要 version/preamble-tier 等）
+        val bodyContent = extractBody(content)
+        return SkillDef(skillName, description, bodyContent, preferredModel)
     }
 
-    fun buildSkillSystemPrompt(): String {
-        return """
-## 可用 Skill: $name
-$description
-
-使用方式：当用户请求匹配此 skill 时，按照以下指引执行：
-$prompt
-        """.trimIndent()
+    /** 提取 SKILL.md 中 YAML front matter（---...---）之后的内容，过滤元数据噪声 */
+    private fun extractBody(content: String): String {
+        val match = Regex("""---\s*\n.*?\n---\s*\n""", RegexOption.DOT_MATCHES_ALL).find(content)
+        return if (match != null) {
+            content.substring(match.range.last + 1).trim()
+        } else {
+            content  // 没有 YAML front matter，全文作为 prompt
+        }
     }
 }

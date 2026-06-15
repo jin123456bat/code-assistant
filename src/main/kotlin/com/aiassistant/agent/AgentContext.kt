@@ -15,6 +15,13 @@ class AgentContext(val project: Project) {
     // Plan mode
     var currentPlan: Plan? = null
 
+    /** 所有已加载的 skill 定义（名称 → SkillDef），不包括已激活的 skill */
+    val skillDefs = mutableMapOf<String, SkillEngine.SkillDef>()
+    /** 客户端通过 /skill-name 激活的 skill（此 skill 不会作为工具暴露给 LLM，防止重复调用） */
+    @Volatile var activatedSkill: String? = null
+    /** 激活的 skill 的完整 prompt（注入 system prompt，对齐 Claude Code） */
+    @Volatile var activatedSkillPrompt: String? = null
+
     data class Step(
         val index: Int,
         val subject: String,

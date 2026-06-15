@@ -31,6 +31,11 @@ class AgentLoop(
         private const val UPDATE_PLAN_STEP_SCHEMA = """{"type":"object","properties":{"index":{"type":"integer","description":"步骤序号（从1开始）"},"status":{"type":"string","enum":["in_progress","done","failed"],"description":"新状态"},"result":{"type":"string","description":"可选的结果摘要（done/failed 时使用）"}},"required":["index","status"]}"""
 
         private const val UPDATE_PLAN_STEP_TOOL_JSON = """{"name":"update_plan_step","description":"更新执行计划中的步骤状态。在开始、完成或失败时调用。","input_schema":$UPDATE_PLAN_STEP_SCHEMA}"""
+
+        /** 统一 Skill 元工具 input_schema（对齐 Claude Code：单一 Skill 工具，参数 skill + args） */
+        private const val SKILL_TOOL_SCHEMA = """{"type":"object","properties":{"skill":{"type":"string","description":"要激活的 skill 名称（如 frontend-design、code-review）"},"args":{"type":"string","description":"传递给 skill 的用户输入内容"}},"required":["skill"]}"""
+
+        private const val SKILL_TOOL_JSON = """{"name":"Skill","description":"激活一个 skill，获取特定领域的专业指引。可选参数 args 传递用户输入。","input_schema":$SKILL_TOOL_SCHEMA}"""
     }
 
     val ctx = AgentContext(project)
@@ -40,6 +45,15 @@ class AgentLoop(
     /** 刷新模型配置，用于 Settings 变更后同步 */
     fun refreshModel() {
         model = AppSettingsService.getInstance().getModel()
+    }
+
+    /** 切换到指定模型（skill preferredModel 路由） */
+    fun switchModel(newModel: String) {
+        if (newModel != model) {
+            AppLogger.info("AgentLoop模型切换: $model → $newModel")
+            model = newModel
+            edt { onModelRouted?.invoke(newModel) }
+        }
     }
 
     /** 当前正在等待用户确认的 latch（用于 stop() 时解除阻塞，避免背景线程挂起）。 */
@@ -62,15 +76,19 @@ class AgentLoop(
     fun initialize(mcpTools: List<AgentTool> = emptyList()) {
         ctx.toolRegistry.registerBuiltIn()
         ctx.toolRegistry.registerMcp(mcpTools)
+        // 加载 skill 定义到 ctx.skillDefs（不再注册为独立工具，对齐 Claude Code 统一 Skill 元工具）
         val basePath = project.basePath
-        val skillTools = if (basePath != null) SkillEngine.loadProjectSkills(basePath) else emptyList()
-        ctx.toolRegistry.registerSkills(skillTools)
-        ctx.systemPrompt = buildSystemPrompt(skillTools)
+        val skillDefs = if (basePath != null) SkillEngine.loadProjectSkills(basePath) else emptyList()
+        skillDefs.forEach { ctx.skillDefs[it.name] = it }
+        ctx.systemPrompt = buildSystemPrompt()
     }
 
-    fun run(userMessage: String, apiKey: String, images: List<ImageData>? = null, callback: (String, String) -> Unit) {
+    fun run(userMessage: String, apiKey: String, images: List<ImageData>? = null, activatedSkill: String? = null, callback: (String, String) -> Unit) {
         cancelled = false
         onStateChange?.invoke(true)
+        // 恢复或重建 system prompt：skill 激活时排除该 skill，普通消息时恢复完整 skill 列表
+        ctx.activatedSkill = activatedSkill
+        ctx.systemPrompt = buildSystemPrompt()
         val history = mutableListOf<AnthropicMessage>()
 
         Thread {
@@ -94,7 +112,7 @@ class AgentLoop(
                         break
                     }
 
-                    val (textContent, thinking, toolCalls) = result
+                    val (textContent, thinking, thinkingSignature, toolCalls) = result
                     edt { onThinking?.invoke(null) }
 
                     if (toolCalls.isNotEmpty()) {
@@ -116,6 +134,8 @@ class AgentLoop(
 
                         // 标记：只有第一个 toolCall 才将 textContent 添加到 history，后续 toolCall 跳过
                         var firstToolCallTextAdded = false
+                        // thinking content block 也只需在第一个 toolCall 时添加一次
+                        var thinkingBlockAdded = false
 
                         for (tc in toolCalls) {
                             if (cancelled) break
@@ -127,6 +147,39 @@ class AgentLoop(
                                 }
                             } catch (_: Exception) {
                                 edt { onToolExecute?.invoke(tc.name, tc.arguments) }
+                            }
+
+                            // Skill 元工具：统一的 skill 激活入口（对齐 Claude Code）
+                            if (tc.name == "Skill") {
+                                val skillName = Regex(""""skill"\s*:\s*"([^"]*)"""").find(tc.arguments)?.groupValues?.get(1)
+                                val skillArgs = Regex(""""args"\s*:\s*"([^"]*)"""").find(tc.arguments)?.groupValues?.get(1)
+                                val def = if (skillName != null) ctx.skillDefs[skillName] else null
+                                val skillResult = if (def != null) {
+                                    // 注入 skill prompt 到 system prompt（对齐 Claude Code）
+                                    ctx.activatedSkillPrompt = def.prompt
+                                    ctx.activatedSkill = skillName
+                                    ctx.systemPrompt = buildSystemPrompt()
+                                    // Skill 模型路由
+                                    if (def.preferredModel != null && def.preferredModel != model) {
+                                        AppLogger.info("Skill模型路由: '$model' → '${def.preferredModel}' (skill: $skillName)")
+                                        model = def.preferredModel!!
+                                        edt { onModelRouted?.invoke(def.preferredModel) }
+                                    }
+                                    "Skill '$skillName' 已激活。${if (!skillArgs.isNullOrBlank()) "用户输入: $skillArgs" else ""}"
+                                } else {
+                                    "未知 Skill: $skillName。可用 skill: ${ctx.skillDefs.keys.joinToString(", ")}"
+                                }
+                                if (!firstToolCallTextAdded) {
+                                    if (!thinkingBlockAdded && thinking.isNotBlank() && thinkingSignature.isNotBlank()) {
+                                        history.add(AnthropicMessage("assistant", "", thinking = thinking, thinkingSignature = thinkingSignature))
+                                        thinkingBlockAdded = true
+                                    }
+                                    history.add(AnthropicMessage("assistant", textContent, toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments))
+                                    firstToolCallTextAdded = true
+                                }
+                                history.add(AnthropicMessage("user", skillResult, toolCallId = tc.id))
+                                edt { onToolResult?.invoke(tc.name, skillResult) }
+                                continue
                             }
 
                             // create_plan 元工具：LLM 自主决定是否创建执行计划
@@ -145,6 +198,18 @@ class AgentLoop(
                                     "计划已创建，共 ${newPlan.stepsSnapshot().size} 步。请从第一步开始执行。"
                                 }
                                 if (!firstToolCallTextAdded) {
+                                    // thinking content block 必须在 assistant 消息中随后续请求传回 API
+                                    if (!thinkingBlockAdded && thinking.isNotBlank() && thinkingSignature.isNotBlank()) {
+                                        AppLogger.info("AgentLoop: 添加thinking到history thinkingLen=${thinking.length} sigLen=${thinkingSignature.length}")
+                                        history.add(AnthropicMessage(
+                                            "assistant", "",
+                                            thinking = thinking,
+                                            thinkingSignature = thinkingSignature
+                                        ))
+                                        thinkingBlockAdded = true
+                                    } else if (!thinkingBlockAdded && thinking.isNotBlank()) {
+                                        AppLogger.warn("AgentLoop: thinking存在但signature为空! thinkingLen=${thinking.length} sigLen=${thinkingSignature.length} — 不会回传")
+                                    }
                                     history.add(AnthropicMessage(
                                         "assistant", textContent, toolUseId = tc.id,
                                         toolName = tc.name, toolInput = tc.arguments
@@ -180,6 +245,14 @@ class AgentLoop(
                                 }
                                 val msg = if (updated) "步骤 $stepIndex 状态更新为 $status" else "更新失败: 步骤 $stepIndex 不存在，当前计划共 ${ctx.currentPlan?.stepsSnapshot()?.size ?: 0} 步"
                                 if (!firstToolCallTextAdded) {
+                                    if (!thinkingBlockAdded && thinking.isNotBlank() && thinkingSignature.isNotBlank()) {
+                                        history.add(AnthropicMessage(
+                                            "assistant", "",
+                                            thinking = thinking,
+                                            thinkingSignature = thinkingSignature
+                                        ))
+                                        thinkingBlockAdded = true
+                                    }
                                     history.add(AnthropicMessage("assistant", textContent, toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments))
                                     firstToolCallTextAdded = true
                                 }
@@ -189,12 +262,10 @@ class AgentLoop(
                             }
 
                             val params = parseParams(tc.arguments)
-                            // skill 工具不执行实际文件操作，只是 prompt 注入包装器，无需审批
-                            val isSkillTool = ctx.toolRegistry.isSkill(tc.name)
                             // read_file 特殊处理：仅在项目目录内自动放行，跨目录需用户确认
                             val readFileOutside = tc.name == "read_file" && params["path"] != null &&
                                 !com.aiassistant.shared.PathUtils.isInsideProject(params["path"]!!, project.basePath)
-                            val approved = if (!readFileOutside && (isSkillTool || tc.name in SAFE_TOOLS || tc.name in AppSettingsService.getInstance().getToolWhitelist())) {
+                            val approved = if (!readFileOutside && (tc.name in SAFE_TOOLS || tc.name in AppSettingsService.getInstance().getToolWhitelist())) {
                                 true
                             } else {
                                 // 内联确认：通过回调 + CountDownLatch 等待用户操作。
@@ -236,6 +307,18 @@ class AgentLoop(
                             val resultText = if (toolResult.success) toolResult.content else "错误: ${toolResult.error}"
 
                             if (!firstToolCallTextAdded) {
+                                // thinking content block 必须在 assistant 消息中随后续请求传回 API
+                                if (!thinkingBlockAdded && thinking.isNotBlank() && thinkingSignature.isNotBlank()) {
+                                    AppLogger.info("AgentLoop: 添加thinking到history thinkingLen=${thinking.length} sigLen=${thinkingSignature.length}")
+                                    history.add(AnthropicMessage(
+                                        "assistant", "",
+                                        thinking = thinking,
+                                        thinkingSignature = thinkingSignature
+                                    ))
+                                    thinkingBlockAdded = true
+                                } else if (!thinkingBlockAdded && thinking.isNotBlank()) {
+                                    AppLogger.warn("AgentLoop: thinking存在但signature为空! thinkingLen=${thinking.length} sigLen=${thinkingSignature.length} — 不会回传")
+                                }
                                 history.add(AnthropicMessage(
                                     "assistant", textContent, toolUseId = tc.id,
                                     toolName = tc.name, toolInput = tc.arguments
@@ -258,6 +341,7 @@ class AgentLoop(
 
                         if (consecutiveFailures >= MAX_FAILURES) break
                     } else {
+                        AppLogger.info("AgentLoop 最终回复: $textContent")
                         callback(textContent, thinking)
                         break
                     }
@@ -286,11 +370,23 @@ class AgentLoop(
 
     data class ToolCallResult(val id: String, val name: String, val arguments: String)
 
+    data class AnthropicResponse(
+        val textContent: String,
+        val thinking: String,
+        val thinkingSignature: String,
+        val toolCalls: List<ToolCallResult>
+    )
+
     private fun callAnthropic(
         apiKey: String, history: List<AnthropicMessage>
-    ): Triple<String, String, List<ToolCallResult>>? {
+    ): AnthropicResponse? {
         val planPrompt = buildPlanPrompt()
-        val effectivePrompt = if (planPrompt.isNotEmpty()) ctx.systemPrompt + "\n\n" + planPrompt else ctx.systemPrompt
+        val skillPrompt = ctx.activatedSkillPrompt
+        val effectivePrompt = buildString {
+            append(ctx.systemPrompt)
+            if (skillPrompt != null) { append("\n\n---\n\n## 已激活 Skill\n\n"); append(skillPrompt) }
+            if (planPrompt.isNotEmpty()) { append("\n\n"); append(planPrompt) }
+        }
         val thinkingEnabled = com.aiassistant.AppSettingsService.getInstance().isThinkingEnabled()
 
         val textBuffer = StringBuilder()
@@ -299,6 +395,7 @@ class AgentLoop(
         val done = Object()
         var hasResponse = false
         var errorDetail: String? = null
+        var thinkingSignature = ""
 
         val sdkClient = com.aiassistant.AnthropicSdkClient(apiKey)
         val tools = buildSdkToolDefs()
@@ -324,13 +421,14 @@ class AgentLoop(
                     AppLogger.info("SDK tool_use: id=$id name=$name")
                 }
                 override fun onToolInputDelta(partial: String) {}
-                override fun onStreamComplete(textContent: String, thinking: String, sdkToolCalls: List<com.aiassistant.AnthropicSdkClient.StreamToolCall>) {
+                override fun onStreamComplete(textContent: String, thinking: String, thinkingSig: String, sdkToolCalls: List<com.aiassistant.AnthropicSdkClient.StreamToolCall>) {
                     textBuffer.clear(); textBuffer.append(textContent)
                     thinkingBuffer.clear(); thinkingBuffer.append(thinking)
+                    thinkingSignature = thinkingSig
                     sdkToolCalls.forEach { tc ->
                         toolCalls.add(ToolCallResult(tc.id, tc.name, tc.arguments))
                     }
-                    AppLogger.info("SDK stream complete: textLen=${textContent.length} thinkingLen=${thinking.length} tools=${toolCalls.size}")
+                    AppLogger.info("SDK stream complete: textLen=${textContent.length} thinkingLen=${thinking.length} thinkingSigLen=${thinkingSig.length} tools=${toolCalls.size}")
                     synchronized(done) { done.notifyAll() }
                 }
                 override fun onError(error: Throwable) {
@@ -358,34 +456,36 @@ class AgentLoop(
         val thinking = thinkingBuffer.toString()
         val resultToolCalls = toolCalls.toList()
 
-        AppLogger.info("callAnthropic 返回: finalText.length=${finalText.length} thinking.length=${thinking.length} toolCalls.size=${resultToolCalls.size}")
+        AppLogger.info("callAnthropic 返回: finalText.length=${finalText.length} thinking.length=${thinking.length} thinkingSigLen=${thinkingSignature.length} toolCalls.size=${resultToolCalls.size}")
 
         if (resultToolCalls.isEmpty() && finalText.isEmpty() && thinking.isNotEmpty()) {
             AppLogger.info("callAnthropic: thinking 降级为 text（DeepSeek V4 behavior）")
-            return Triple(thinking, "", resultToolCalls)
+            return AnthropicResponse(thinking, "", thinkingSignature, resultToolCalls)
         }
 
-        return Triple(finalText, thinking, resultToolCalls)
+        return AnthropicResponse(finalText, thinking, thinkingSignature, resultToolCalls)
     }
 
-    /** 将 ToolRegistryV3 中的工具 + 计划元工具转换为 SDK 格式 */
+    /** 将 ToolRegistryV3 中的工具 + 元工具转换为 SDK 格式 */
     private fun buildSdkToolDefs(): List<com.aiassistant.AnthropicToolDef> {
-        val builtIn = ctx.toolRegistry.getAll().map { tool ->
-            com.aiassistant.AnthropicToolDef(
-                name = tool.name,
-                description = tool.description,
-                properties = tool.parameters.associate { p ->
-                    p.name to com.aiassistant.PropertyDef(p.type, p.description)
-                }.ifEmpty { null },
-                required = tool.parameters.filter { it.required }.map { it.name }.ifEmpty { null }
-            )
-        }
-        // 添加计划元工具（由 AgentLoop 硬编码处理，不在 ToolRegistryV3 中）
-        val planTools = listOf(
+        val builtIn = ctx.toolRegistry.getAll()
+            .map { tool ->
+                com.aiassistant.AnthropicToolDef(
+                    name = tool.name,
+                    description = tool.description,
+                    properties = tool.parameters.associate { p ->
+                        p.name to com.aiassistant.PropertyDef(p.type, p.description)
+                    }.ifEmpty { null },
+                    required = tool.parameters.filter { it.required }.map { it.name }.ifEmpty { null }
+                )
+            }
+        // 元工具（由 AgentLoop 硬编码处理，不在 ToolRegistryV3 中）
+        val metaTools = listOf(
+            com.aiassistant.AnthropicToolDef("Skill", "激活一个 skill，获取特定领域的专业指引"),
             com.aiassistant.AnthropicToolDef("create_plan", "创建执行计划"),
             com.aiassistant.AnthropicToolDef("update_plan_step", "更新计划步骤状态")
         )
-        return builtIn + planTools
+        return builtIn + metaTools
     }
 
     /** 使用 Gson 完整解析 JSON 参数，嵌套对象/数组序列化为 JSON 字符串 */
@@ -407,18 +507,19 @@ class AgentLoop(
         }
     }
 
-    private fun buildSystemPrompt(skills: List<AgentTool> = emptyList()): String {
+    private fun buildSystemPrompt(): String {
         val tools = ctx.toolRegistry.getAll()
-        val builtInCount = ctx.toolRegistry.getAll().count { it !is SkillTool }
-        val toolList = tools.take(builtInCount).joinToString("\n") { t ->
+        val toolList = tools.joinToString("\n") { t ->
             val params = t.parameters.joinToString(", ") { "${it.name}:${it.type}" }
             "- **${t.name}**($params): ${t.description}"
         }
-        val skillsSection = if (skills.isNotEmpty()) {
-            "\n## Skills\n" + skills.joinToString("\n\n") { s ->
-                val st = s as? SkillTool ?: return@joinToString ""
-                "### ${st.name}\n${st.description}\n\n${st.prompt}"
-            }
+        // Skills 段落：展示可用 skill 列表（排除已激活的），渐进披露
+        val activeSkill = ctx.activatedSkill
+        val availableSkills = ctx.skillDefs.values.filter { it.name != activeSkill }
+        val skillsSection = if (availableSkills.isNotEmpty()) {
+            "\n## Skills\n" + availableSkills.joinToString("\n") { s ->
+                "- **${s.name}**: ${s.description}"
+            } + "\n\n可通过 /skill名称 激活 Skill，或调用 **Skill** 工具动态激活。"
         } else ""
         val claudeMdContent = loadClaudeMdFiles()
         return """

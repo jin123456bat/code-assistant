@@ -99,10 +99,16 @@ src/main/kotlin/com/aiassistant/
 ChatToolWindowFactory → ChatToolWindow (Swing UI, ~1590 行)
     → ChatViewModel  (UI 桥接，轻量 ViewModel，含 Activity 状态机)
         → AgentLoop (agent，Agent 主循环)
-            → AnthropicAdapter (构建请求 / 解析 SSE 事件)
-            → SseClient        (流式 HTTP, HttpURLConnection)
+            → AnthropicSdkClient (Anthropic Java SDK 封装，HTTP/SSE)
             → ToolRegistryV3   (工具注册与分发)
 ```
+
+**关键数据流**：
+- `ChatViewModel.sendMessage()` 发送后立即设置 `streamingThinking="等待 AI 回复..."` 和 `activity=Activity.Thinking`，消除等待空白
+- `resolveSkillInvocation()` 返回 `SkillResolution(displayContent, llmContent, skillName, preferredModel)`——将 skill prompt 注入 LLM 上下文的同时，保留用户可见文本用于气泡展示
+- `AgentLoop.run(activatedSkill=...)` 接收客户端激活的 skill 名称，存入 `AgentContext.activatedSkill`
+- `AgentLoop.callAnthropic()` 返回 `AnthropicResponse(textContent, thinking, thinkingSignature, toolCalls)`
+- `AnthropicSdkClient.mergeConsecutiveSameRole()` 将连续同 role 的 `AnthropicMessage`（含 `thinking`/`thinkingSignature` 字段）合并为单个 `MessageParam`，确保 DeepSeek V4 thinking 回传要求
 
 ### Agent 循环
 
@@ -144,10 +150,22 @@ AgentLoop 内置两个不由 ToolRegistryV3 管理的元工具，以硬编码 JS
 
 ### Skills
 
-- `SkillEngine` 扫描 `<project>/.claude/skills/**/SKILL.md` 和 `~/.claude/skills/**/SKILL.md`
-- 每个 Skill 被包装为 `SkillTool`（实现 `AgentTool` 接口）
-- Skill 执行时返回提示词注入文本，实际执行由 LLM 完成
-- Skill 工具无需审批，直接执行
+**加载：** `SkillEngine` 扫描 `<project>/.claude/skills/**/SKILL.md` 和 `~/.claude/skills/**/SKILL.md`。全深度遍历（支持嵌套子目录如 `gstack/review/SKILL.md`），自动跳过隐藏目录（`.git`、`.hermes` 等）。同名 skill 以项目级优先。
+
+**SKILL.md 格式：** YAML front matter（`name`、`description`、`model`） + Markdown 正文。`model` 字段可选，声明后激活该 skill 时自动切换模型。
+
+**两种激活路径（对齐 Claude Code）：**
+
+| 路径 | 触发方式 | 机制 |
+|------|---------|------|
+| 客户端拦截 | 用户输入 `/skill-name` | `resolveSkillInvocation()` 拦截，skill prompt 注入 **system prompt**（指令级），skill 从工具列表和 system prompt 中移除，**1 次 API 调用** |
+| 工具调用 | LLM 自主判断 | 调用 skill 工具获取完整 prompt（system prompt 中仅列名称+描述） |
+
+**关键设计：** 客户端激活的 skill 从 LLM 可见的工具列表中移除，防止重复调用。未激活的 skill 仍可通过工具调用获取。Skill prompt 注入 system prompt 而非 user message，确保模型将其视为权威指令。
+
+**模型路由：** SKILL.md 可声明 `model:` 字段指定首选模型。通过 `/skill-name` 激活或 LLM 调用工具时，自动切换到该模型。
+
+**审批：** Skill 工具无需审批，直接执行（skill 是 prompt 注入包装器，不执行实际文件操作）。`isSkill()` 使用严格判定：仅当名称唯一属于 skillTools 时为 true，防止 MCP 工具与 skill 同名时被误判。查找优先级：内置工具 > skill > MCP。
 
 ## 开发指南
 
@@ -206,9 +224,26 @@ AgentLoop 内置两个不由 ToolRegistryV3 管理的元工具，以硬编码 JS
 
 ### Skills
 
+**目录结构：**
 - 项目级：`<project>/.claude/skills/<skill-name>/SKILL.md`
 - 全局：`~/.claude/skills/<skill-name>/SKILL.md`
-- SKILL.md 需包含 `name:` 和 `description:` 字段
+- 支持嵌套子目录（如 `gstack/review/SKILL.md`）
+
+**SKILL.md 格式：**
+```yaml
+---
+name: skill-name          # 必填
+description: 简短描述      # 必填
+model: claude-sonnet-4-6  # 可选，声明后激活时自动切换模型
+---
+# Skill 指引正文（Markdown）
+```
+
+**使用方式：**
+- 输入 `/skill-name`，从斜杠菜单选中后**填充到输入框**（不直接发送，允许用户补充描述）
+- 发送时 `resolveSkillInvocation()` 拦截：提取 skill prompt 注入 LLM 上下文，同时将 `/skill-name` 前缀从用户可见气泡中去掉
+- LLM 也可在需要时主动调用 skill 工具获取指引
+- `ChatViewModel.getSkills()` 返回 `SkillInfo(name, description)` 供 UI 展示
 
 ### 工具白名单
 
@@ -218,8 +253,11 @@ AgentLoop 内置两个不由 ToolRegistryV3 管理的元工具，以硬编码 JS
 
 ## 关键约定与坑
 
-- **DeepSeek V4 兼容**：`AnthropicAdapter.buildRequest()` 在每个 `tool_use` content block 前预置一个空 `thinking` block（`{"type":"thinking","thinking":""}`），这是 DeepSeek V4 API 的硬性要求
-- **SSE 解析手写**：`AnthropicAdapter.parseSseEvent()` 和 `extractJsonString()` 用字符串扫描而非 JSON 库解析事件；`SseClient` 已剥离 `data:` 前缀
+- **DeepSeek V4 thinking 回传**：启用 thinking 模式时，assistant 回复中的 `thinking` content block（含 `signature`）必须随后续请求传回 API。`AnthropicMessage` 新增 `thinking` 和 `thinkingSignature` 字段存储。`mergeConsecutiveSameRole()` 负责将 thinking + text + tool_use 合并为单条消息，`buildSdkMessage()` 构建含 `ThinkingBlockParam` 的完整 content blocks。
+- **流式气泡清理**：`streamingBubble` 必须存 row（container 的直接子组件），不能存 ChatBubble（row 的子组件），否则 `container.remove(streamingBubble)` 找不到直接子组件导致流式气泡永远删不掉。
+- **错误恢复**：`ChatViewModel.onError` 回调中清理全部流式状态（`isStreaming=false`、`streamingContent=""`、`streamingThinking=""`、`isThinking=false`、`activity=Idle`）并触发 `onMessagesChanged` 强制 UI 重建，移除残留流式组件。`onStateChange(false)` 在停止时同样清理 `streamingContent`。
+- **发送后等待指示**：`sendMessage()` 中设置 `streamingThinking="等待 AI 回复..."` + `activity=Activity.Thinking`，立即显示等待指示器，收到首个 streaming 事件后自动替换。
+- **增量渲染**：消息通过 `id` + `version` 追踪变更，`renderedMsgVersions` 和 `msgIdToComponent` 配合实现增量更新。消息减少时通过 `renderedMsgVersions.size > displayMessages.size` 自动触发全量重建。
+- **Anthropic Java SDK**：HTTP/SSE 层使用官方 `com.anthropic:anthropic-java:2.40.1`，替代手写 `SseClient`。
 - **工具参数解析使用 Gson**：`AgentLoop.parseParams()` 使用 `Gson.fromJson(json, Map::class.java)` 完整解析 JSON，嵌套对象/数组序列化为 JSON 字符串
-- **JSON 转义统一走 `shared/JsonUtils`**：`escapeJson` / `unescapeJson` 在适配器和工具 schema 里复用
 - **i18n**：用户可见文案走 `messages/AiAssistantBundle*.properties`，通过 `AiAssistantBundle` 读取

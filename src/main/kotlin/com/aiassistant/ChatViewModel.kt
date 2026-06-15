@@ -73,9 +73,14 @@ class ChatViewModel {
         agent = a
     }
 
-    fun getSkillNames(): List<String> = agent?.ctx?.toolRegistry?.getAll()
-        ?.filter { it.name !in setOf("search_code","read_file","write_file","list_directory","execute_command","git_diff","git_log","git_status","ask_user","web_search","web_fetch","notebook_edit","task") }
-        ?.map { it.name } ?: emptyList()
+    data class SkillInfo(val name: String, val description: String)
+
+    fun getSkillNames(): List<String> = getSkills().map { it.name }
+
+    /** 获取所有 skill 的名称和描述（用于 UI 菜单展示） */
+    fun getSkills(): List<SkillInfo> = agent?.ctx?.skillDefs?.values
+        ?.map { SkillInfo(it.name, it.description) }
+        ?: emptyList()
 
     fun addMcpTools(mcpTools: List<com.aiassistant.agent.AgentTool>) {
         agent?.ctx?.toolRegistry?.registerMcp(mcpTools)
@@ -146,6 +151,12 @@ class ChatViewModel {
         a.onPlanUpdate = { plan -> runOnEdt { currentPlan = plan; onPlanUpdate?.invoke(plan); onMessagesChanged?.invoke() } }
         a.onError = { msg ->
             runOnEdt {
+                // 清理流式状态，防止残留的 streaming bubble 与错误消息重复渲染
+                isStreaming = false
+                streamingContent = ""
+                streamingThinking = ""
+                isThinking = false
+                activity = Activity.Idle
                 // Rate Limit 检测：若错误消息包含 429 状态码，标记限流状态并在若干秒后自动恢复
                 if (msg.contains("429")) {
                     isRateLimited = true
@@ -158,14 +169,16 @@ class ChatViewModel {
                 } else {
                     onError?.invoke(msg)
                 }
+                // 触发 UI 重建，移除残留的流式组件
+                onMessagesChanged?.invoke()
             }
         }
         a.onStateChange = { streaming ->
             runOnEdt {
                 isStreaming = streaming
-                // 运行开始→思考中；结束→空闲
+                // 运行开始→思考中；结束→空闲，清理所有流式状态防止残留渲染
                 if (streaming) { if (activity == Activity.Idle) activity = Activity.Thinking }
-                else { activity = Activity.Idle; currentToolName = null; streamingThinking = ""; isThinking = false }
+                else { activity = Activity.Idle; currentToolName = null; streamingThinking = ""; streamingContent = ""; isThinking = false }
                 onStreamingStateChanged?.invoke(streaming)
             }
         }
@@ -203,30 +216,55 @@ class ChatViewModel {
         generationId++  // 新轮次，DD旧回调
         streamingContent = ""
         streamingThinking = ""
-        // 气泡只显示用户文本，引用内容以 chips 形式独立展示
-        val msg = AgentMessage("user", content, images = images)
+
+        // 对齐 Claude Code：客户端拦截 /skill-name，注入 prompt 并从工具列表移除该 skill
+        val resolved = resolveSkillInvocation(content)
+
+        // 气泡只显示用户可见文本（不含 skill prompt），引用内容以 chips 形式独立展示
+        val msg = AgentMessage("user", resolved.displayContent, images = images)
         messages.add(msg)
         runOnEdt { onMessagesChanged?.invoke() }
         isStreaming = true
-        runOnEdt { onStreamingStateChanged?.invoke(true) }
+        // 立即显示"等待AI回复"指示器，消除用户发送消息后到首个 streaming 事件之间的空白等待感
+        streamingThinking = "等待 AI 回复..."
+        activity = Activity.Thinking
+        runOnEdt {
+            onStreamingThinkingChanged?.invoke(streamingThinking)
+            onStreamingStateChanged?.invoke(true)
+        }
 
-        val llmContent = if (refContent.isNotEmpty()) "$content\n\n$refContent" else content
+        val llmContent = if (refContent.isNotEmpty()) "${resolved.llmContent}\n\n$refContent" else resolved.llmContent
+        AppLogger.info("用户消息: ${resolved.displayContent}")
         val a = agent
         if (a != null) {
-            a.run(llmContent, apiKey, images) { finalText, thinking ->
+            // Skill 模型路由：客户端激活时应用 preferredModel
+            if (resolved.preferredModel != null) {
+                a.switchModel(resolved.preferredModel!!)
+            }
+            // 对齐 Claude Code：skill prompt 注入 system prompt
+            a.ctx.activatedSkillPrompt = resolved.skillPrompt
+            a.run(llmContent, apiKey, images, resolved.skillName) { finalText, thinking ->
                 // thinking 与 assistant 消息在同一个 EDT 块中原子性地落地，
                 // 同时清空 streamingThinking/streamingContent，避免分两次 rebuild
                 // 导致 streamingContent 作为临时气泡重复渲染。
                 runOnEdt {
+                    // 先清空流式状态并标记流式结束——防止 SDK 延迟到达的 onTextDelta
+                    // EDT 回调在 rebuild 之后重新设置 streamingContent，导致
+                    // updateStreamingBubble 又创建一个流式气泡与正式消息重复。
+                    isStreaming = false
+                    streamingContent = ""
+                    streamingThinking = ""
                     if (thinking.isNotEmpty()) {
                         addThinkingMessage(thinking)
                     }
                     if (finalText.isNotEmpty()) {
+                        AppLogger.info("收到AI回复: $finalText")
                         messages.add(AgentMessage("assistant", finalText))
                     }
-                    streamingContent = ""
-                    activity = Activity.Idle  // 必须在 onMessagesChanged 之前重置，否则 rebuildConversation 会渲染"思考中..."
+                    activity = Activity.Idle
                     onMessagesChanged?.invoke()
+                    // 手动触发状态回调（AgentLoop finally 块也会触发，此处先触发确保输入框尽早恢复）
+                    onStreamingStateChanged?.invoke(false)
                 }
             }
         } else {
@@ -254,6 +292,42 @@ class ChatViewModel {
     /** 刷新 Agent 模型配置，响应 Settings 变更 */
     fun refreshModel() {
         agent?.refreshModel()
+    }
+
+    /** resolveSkillInvocation 的返回值 */
+    private data class SkillResolution(
+        val displayContent: String,
+        val llmContent: String,
+        val skillName: String?,
+        val preferredModel: String?,
+        val skillPrompt: String? = null  // 注入 system prompt，对齐 Claude Code
+    )
+
+    /**
+     * 对齐 Claude Code：客户端拦截 /skill-name，将 skill prompt 注入 LLM 上下文。
+     * 同时提取 preferredModel 用于模型路由。
+     */
+    private fun resolveSkillInvocation(content: String): SkillResolution {
+        val trimmed = content.trimStart()
+        if (!trimmed.startsWith("/")) return SkillResolution(content, content, null, null)
+        val skillName = trimmed.removePrefix("/").substringBefore(" ").substringBefore("\n")
+        if (skillName.isBlank()) return SkillResolution(content, content, null, null)
+        // 对齐 Claude Code：从 skillDefs 查找（skill 不再注册为独立工具）
+        val def = agent?.ctx?.skillDefs?.get(skillName) ?: return SkillResolution(content, content, null, null)
+        // 用户可见内容：保留 /skill-name 前缀，让用户知道激活了哪个 skill
+        val userInput = trimmed.removePrefix("/$skillName").trimStart()
+        val displayContent = if (userInput.isNotEmpty()) "/$skillName $userInput" else "/$skillName"
+        // 对齐 Claude Code：skill prompt 注入 system prompt（指令级），不混入用户消息
+        // llmContent 只含用户输入，skill prompt 通过 AgentContext.activatedSkillPrompt 传递
+        val llmContent = userInput.ifEmpty { "执行此 skill" }
+        AppLogger.info("Skill客户端拦截: /$skillName → prompt注入system (${def.prompt.length} chars) model=${def.preferredModel}")
+        return SkillResolution(
+            displayContent = displayContent,
+            llmContent = llmContent,
+            skillName = skillName,
+            preferredModel = def.preferredModel,
+            skillPrompt = def.prompt
+        )
     }
 
     fun stopGeneration() {
