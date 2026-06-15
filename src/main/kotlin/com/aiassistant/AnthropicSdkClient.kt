@@ -23,7 +23,7 @@ class AnthropicSdkClient(
         fun onThinkingDelta(fullThinking: String)
         fun onToolUseStart(id: String, name: String)
         fun onToolInputDelta(partial: String)
-        fun onStreamComplete(textContent: String, thinking: String, thinkingSignature: String, toolCalls: List<StreamToolCall>)
+        fun onStreamComplete(textContent: String, thinking: String, thinkingSignature: String, toolCalls: List<StreamToolCall>, inputTokens: Int)
         fun onError(error: Throwable)
     }
 
@@ -92,10 +92,12 @@ class AnthropicSdkClient(
         var currentToolName: String? = null
         val toolCalls = mutableListOf<StreamToolCall>()
         var currentThinkingSignature: String? = null
+        val accumulator = com.anthropic.helpers.MessageAccumulator.create()
 
         try {
             client.messages().createStreaming(params).use { response ->
                 response.stream().forEach { event ->
+                    accumulator.accumulate(event)
                     if (event.isContentBlockDelta()) {
                         val delta = event.asContentBlockDelta().delta()
                         if (delta.isText()) {
@@ -132,12 +134,16 @@ class AnthropicSdkClient(
                             toolInputBuffer.clear()
                         }
                     } else if (event.isMessageStop()) {
-                        com.aiassistant.AppLogger.info("SDK响应: text=${textBuffer}")
+                        val inputTokens = try {
+                            accumulator.message().usage().inputTokens().toInt()
+                        } catch (_: Exception) { 0 }
+                        com.aiassistant.AppLogger.info("SDK响应: text=${textBuffer} inputTokens=$inputTokens")
                         callback.onStreamComplete(
                             textBuffer.toString(),
                             thinkingBuffer.toString(),
                             currentThinkingSignature ?: "",
-                            toolCalls.toList()
+                            toolCalls.toList(),
+                            inputTokens
                         )
                         latch.countDown()
                     }

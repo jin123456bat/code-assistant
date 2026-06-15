@@ -1283,8 +1283,13 @@ class ChatToolWindow(private val project: Project) {
             Cmd("/init",  "初始化项目文档") { sendQuick("请分析当前项目结构，创建 CLAUDE.md 文档，包含项目概述、常用命令、架构说明和关键约定。") },
             Cmd("/review","审查当前改动") { sendQuick("请审查当前分支的代码改动，分析潜在问题并给出修复建议。") },
             Cmd("/test",  "运行测试") { sendQuick("请运行 ./gradlew test，分析测试结果并修复失败的测试。") },
-            Cmd("/stop",  "停止生成") { viewModel.stopGeneration() },
-            Cmd("/clear", "清空输入") { /* 已在 executeCommand 中清空 */ }
+            Cmd("/stop",    "停止生成") { viewModel.stopGeneration() },
+            Cmd("/compact", "压缩对话释放 token") {
+                val apiKey = try { AppSettingsService.getInstance().getApiKey() } catch (_: Exception) { null }
+                if (apiKey.isNullOrBlank()) { showWarning("请先配置 API Key"); return@Cmd }
+                viewModel.compactConversation(apiKey)
+            },
+            Cmd("/clear",   "清空输入") { /* 已在 executeCommand 中清空 */ }
         )
 
         fun executeCommand(cmd: Cmd) {

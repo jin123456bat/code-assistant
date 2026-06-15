@@ -8,6 +8,8 @@ import com.intellij.ui.components.JBPasswordField
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.util.ui.JBUI
 import java.awt.BorderLayout
+import javax.swing.JSpinner
+import javax.swing.SpinnerNumberModel
 import java.awt.Dimension
 import java.awt.GridBagConstraints
 import java.awt.GridBagLayout
@@ -39,6 +41,7 @@ class SettingsConfigurable : Configurable {
     private val thinkingCheckbox = JBCheckBox(AiAssistantBundle.message("settings.thinking")).apply {
         isSelected = true
     }
+    private val compactRatioSpinner = JSpinner(SpinnerNumberModel(90, 10, 100, 5))
     // ---- whitelist ----
     private val toolWhitelistPanel = JPanel()
     private val commandWhitelistPanel = JPanel()
@@ -145,25 +148,33 @@ class SettingsConfigurable : Configurable {
         gbc.gridx = 1; gbc.weightx = 1.0
         contentPanel.add(thinkingCheckbox, gbc)
 
+        // Auto-compact ratio
+        gbc.gridy = 6; gbc.gridx = 0; gbc.weightx = 0.0; gbc.gridwidth = 1
+        contentPanel.add(JLabel("自动 Compact 触发比例"), gbc)
+        gbc.gridx = 1; gbc.weightx = 1.0
+        contentPanel.add(compactRatioSpinner, gbc)
+        gbc.gridx = 2; gbc.weightx = 0.0
+        contentPanel.add(JLabel("% 上下文窗口"), gbc)
+
         // Prompt label
-        gbc.gridy = 6; gbc.gridx = 0; gbc.gridwidth = 2
+        gbc.gridy = 7; gbc.gridx = 0; gbc.gridwidth = 2
         gbc.insets = JBUI.insets(12, 8, 4, 8)
         contentPanel.add(JLabel(AiAssistantBundle.message("settings.prompt.label")), gbc)
         gbc.insets = JBUI.insets(6, 8)
 
         // Prompt editor
-        gbc.gridy = 7; gbc.weightx = 1.0; gbc.fill = GridBagConstraints.BOTH
+        gbc.gridy = 8; gbc.weightx = 1.0; gbc.fill = GridBagConstraints.BOTH
         contentPanel.add(promptScrollPane, gbc)
 
         // Reset button
-        gbc.gridy = 8; gbc.weightx = 0.0; gbc.fill = GridBagConstraints.NONE
+        gbc.gridy = 9; gbc.weightx = 0.0; gbc.fill = GridBagConstraints.NONE
         gbc.anchor = GridBagConstraints.EAST
         val resetBtn = JButton(AiAssistantBundle.message("settings.prompt.reset"))
         resetBtn.addActionListener { promptArea.text = AppSettingsService.DEFAULT_COMMIT_PROMPT_ZH }
         contentPanel.add(resetBtn, gbc)
 
         // Status
-        gbc.gridy = 9; gbc.gridx = 0; gbc.gridwidth = 2; gbc.anchor = GridBagConstraints.NORTHWEST
+        gbc.gridy = 10; gbc.gridx = 0; gbc.gridwidth = 2; gbc.anchor = GridBagConstraints.NORTHWEST
         gbc.fill = GridBagConstraints.HORIZONTAL
         contentPanel.add(statusLabel, gbc)
 
@@ -214,6 +225,9 @@ class SettingsConfigurable : Configurable {
 
         if (service.isThinkingEnabled() != thinkingCheckbox.isSelected) return true
 
+        val savedRatio = (service.getCompactRatio() * 100).toInt()
+        if (savedRatio != (compactRatioSpinner.value as Int)) return true
+
         return false
     }
 
@@ -245,6 +259,7 @@ class SettingsConfigurable : Configurable {
         }
 
         service.setThinkingEnabled(thinkingCheckbox.isSelected)
+        service.setCompactRatio((compactRatioSpinner.value as Int) / 100.0)
 
         statusLabel.text = AiAssistantBundle.message("settings.key.saved")
         statusLabel.foreground = JBColor(0x1B5E20, 0x80C080)
@@ -260,6 +275,7 @@ class SettingsConfigurable : Configurable {
         val idx = AppSettingsService.AVAILABLE_MODELS.indexOfFirst { it.first == savedModel }
         if (idx >= 0) modelCombo.selectedIndex = idx
         thinkingCheckbox.isSelected = service.isThinkingEnabled()
+        compactRatioSpinner.value = (service.getCompactRatio() * 100).toInt()
         statusLabel.text = ""
         refreshWhitelistUI()
     }

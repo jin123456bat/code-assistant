@@ -94,12 +94,20 @@ class AgentLoop(
         // 恢复或重建 system prompt：skill 激活时排除该 skill，普通消息时恢复完整 skill 列表
         ctx.activatedSkill = activatedSkill
         ctx.systemPrompt = buildSystemPrompt()
-        val history = mutableListOf<AnthropicMessage>()
+        // 跨轮对话历史：每轮追加到 ctx.conversationHistory，使 LLM 能感知完整上下文
+        val history = ctx.conversationHistory
 
         val t = Thread {
             try {
                 // 健康检查：恢复崩溃的 MCP 服务器（对齐 Claude Code，后台线程避免阻塞 EDT）
                 com.aiassistant.mcp.McpManager.getInstance(project.basePath)?.healthCheck()
+
+                // 自动 Compact：历史过长时先压缩再发送（对齐 Claude Code 自动 token 阈值触发）
+                if (shouldAutoCompact(history)) {
+                    AppLogger.info("自动 Compact 触发: historySize=${history.size}")
+                    autoCompact(history, apiKey)
+                }
+
                 // 诊断信息
                 val toolCount = ctx.toolRegistry.getAll().size
                 val toolNames = ctx.toolRegistry.getAll().joinToString(", ") { it.name }
@@ -449,7 +457,8 @@ class AgentLoop(
                     AppLogger.info("SDK tool_use: id=$id name=$name")
                 }
                 override fun onToolInputDelta(partial: String) {}
-                override fun onStreamComplete(textContent: String, thinking: String, thinkingSig: String, sdkToolCalls: List<com.aiassistant.AnthropicSdkClient.StreamToolCall>) {
+                override fun onStreamComplete(textContent: String, thinking: String, thinkingSig: String, sdkToolCalls: List<com.aiassistant.AnthropicSdkClient.StreamToolCall>, inputTokens: Int) {
+                    ctx.lastInputTokens = inputTokens
                     textBuffer.clear(); textBuffer.append(textContent)
                     thinkingBuffer.clear(); thinkingBuffer.append(thinking)
                     thinkingSignature = thinkingSig
@@ -492,6 +501,140 @@ class AgentLoop(
         }
 
         return AnthropicResponse(finalText, thinking, thinkingSignature, resultToolCalls)
+    }
+
+    /**
+     * 压缩对话历史：使用 LLM 生成摘要，保留关键信息，释放 token 预算。
+     * 对齐 Claude Code /compact：保留原始任务、关键决策、文件变更、计划进度。
+     * @param messages 待压缩的消息列表
+     * @param apiKey API Key
+     * @return 摘要文本，失败返回 null
+     */
+    fun compact(messages: List<AnthropicMessage>, apiKey: String): String? {
+        if (messages.isEmpty()) return null
+        // 复用 SDK 客户端
+        if (sdkClient == null || lastApiKey != apiKey) {
+            sdkClient = com.aiassistant.AnthropicSdkClient(apiKey)
+            lastApiKey = apiKey
+        }
+        val sdkClient = sdkClient!!
+
+        // 构建压缩提示词
+        val compactPrompt = buildString {
+            append("你是一个对话摘要助手。请将以下对话历史压缩为一段简洁的中文摘要，")
+            append("保留以下关键信息：\n")
+            append("1. 用户的原始任务/目标\n")
+            append("2. 已完成的关键操作和决策\n")
+            append("3. 修改过的文件及原因\n")
+            append("4. 遇到的错误及解决方案\n")
+            append("5. 当前执行计划进度（如有）\n")
+            append("6. 重要的技术细节和约定\n")
+            append("\n请用 200-500 字输出摘要，不要使用标题或列表标记。\n\n")
+            append("对话历史：\n")
+            for (msg in messages) {
+                // 跳过 thinking-only 消息（不包含实质内容，仅 API 协议需要）
+                if (msg.thinking.isNotBlank() && msg.content.isBlank() && msg.toolUseId == null) continue
+                val prefix = when {
+                    msg.toolCallId != null -> "工具结果"
+                    msg.toolUseId != null -> "工具调用(${msg.toolName ?: ""})"
+                    msg.role == "user" -> "用户"
+                    else -> "AI"
+                }
+                val content = msg.content.take(2000)  // 每条最多 2000 字符
+                append("[$prefix] $content\n")
+            }
+        }
+
+        // 构建摘要消息列表：system prompt + 压缩请求
+        val summaryHistory = listOf(
+            AnthropicMessage("user", compactPrompt)
+        )
+
+        // 一次性调用，不传工具、不启用 thinking
+        val result = try {
+            val done = Object()
+            var summaryText = ""
+            var hasError = false
+            sdkClient.createStreaming(
+                model = model,
+                systemPrompt = "你是一个简洁的对话摘要助手，用中文输出。",
+                messages = summaryHistory,
+                tools = emptyList(),
+                thinkingEnabled = false,
+                callback = object : com.aiassistant.AnthropicSdkClient.Callback {
+                    override fun onTextDelta(fullText: String) { summaryText = fullText }
+                    override fun onThinkingDelta(fullThinking: String) {}
+                    override fun onToolUseStart(id: String, name: String) {}
+                    override fun onToolInputDelta(partial: String) {}
+                    override fun onStreamComplete(textContent: String, thinking: String, thinkingSignature: String, toolCalls: List<com.aiassistant.AnthropicSdkClient.StreamToolCall>, inputTokens: Int) {
+                        summaryText = textContent
+                        synchronized(done) { done.notifyAll() }
+                    }
+                    override fun onError(error: Throwable) {
+                        hasError = true
+                        synchronized(done) { done.notifyAll() }
+                    }
+                }
+            )
+            synchronized(done) {
+                if (summaryText.isEmpty() && !hasError) {
+                    try { done.wait(60_000) } catch (_: InterruptedException) {}
+                }
+            }
+            if (hasError || summaryText.isBlank()) null else summaryText.trim()
+        } catch (e: Exception) {
+            AppLogger.warn("对话压缩失败: ${e.message}")
+            null
+        }
+
+        return result
+    }
+
+    /**
+     * 判断是否超过上下文窗口的比例阈值。
+     * 使用最近一次 API 返回的 inputTokens（代表当前对话历史占用的 token 数），
+     * 因为上下文窗口限制只针对 input（输出 token 不影响下次请求）。
+     * 若 SDK 未返回 inputTokens（=0），降级为字符估算。
+     */
+    private fun shouldAutoCompact(history: List<AnthropicMessage>): Boolean {
+        if (history.size < 30) return false
+        val contextWindow = 1_000_000L
+        val ratio = com.aiassistant.AppSettingsService.getInstance().getCompactRatio()
+        val threshold = (contextWindow * ratio).toLong()
+        // 优先使用 API 返回的精确 input token 数
+        val tokens = ctx.lastInputTokens
+        if (tokens > 0) return tokens > threshold
+        // 降级：字符数估算
+        val allText = history.joinToString("") { it.content + it.thinking }
+        val cjkCount = allText.count { it in '一'..'鿿' }
+        val otherCount = allText.length - cjkCount
+        val estimatedTokens = (cjkCount * 1.5 + otherCount * 0.25).toLong()
+        return estimatedTokens > threshold
+    }
+
+    /**
+     * 自动 Compact：静默压缩旧消息，摘要注入 system prompt。
+     * 对齐 Claude Code 自动 token 阈值触发机制。
+     */
+    private fun autoCompact(history: MutableList<AnthropicMessage>, apiKey: String) {
+        if (history.size <= 30) return
+        // 保留最近约 30 条历史记录（对应约 10 轮对话）
+        val historyKeep = history.takeLast(30).toList()
+        val historyToSummarize = history.dropLast(30).toList()
+        if (historyToSummarize.isEmpty()) return
+
+        val summary = compact(historyToSummarize, apiKey) ?: return
+        // 摘要注入 system prompt（对齐 Claude Code，不破坏消息交替结构）
+        ctx.systemPrompt = buildString {
+            append(ctx.systemPrompt)
+            append("\n\n## 对话摘要（自动生成）\n$summary")
+        }
+        // 重建历史：仅保留最近的消息
+        synchronized(ctx.historyLock) {
+            history.clear()
+            history.addAll(historyKeep)
+        }
+        AppLogger.info("自动 Compact 完成: ${historyToSummarize.size} 条 → 1 段摘要, 保留 ${historyKeep.size} 条")
     }
 
     /** 将 ToolRegistryV3 中的工具 + 元工具转换为 SDK 格式 */

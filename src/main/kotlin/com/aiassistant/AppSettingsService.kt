@@ -19,6 +19,7 @@ class AppSettingsService {
         private const val WHITELIST_KEY = "$SERVICE_NAME.COMMAND_WHITELIST"
         private const val MODEL_KEY = "$SERVICE_NAME.MODEL"
         private const val THINKING_KEY = "$SERVICE_NAME.THINKING"
+        private const val COMPACT_RATIO_KEY = "$SERVICE_NAME.COMPACT_RATIO"
 
         val AVAILABLE_MODELS = listOf(
             "deepseek-v4-flash" to "DeepSeek V4 Flash (快速/工具调用)",
@@ -227,5 +228,16 @@ feat(新功能) | fix(修复) | chore(杂项) | docs(文档) | style(格式) | r
 
     fun setThinkingEnabled(enabled: Boolean) {
         com.intellij.ide.util.PropertiesComponent.getInstance().setValue(THINKING_KEY, enabled.toString())
+    }
+
+    /** 自动 Compact 触发比例（0.1-1.0），默认 0.9 = 占上下文窗口 90% 时触发 */
+    fun getCompactRatio(): Double {
+        val raw = com.intellij.ide.util.PropertiesComponent.getInstance().getValue(COMPACT_RATIO_KEY)
+        return raw?.toDoubleOrNull()?.coerceIn(0.1, 1.0) ?: 0.9
+    }
+
+    fun setCompactRatio(ratio: Double) {
+        com.intellij.ide.util.PropertiesComponent.getInstance()
+            .setValue(COMPACT_RATIO_KEY, ratio.coerceIn(0.1, 1.0).toString())
     }
 }

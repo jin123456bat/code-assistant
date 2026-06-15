@@ -1,5 +1,6 @@
 package com.aiassistant.agent
 
+import com.aiassistant.AnthropicMessage
 import com.aiassistant.agent.AgentTool
 import com.aiassistant.agent.ToolResult
 import com.intellij.openapi.project.Project
@@ -11,6 +12,13 @@ class AgentContext(val project: Project) {
     val toolRegistry = ToolRegistryV3()
     var systemPrompt: String = ""
     var model: String = "deepseek-chat"
+    /** 跨轮对话历史：保留完整 assistant/tool 消息，使 LLM 能感知之前的所有交互 */
+    @Volatile var conversationHistory = java.util.Collections.synchronizedList(mutableListOf<AnthropicMessage>())
+        private set
+    /** conversationHistory 的复合操作锁（clear+addAll 组合操作需要外部同步） */
+    val historyLock = Any()
+    /** 最近一次 API 调用的 input tokens（从 API usage 获取），用于判断是否触发自动 Compact */
+    var lastInputTokens: Int = 0
 
     // Plan mode
     var currentPlan: Plan? = null
