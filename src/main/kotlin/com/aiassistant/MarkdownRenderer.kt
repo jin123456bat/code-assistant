@@ -72,7 +72,14 @@ class MarkdownRenderer {
      * - 文本段：JTextPane with HTML
      * - 代码段：CodeBlockWrapper（带语言标签 + 右上角"复制"按钮）
      */
-    fun render(markdown: String): JPanel {
+    fun render(markdown: String): JPanel = render(markdown, null, null)
+
+    /**
+     * 将 markdown 渲染为 JPanel，支持文件路径/URL 点击跳转。
+     * @param project 当前项目，非 null 时启用文件路径点击跳转
+     * @param basePath 项目根路径，默认使用 project.basePath
+     */
+    fun render(markdown: String, project: com.intellij.openapi.project.Project?, basePath: String? = null): JPanel {
         val container = JPanel()
         container.layout = BoxLayout(container, BoxLayout.Y_AXIS)
 
@@ -84,6 +91,7 @@ class MarkdownRenderer {
             val textPane = buildTextPane(container.background)
             textPane.text = buildStyledHtml(html, textPane)
             textPane.caretPosition = 0
+            if (project != null) com.aiassistant.ui.FilePathNavigator.attach(textPane, project, basePath)
             container.add(textPane)
             return container
         }
@@ -96,6 +104,7 @@ class MarkdownRenderer {
                     val textPane = buildTextPane(container.background)
                     textPane.text = buildStyledHtml(html, textPane)
                     textPane.caretPosition = 0
+                    if (project != null) com.aiassistant.ui.FilePathNavigator.attach(textPane, project, basePath)
                     container.add(textPane)
                 }
                 is CodeSegment -> {
@@ -273,7 +282,7 @@ class MarkdownRenderer {
                 table { width: 100%; }
                 th, td { border: 1px solid $borderColor; padding: 6px 10px; }
                 th { background-color: $inlineBg; }
-                a { color: #2674B4; }
+                a { color: #2674B4; text-decoration: underline; }
                 hr { border: none; border-top: 1px solid $borderColor; }
             </style></head><body>$htmlBody</body></html>
         """.trimIndent()

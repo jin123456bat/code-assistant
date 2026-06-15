@@ -351,7 +351,14 @@ class AgentLoop(
 
                         if (consecutiveFailures >= MAX_FAILURES) break
                     } else {
-                        AppLogger.info("AgentLoop 最终回复: $textContent")
+                        // 无工具调用：thinking block 必须传回 API（DeepSeek V4 硬性要求）
+                        AppLogger.info("AgentLoop 最终回复: $textContent thinkingLen=${thinking.length} sigLen=${thinkingSignature.length}")
+                        if (thinking.isNotBlank() && thinkingSignature.isNotBlank()) {
+                            history.add(AnthropicMessage("assistant", textContent,
+                                thinking = thinking, thinkingSignature = thinkingSignature))
+                        } else {
+                            history.add(AnthropicMessage("assistant", textContent))
+                        }
                         callback(textContent, thinking)
                         break
                     }

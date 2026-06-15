@@ -69,7 +69,10 @@ private class BrailleSpinnerLabel(color: Color) : JLabel() {
  * - 展开/收起采用 removeAll + rebuild + revalidate/repaint 模式
  * - 所有颜色取自 ChatTheme，不硬编码
  */
-class ToolRowFactory(private val availableWidth: () -> Int) {
+class ToolRowFactory(
+    private val availableWidth: () -> Int,
+    private val project: com.intellij.openapi.project.Project? = null
+) {
 
     private val editorFontSize get() = runCatching { EditorColorsManager.getInstance().globalScheme.editorFontSize }.getOrDefault(14)
     private val toolFont get() = Font(Font.SANS_SERIF, Font.PLAIN, editorFontSize - ChatTheme.TOOL_FONT_OFFSET)
@@ -246,6 +249,7 @@ class ToolRowFactory(private val availableWidth: () -> Int) {
                     font = toolCodeFont; background = ChatTheme.codeBg
                     foreground = ChatTheme.textSecondary; border = JBUI.Borders.empty(4, 6)
                 }
+                if (project != null) FilePathNavigator.attach(textArea, project)
                 val codePanel = JPanel(BorderLayout()).apply {
                     background = ChatTheme.codeBg
                     border = BorderFactory.createCompoundBorder(

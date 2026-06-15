@@ -1011,8 +1011,8 @@ class ChatToolWindow(private val project: Project) {
     }
 
     private val markdownRenderer = MarkdownRenderer()
-    private val bubbleFactory = BubbleFactory(conversationScrollPane)
-    private val toolRowFactory = ToolRowFactory { conversationScrollPane.viewport.width }
+    private val bubbleFactory = BubbleFactory(conversationScrollPane, project)
+    private val toolRowFactory = ToolRowFactory({ conversationScrollPane.viewport.width }, project)
 
     /** 流式更新时原地替换 JTextPane 文本，避免 remove/add 触发布局震荡 */
     private fun updateStreamingBubble() {

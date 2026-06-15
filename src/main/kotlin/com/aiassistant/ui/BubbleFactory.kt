@@ -26,7 +26,10 @@ import javax.swing.text.html.HTMLEditorKit
  * 那是用户消息裁字、AI 气泡错位的架构根因。viewport 变化时只需对容器
  * 调用 revalidate()，气泡会按新宽度自动重测。
  */
-class BubbleFactory(private val scrollPane: JBScrollPane) {
+class BubbleFactory(
+    private val scrollPane: JBScrollPane,
+    private val project: com.intellij.openapi.project.Project? = null
+) {
 
     private val editorFontSize get() = runCatching { EditorColorsManager.getInstance().globalScheme.editorFontSize }.getOrDefault(14)
 
@@ -94,7 +97,7 @@ class BubbleFactory(private val scrollPane: JBScrollPane) {
     }
 
     fun assistantBubble(message: AgentMessage): Triple<JPanel, JPanel, JComponent> {
-        val content = MarkdownRenderer().render(message.content).apply {
+        val content = MarkdownRenderer().render(message.content, project).apply {
             isOpaque = true
             background = ChatTheme.aiBg
         }
