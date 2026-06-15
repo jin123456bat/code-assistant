@@ -22,6 +22,11 @@ class AgentContext(val project: Project) {
     /** 激活的 skill 的完整 prompt（注入 system prompt，对齐 Claude Code） */
     @Volatile var activatedSkillPrompt: String? = null
 
+    /** MCP prompts（对齐 Claude Code：MCP 服务器提供的 prompt 模板，注入 system prompt） */
+    val mcpPrompts = java.util.concurrent.CopyOnWriteArrayList<com.aiassistant.mcp.McpPromptDef>()
+    /** MCP resources（对齐 Claude Code：MCP 服务器提供的资源 URI 列表，注入 system prompt） */
+    val mcpResources = java.util.concurrent.CopyOnWriteArrayList<com.aiassistant.mcp.McpResourceDef>()
+
     data class Step(
         val index: Int,
         val subject: String,

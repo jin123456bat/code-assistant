@@ -55,6 +55,8 @@ class TaskTool : AgentTool {
             }
         } catch (e: Exception) {
             return ToolResult.err("子 Agent 执行失败: ${e.message}")
+        } finally {
+            childLoop.stop()  // 确保子 agent 线程被中断释放，防止资源泄漏
         }
     }
 }

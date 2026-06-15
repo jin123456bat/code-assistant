@@ -25,16 +25,26 @@ class ReadFileTool : AgentTool {
     )
 
     override fun execute(params: Map<String, String>, project: Project): ToolResult {
-        val relativePath = params["path"]?.takeIf { it.isNotBlank() } ?: return ToolResult.err("path 不能为空")
+        val path = params["path"]?.takeIf { it.isNotBlank() } ?: return ToolResult.err("path 不能为空")
+
+        // MCP resource:// URI 路由（对齐 Claude Code：read_file 支持 resource:// 协议）
+        if (path.startsWith("resource://")) {
+            val mcpManager = com.aiassistant.mcp.McpManager.getInstance(project.basePath)
+                ?: return ToolResult.err("MCP 管理器未初始化")
+            val content = mcpManager.readResource(path)
+                ?: return ToolResult.err("MCP 资源不存在或读取失败: $path")
+            return ToolResult.ok(content)
+        }
+
         val basePath = project.basePath ?: return ToolResult.err("项目路径不可用")
-        val file = if (File(relativePath).isAbsolute) File(relativePath) else File(basePath, relativePath)
+        val file = if (File(path).isAbsolute) File(path) else File(basePath, path)
 
         if (!file.exists()) return ToolResult.err("文件不存在: ${file.absolutePath}")
-        if (!file.isFile) return ToolResult.err("不是文件: $relativePath")
+        if (!file.isFile) return ToolResult.err("不是文件: $path")
 
         // 纵深防御：canonical path 前缀校验（AgentLoop 层已做一次，此处为二次保险）
         // 设计决策：安全拦截时统一返回"文件不存在"，不暴露实际路径也不透露项目目录位置
-        if (!PathUtils.isInsideProject(relativePath, basePath)) {
+        if (!PathUtils.isInsideProject(path, basePath)) {
             return ToolResult.err("文件不存在: ${file.absolutePath}")
         }
 

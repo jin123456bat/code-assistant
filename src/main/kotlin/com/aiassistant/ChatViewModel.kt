@@ -23,6 +23,8 @@ class ChatViewModel {
     @Volatile var streamingThinking = ""
     @Volatile var isStreaming = false
     @Volatile var isRateLimited = false
+    /** 限流恢复 Timer 引用，供 stopGeneration/clearConversation 取消 */
+    private var rateLimitTimer: javax.swing.Timer? = null
     @Volatile var currentToolName: String? = null
     /** 待审批工具: toolName → ApprovalState */
     @Volatile var pendingApprovals = mutableMapOf<String, ApprovalState>()
@@ -84,6 +86,37 @@ class ChatViewModel {
 
     fun addMcpTools(mcpTools: List<com.aiassistant.agent.AgentTool>) {
         agent?.ctx?.toolRegistry?.registerMcp(mcpTools)
+    }
+
+    /** 添加 MCP prompts 到 Agent 上下文（供 system prompt 注入） */
+    fun addMcpPrompts(prompts: List<com.aiassistant.mcp.McpPromptDef>) {
+        agent?.ctx?.mcpPrompts?.addAll(prompts)
+    }
+
+    /** 添加 MCP resources 到 Agent 上下文（供 system prompt 注入） */
+    fun addMcpResources(resources: List<com.aiassistant.mcp.McpResourceDef>) {
+        agent?.ctx?.mcpResources?.addAll(resources)
+    }
+
+    /** 注册 MCP 变更监听器（对齐 Claude Code：服务器推送变更时自动更新 Agent 上下文和工具注册中心） */
+    fun setupMcpChangeListener(mcpManager: com.aiassistant.mcp.McpManager) {
+        mcpManager.changeListener = object : com.aiassistant.mcp.McpChangeListener {
+            override fun onToolsChanged(serverName: String, newTools: List<com.aiassistant.agent.AgentTool>) {
+                val a = agent ?: return
+                a.ctx.toolRegistry.clearMcp()
+                a.ctx.toolRegistry.registerMcp(newTools)
+            }
+            override fun onPromptsChanged(newPrompts: List<com.aiassistant.mcp.McpPromptDef>) {
+                val ctx = agent?.ctx ?: return
+                ctx.mcpPrompts.clear()
+                ctx.mcpPrompts.addAll(newPrompts)
+            }
+            override fun onResourcesChanged(newResources: List<com.aiassistant.mcp.McpResourceDef>) {
+                val ctx = agent?.ctx ?: return
+                ctx.mcpResources.clear()
+                ctx.mcpResources.addAll(newResources)
+            }
+        }
     }
 
     /** 添加 thinking 消息，若上一条也是 thinking 则合并，避免多个相邻思考行 */
@@ -162,7 +195,8 @@ class ChatViewModel {
                     isRateLimited = true
                     onError?.invoke(msg)
                     // 60 秒后用 javax.swing.Timer 在 EDT 上自动重置限流状态
-                    javax.swing.Timer(60_000) { isRateLimited = false }.apply {
+                    rateLimitTimer?.stop()
+                    rateLimitTimer = javax.swing.Timer(60_000) { isRateLimited = false }.apply {
                         isRepeats = false
                         start()
                     }
@@ -332,6 +366,7 @@ class ChatViewModel {
 
     fun stopGeneration() {
         generationId++  // 废弃所有 pending 回调
+        rateLimitTimer?.stop()
         agent?.stop()
         isStreaming = false
         streamingContent = ""
@@ -340,7 +375,7 @@ class ChatViewModel {
     }
 
     fun clearConversation() {
-        stopGeneration()
+        stopGeneration()  // 内部已调用 rateLimitTimer?.stop()
         messages.clear()
         streamingContent = ""
         streamingThinking = ""

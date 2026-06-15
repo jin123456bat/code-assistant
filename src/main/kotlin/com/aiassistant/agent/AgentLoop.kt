@@ -41,6 +41,11 @@ class AgentLoop(
     val ctx = AgentContext(project)
     @Volatile private var cancelled = false
     @Volatile private var model: String = AppSettingsService.getInstance().getModel()
+    /** 当前 agent 后台线程引用，供 stop() 中断阻塞等待（网络挂起时无需等 2 分钟超时） */
+    @Volatile private var agentThread: Thread? = null
+    /** 复用的 SDK 客户端（含 OkHttp 连接池），避免每轮 API 调用创建新的连接池导致线程/连接泄漏 */
+    @Volatile private var sdkClient: com.aiassistant.AnthropicSdkClient? = null
+    private var lastApiKey: String? = null
 
     /** 刷新模型配置，用于 Settings 变更后同步 */
     fun refreshModel() {
@@ -91,8 +96,10 @@ class AgentLoop(
         ctx.systemPrompt = buildSystemPrompt()
         val history = mutableListOf<AnthropicMessage>()
 
-        Thread {
+        val t = Thread {
             try {
+                // 健康检查：恢复崩溃的 MCP 服务器（对齐 Claude Code，后台线程避免阻塞 EDT）
+                com.aiassistant.mcp.McpManager.getInstance(project.basePath)?.healthCheck()
                 // 诊断信息
                 val toolCount = ctx.toolRegistry.getAll().size
                 val toolNames = ctx.toolRegistry.getAll().joinToString(", ") { it.name }
@@ -293,6 +300,9 @@ class AgentLoop(
                                 userChoice.get()
                             }
                             val toolResult = if (approved) {
+                                // MCP 工具：注入原始 JSON 参数，保留 number/boolean/array/object 类型
+                                val mcpAdapter = ctx.toolRegistry.find(tc.name) as? com.aiassistant.mcp.McpToolAdapter
+                                if (mcpAdapter != null) { mcpAdapter.rawArgsJson = tc.arguments }
                                 val r = ctx.toolRegistry.executeTool(tc.name, params, project)
                                 if (!r.success) consecutiveFailures++ else consecutiveFailures = 0
                                 r
@@ -357,11 +367,17 @@ class AgentLoop(
                 onStateChange?.invoke(false)
                 edt { onThinking?.invoke(null) }
             }
-        }.start()
+        }
+        agentThread = t
+        t.start()
     }
 
     fun stop() {
         cancelled = true
+        // 中断阻塞等待（done.wait / latch.await）：网络挂起时无需等 2 分钟超时
+        agentThread?.interrupt()
+        // 通知所有 MCP 服务器取消正在执行的操作（对齐 Claude Code）
+        com.aiassistant.mcp.McpManager.getInstance(project.basePath)?.cancelAll()
         // 解除可能正卡在用户确认上的背景线程，避免挂起到超时
         pendingConfirmLatch?.countDown()
     }
@@ -397,7 +413,12 @@ class AgentLoop(
         var errorDetail: String? = null
         var thinkingSignature = ""
 
-        val sdkClient = com.aiassistant.AnthropicSdkClient(apiKey)
+        // 复用 SDK 客户端，仅在 API Key 变更时重建，避免每轮创建新连接池
+        if (sdkClient == null || lastApiKey != apiKey) {
+            sdkClient = com.aiassistant.AnthropicSdkClient(apiKey)
+            lastApiKey = apiKey
+        }
+        val sdkClient = sdkClient!!
         val tools = buildSdkToolDefs()
 
         sdkClient.createStreaming(
@@ -521,6 +542,19 @@ class AgentLoop(
                 "- **${s.name}**: ${s.description}"
             } + "\n\n可通过 /skill名称 激活 Skill，或调用 **Skill** 工具动态激活。"
         } else ""
+        // MCP Prompts 段落（对齐 Claude Code：MCP 服务器提供的 prompt 模板）
+        val promptsSection = if (ctx.mcpPrompts.isNotEmpty()) {
+            "\n## MCP Prompts\n" + ctx.mcpPrompts.joinToString("\n") { p ->
+                val argsStr = if (p.arguments.isNotEmpty()) "（参数: ${p.arguments.joinToString { "${it.name}:${it.type}" }}）" else ""
+                "- **${p.name}**$argsStr: ${p.description}"
+            } + "\n\n需要时可通过 **mcp_get_prompt** 工具获取完整渲染内容（传入 name 和可选的 arguments JSON）。"
+        } else ""
+        // MCP Resources 段落（对齐 Claude Code：MCP 服务器提供的资源）
+        val resourcesSection = if (ctx.mcpResources.isNotEmpty()) {
+            "\n## MCP Resources\n" + ctx.mcpResources.joinToString("\n") { r ->
+                "- `${r.uri}` — ${r.name}${if (r.description.isNotBlank()) ": ${r.description}" else ""}"
+            } + "\n\n可通过 **read_file** 工具读取上述 MCP 资源（传入 resource:// URI 作为 path 参数）。"
+        } else ""
         val claudeMdContent = loadClaudeMdFiles()
         return """
 You are an AI coding assistant in idea. Use tools to work with the project.
@@ -536,6 +570,8 @@ $toolList
 简单任务（读取文件、回答单个问题、一行修改）不要创建计划。
 创建计划后，每个步骤开始前调用 **update_plan_step**（status="in_progress"），完成后调用（status="done" + result 摘要），失败时调用（status="failed" + result 原因）。
 $skillsSection
+$promptsSection
+$resourcesSection
 $claudeMdContent
 ## Rules
 - Use tools to get real data; never guess

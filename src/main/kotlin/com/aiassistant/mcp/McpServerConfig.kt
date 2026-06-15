@@ -54,7 +54,7 @@ data class McpServerConfig(
             val serversStart = serversPattern.find(json)?.range?.last ?: return configs
 
             // 简化解析：提取每个 "name": { ... } 对象
-            val entryPattern = Regex(""""(\w+)"\s*:\s*\{([^}]*(?:\{[^}]*\}[^}]*)*)\}""")
+            val entryPattern = Regex(""""([\w-]+)"\s*:\s*\{([^}]*(?:\{[^}]*\}[^}]*)*)\}""")
             for (match in entryPattern.findAll(json.substring(serversStart))) {
                 val name = match.groupValues[1]
                 val body = match.groupValues[2]
@@ -80,7 +80,7 @@ data class McpServerConfig(
             val argsMatch = argsPattern.find(body)
             if (argsMatch != null) {
                 val argsStr = argsMatch.groupValues[1]
-                val argPattern = Regex(""""([^"]*)"""")
+                val argPattern = Regex(""""((?:[^"\\]|\\.)*)"""")
                 argPattern.findAll(argsStr).forEach { args.add(it.groupValues[1]) }
             }
 
@@ -90,7 +90,7 @@ data class McpServerConfig(
             val envMatch = envPattern.find(body)
             if (envMatch != null) {
                 val envStr = envMatch.groupValues[1]
-                val kvPattern = Regex(""""(\w+)"\s*:\s*"([^"]*)"""")
+                val kvPattern = Regex(""""(\w+)"\s*:\s*"((?:[^"\\]|\\.)*)"""")
                 kvPattern.findAll(envStr).forEach { env[it.groupValues[1]] = it.groupValues[2] }
             }
 
@@ -98,7 +98,7 @@ data class McpServerConfig(
         }
 
         private fun extractJsonValue(json: String, key: String): String {
-            val pattern = Regex(""""$key"\s*:\s*"([^"]*)"""")
+            val pattern = Regex(""""$key"\s*:\s*"((?:[^"\\]|\\.)*)"""")
             return pattern.find(json)?.groupValues?.getOrNull(1) ?: ""
         }
 

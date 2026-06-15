@@ -34,9 +34,21 @@ class WriteFileTool : AgentTool {
             // 原子写入：先写临时文件，成功后再 rename，避免写入中断导致原文件损坏
             val tmpFile = File(targetFile.path + ".tmp")
             tmpFile.writeText(content, Charsets.UTF_8)
-            if (!tmpFile.renameTo(targetFile)) {
+            try {
+                java.nio.file.Files.move(
+                    tmpFile.toPath(), targetFile.toPath(),
+                    java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING
+                )
+            } catch (_: java.nio.file.AtomicMoveNotSupportedException) {
+                // 跨文件系统降级：先 copy 再 delete
+                java.nio.file.Files.move(
+                    tmpFile.toPath(), targetFile.toPath(),
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING
+                )
+            } catch (_: Exception) {
                 tmpFile.delete()
-                return ToolResult.err("写入失败: rename 失败")
+                return ToolResult.err("写入失败: 无法完成文件移动")
             }
             val lineCount = content.lines().size
             ToolResult.ok("文件已写入: $relativePath ($lineCount 行, ${content.length} 字符)")

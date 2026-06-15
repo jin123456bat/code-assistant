@@ -11,18 +11,19 @@ import com.intellij.openapi.project.Project
 class ToolRegistryV3 {
 
     private val tools = mutableMapOf<String, AgentTool>()
-    private val mcpTools = mutableMapOf<String, AgentTool>()
+    private val mcpTools = java.util.concurrent.ConcurrentHashMap<String, AgentTool>()
 
     fun registerBuiltIn() {
         listOf(
             ReadFileTool(), WriteFileTool(), SearchCodeTool(), ListDirectoryTool(),
             ExecuteCommandTool(), GitDiffTool(), GitLogTool(), GitStatusTool(),
             AskUserTool(), WebSearchTool(), WebFetchTool(), NotebookEditTool(), TaskTool(),
-            CodeIntelligenceTool()
+            CodeIntelligenceTool(), McpGetPromptTool()
         ).forEach { tools[it.name] = it }
     }
 
     fun registerMcp(mcp: List<AgentTool>) { mcp.forEach { mcpTools[it.name] = it } }
+    fun clearMcp() { mcpTools.clear() }
 
     fun getAll(): List<AgentTool> = (tools.values + mcpTools.values).toList()
     // 查找优先级：内置工具 > MCP

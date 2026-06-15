@@ -8,7 +8,7 @@ Code Assistant 是 IntelliJ IDEA 的开源 AI 编程 Agent 插件（IntelliJ Pla
 
 - **Agent 模式**：AI 自主规划并执行多步骤任务，使用内置工具（搜索代码、读写文件、执行命令、Git 操作等）
 - **流式聊天**：Markdown 渲染 + 语法高亮，实时流式输出
-- **工具系统**：14 个内置工具 + MCP（Model Context Protocol）扩展 + Skills 引擎
+- **工具系统**：14 个内置工具 + MCP（Model Context Protocol）扩展 + 统一 Skill 元工具（对齐 Claude Code）
 - **计划模式**：LLM 自主决定是否创建执行计划，并跟踪步骤进度
 - **安全机制**：工具审批流、白名单、文件越界防护
 - **输入增强**：文件引用、编辑器选区自动引用、图片粘贴、斜杠命令
@@ -43,8 +43,8 @@ src/main/kotlin/com/aiassistant/
 ├── agent/                     # Agent 核心实现 + 共享类型
 │   ├── AgentLoop.kt           # Agent 主循环 (while 循环 + 工具调用分发)
 │   ├── AgentContext.kt        # 共享上下文 (Plan/Step/ImageData/AgentMessage，含 id/version 用于增量渲染)
-│   ├── ToolRegistryV3.kt      # 统一工具注册中心 (内置/MCP/Skill)
-│   ├── SkillEngine.kt         # Skill 加载引擎
+│   ├── ToolRegistryV3.kt      # 统一工具注册中心 (内置/MCP)
+│   ├── SkillEngine.kt         # Skill 加载引擎（SkillDef → ctx.skillDefs，统一 Skill 元工具激活）
 │   └── AgentTool.kt           # 工具接口定义 (AgentTool/ToolParameter/ToolResult)
 │
 ├── tools/                     # 14 个内置工具实现
@@ -125,11 +125,11 @@ AgentLoop 是核心调度器，在后台 `Thread` 上运行 `while` 循环：
 
 1. **内置工具**（14 个）：`search_code`、`read_file`、`write_file`、`list_directory`、`execute_command`、`git_diff`、`git_log`、`git_status`、`ask_user`、`web_search`、`web_fetch`、`notebook_edit`、`task`、`code_intelligence`
 2. **MCP 工具**：通过 `registerMcp()` 注册，来自 MCP 服务器的工具发现
-3. **Skill 工具**：通过 `registerSkills()` 注册，从 `.claude/skills/**/SKILL.md` 加载
-
 ### 元工具（Meta-Tools）
 
-AgentLoop 内置两个不由 ToolRegistryV3 管理的元工具，以硬编码 JSON 注入：
+AgentLoop 内置三个不由 ToolRegistryV3 管理的元工具，由 `buildSdkToolDefs()` 硬编码注入：
+
+- **`Skill(skill, args)`**：统一 skill 激活入口（对齐 Claude Code）。激活后 prompt 注入 system prompt，支持模型路由
 
 - **`create_plan`**：LLM 自主决定是否创建执行计划。`input_schema` 含嵌套 `items` 结构（`ToolParameter` 无法表达）
 - **`update_plan_step`**：更新计划步骤状态（`in_progress` / `done` / `failed`）
@@ -143,29 +143,37 @@ AgentLoop 内置两个不由 ToolRegistryV3 管理的元工具，以硬编码 JS
 ### MCP（Model Context Protocol）
 
 - `McpManager` 管理多个 MCP 服务器的生命周期
-- 使用 Claude 的 MCP 配置：`~/.claude.json`（全局）+ `.mcp.json`（项目级）
-- `McpClient` 通过 stdio 与 MCP 服务器通信，使用 JSON-RPC 2.0 协议
-- 自动健康检查和崩溃重启（最多 3 次）
+- 使用 Claude 的 MCP 配置：`~/.claude.json`（全局）+ `.mcp.json`（项目级），解析 `mcpServers.{name}.{type,command,args,env,url}`（支持连字符服务器名和 JSON 转义引号）
+- `McpClient` 支持 **stdio** 和 **HTTP** 两种传输，使用 JSON-RPC 2.0 协议（`initialize` → `initialized` → `tools/list` → `tools/call`）。Client capabilities：`roots`+`sampling`
+- **Prompts**：`prompts/list` 发现 → system prompt `## MCP Prompts` 段落 + `mcp_get_prompt` 工具按需渲染
+- **Resources**：`resources/list` 发现 → system prompt `## MCP Resources` 段落 + `read_file` 支持 `resource://` URI 按需读取
+- **Ping**：回复服务器心跳探测 `{}`，防止超时断连
+- **Cancelled**：`stop()` 时向所有服务器发送 `notifications/cancelled`，释放服务器资源
+- **自动健康检查**：每次 agent 对话启动时运行（`AgentLoop.run()` 后台线程），恢复崩溃服务器并重新发现工具，同时重试初始连接失败的配置（最多 3 次）
+- **McpChangeListener**：服务器 SSE 推送变更时自动更新 `ToolRegistryV3`（工具）和 `AgentContext`（prompts/resources）。工具变更采用全量采集模式，防止单服务器更新时清除其他服务器工具
+- **线程安全**：`mcpTools` 用 `ConcurrentHashMap`，`mcpPrompts`/`mcpResources` 用 `CopyOnWriteArrayList`，`clients`/`configs`/`restartCount` 用 `ConcurrentHashMap`。通知回调使用 `bgExecutor` 线程池。MCP 加载在后台线程执行避免阻塞 EDT
 - 远程工具通过 `McpToolAdapter` 包装为 `AgentTool` 注入注册中心
+- **参数类型保留**：`McpToolAdapter.rawArgsJson` 在 AgentLoop 执行前注入原始 JSON
+- **SSE 推送**：stdio 后台线程持续读取 + HTTP SSE 流，自动处理 `notifications/{tools,prompts,resources}/list_changed`
 
-### Skills
+### Skills（对齐 Claude Code）
 
-**加载：** `SkillEngine` 扫描 `<project>/.claude/skills/**/SKILL.md` 和 `~/.claude/skills/**/SKILL.md`。全深度遍历（支持嵌套子目录如 `gstack/review/SKILL.md`），自动跳过隐藏目录（`.git`、`.hermes` 等）。同名 skill 以项目级优先。
+**加载：** `SkillEngine` 扫描 `<project>/.claude/skills/**/SKILL.md` 和 `~/.claude/skills/**/SKILL.md`。解析为 `SkillDef`（`name`/`description`/`prompt`/`preferredModel`），存入 `AgentContext.skillDefs`。全深度遍历，跳过隐藏目录，同名 skill 项目级优先。
 
-**SKILL.md 格式：** YAML front matter（`name`、`description`、`model`） + Markdown 正文。`model` 字段可选，声明后激活该 skill 时自动切换模型。
+**SKILL.md 格式：** YAML front matter（`name`、`description`、`model`） + Markdown 正文。`model` 可选，声明后激活时自动切换模型。
 
-**两种激活路径（对齐 Claude Code）：**
+**统一 Skill 元工具：** 对齐 Claude Code，skill **不**注册为独立 `AgentTool`。统一通过一个 `Skill` 元工具激活（`Skill(skill=名称, args=输入)`），由 `AgentLoop.buildSdkToolDefs()` 硬编码注入。
+
+**两种激活路径：**
 
 | 路径 | 触发方式 | 机制 |
 |------|---------|------|
-| 客户端拦截 | 用户输入 `/skill-name` | `resolveSkillInvocation()` 拦截，skill prompt 注入 **system prompt**（指令级），skill 从工具列表和 system prompt 中移除，**1 次 API 调用** |
-| 工具调用 | LLM 自主判断 | 调用 skill 工具获取完整 prompt（system prompt 中仅列名称+描述） |
+| 客户端拦截 | 用户输入 `/skill-name` | `resolveSkillInvocation()` 从 `ctx.skillDefs` 查找，prompt 注入 **system prompt** |
+| LLM 调用 | 调用 `Skill(skill=名称, args=输入)` 工具 | `AgentLoop` 硬编码处理，同样注入 system prompt + 模型路由 |
 
-**关键设计：** 客户端激活的 skill 从 LLM 可见的工具列表中移除，防止重复调用。未激活的 skill 仍可通过工具调用获取。Skill prompt 注入 system prompt 而非 user message，确保模型将其视为权威指令。
+**渐进披露：** skill 描述列表始终在 system prompt 的 `## Skills` 段落中。激活的 skill 从列表中排除，防止重复激活。已激活 skill 的完整 prompt 通过 `activatedSkillPrompt` 注入 system prompt 顶部。
 
-**模型路由：** SKILL.md 可声明 `model:` 字段指定首选模型。通过 `/skill-name` 激活或 LLM 调用工具时，自动切换到该模型。
-
-**审批：** Skill 工具无需审批，直接执行（skill 是 prompt 注入包装器，不执行实际文件操作）。`isSkill()` 使用严格判定：仅当名称唯一属于 skillTools 时为 true，防止 MCP 工具与 skill 同名时被误判。查找优先级：内置工具 > skill > MCP。
+**模型路由：** SKILL.md 的 `model:` 字段声明首选模型。激活时自动切换，`onModelRouted` 回调通知 UI。
 
 ## 开发指南
 
@@ -239,11 +247,11 @@ model: claude-sonnet-4-6  # 可选，声明后激活时自动切换模型
 # Skill 指引正文（Markdown）
 ```
 
-**使用方式：**
-- 输入 `/skill-name`，从斜杠菜单选中后**填充到输入框**（不直接发送，允许用户补充描述）
-- 发送时 `resolveSkillInvocation()` 拦截：提取 skill prompt 注入 LLM 上下文，同时将 `/skill-name` 前缀从用户可见气泡中去掉
-- LLM 也可在需要时主动调用 skill 工具获取指引
-- `ChatViewModel.getSkills()` 返回 `SkillInfo(name, description)` 供 UI 展示
+**使用方式（对齐 Claude Code）：**
+- 输入 `/skill-name`，从斜杠菜单选中后填充到输入框，发送时 `resolveSkillInvocation()` 从 `ctx.skillDefs` 查找并注入 system prompt
+- LLM 通过统一 `Skill(skill=名称, args=输入)` 元工具动态激活，`AgentLoop` 硬编码处理
+- 两种路径均将 prompt 注入 system prompt（非消息历史），支持 `preferredModel` 模型路由
+- `ChatViewModel.getSkills()` 从 `ctx.skillDefs` 读取，供 UI 斜杠菜单展示
 
 ### 工具白名单
 

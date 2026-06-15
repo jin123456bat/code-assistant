@@ -57,9 +57,9 @@ class ListDirectoryTool : AgentTool {
     ) {
         if (depth > maxDepth) return
         val entries = dir.listFiles()?.sortedBy { it.name } ?: return
-        for ((index, file) in entries.withIndex()) {
-            if (file.name in ignoreDirs || file.isHidden) continue
-            val isLast = index == entries.size - 1
+        val visible = entries.filter { it.name !in ignoreDirs && !it.isHidden }
+        for ((index, file) in visible.withIndex()) {
+            val isLast = index == visible.size - 1
             val connector = if (isLast) "└── " else "├── "
             append("$prefix$connector${file.name}")
             if (file.isDirectory) {

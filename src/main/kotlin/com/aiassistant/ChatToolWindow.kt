@@ -171,7 +171,7 @@ class ChatToolWindow(private val project: Project) {
         toolTipText = "新会话"
         border = JBUI.Borders.empty(2, 6, 2, 6)
         addMouseListener(object : MouseAdapter() {
-            override fun mouseClicked(e: MouseEvent) { needFullRebuild = true; viewModel.clearConversation(); messageRefChips.clear(); planBar.updatePlan(null); rebuildConversation() }
+            override fun mouseClicked(e: MouseEvent) { needFullRebuild = true; viewModel.clearConversation(); messageRefChips.clear(); refChips.clear(); selectionRefChip = null; rebuildChips(); planBar.updatePlan(null); rebuildConversation() }
             override fun mouseEntered(e: MouseEvent) { foreground = ChatTheme.accentHover }
             override fun mouseExited(e: MouseEvent) { foreground = ChatTheme.codeLangFg }
         })
@@ -659,8 +659,8 @@ class ChatToolWindow(private val project: Project) {
     /** EditorFactoryListener 的父 Disposable，dispose 时自动移除监听器 */
     private val editorListenerDisposable = com.intellij.openapi.Disposable { }
     /** 已注册 SelectionListener 的编辑器集合，用于 dispose 时清理 */
-    private val trackedEditors = mutableSetOf<com.intellij.openapi.editor.Editor>()
-    private val editorListeners = mutableMapOf<com.intellij.openapi.editor.Editor, com.intellij.openapi.editor.event.SelectionListener>()
+    private val trackedEditors = java.util.concurrent.ConcurrentHashMap.newKeySet<com.intellij.openapi.editor.Editor>()
+    private val editorListeners = java.util.concurrent.ConcurrentHashMap<com.intellij.openapi.editor.Editor, com.intellij.openapi.editor.event.SelectionListener>()
 
     // ---- plan bar（置顶，不随消息滚动）----
     private val planBar = PlanBar().also { it.updatePlan(null) }
@@ -710,10 +710,21 @@ class ChatToolWindow(private val project: Project) {
         askUserHandler = myAskUserHandler
         AskUserBridge.handler = myAskUserHandler
 
-        // MCP 延迟加载（需 COMPONENTS_LOADED 之后）
+        // MCP 延迟加载（需 COMPONENTS_LOADED 之后，后台线程避免阻塞 EDT）
         ApplicationManager.getApplication().invokeLater {
-            val mcpTools = try { mcpManager.loadAndConnect() } catch (_: Exception) { emptyList() }
-            viewModel.addMcpTools(mcpTools)
+            Thread {
+                viewModel.setupMcpChangeListener(mcpManager)
+                val mcpTools = try { mcpManager.loadAndConnect() } catch (_: Exception) { emptyList() }
+                // 采集 MCP prompts + resources 注入 Agent 上下文（对齐 Claude Code）
+                val prompts = try { mcpManager.collectPrompts() } catch (_: Exception) { emptyList() }
+                val resources = try { mcpManager.collectResources() } catch (_: Exception) { emptyList() }
+                // 回 EDT 更新 ViewModel
+                ApplicationManager.getApplication().invokeLater {
+                    viewModel.addMcpTools(mcpTools)
+                    viewModel.addMcpPrompts(prompts)
+                    viewModel.addMcpResources(resources)
+                }
+            }.start()
         }
         // 处理在工具窗口创建之前就已排队的文本
         val pending = pendingTexts.remove(project)
@@ -883,7 +894,7 @@ class ChatToolWindow(private val project: Project) {
                 latch.countDown()
             }
         )
-        conversationContainer.add(card, conversationContainer.componentCount - 1)
+        conversationContainer.add(card, maxOf(0, conversationContainer.componentCount - 1))
         conversationContainer.revalidate()
         conversationContainer.repaint()
         scrollToBottom(force = true)
@@ -935,6 +946,10 @@ class ChatToolWindow(private val project: Project) {
                 // 移除旧组件（原地更新场景）
                 msgIdToComponent.remove(msg.id)?.let { oldComp ->
                     conversationContainer.remove(oldComp)
+                    // 同步清理 bubbleSizeConstraints 中对应的旧条目，防止增量模式下内存泄漏
+                    bubbleSizeConstraints.removeAll { (bubble, _) ->
+                        !bubble.isDisplayable || bubble.parent == null
+                    }
                 }
 
                 renderedMsgVersions[msg.id] = msg.version
@@ -1263,7 +1278,7 @@ class ChatToolWindow(private val project: Project) {
         }
 
         val commands = listOf(
-            Cmd("/new",   "新会话") { needFullRebuild = true; viewModel.clearConversation(); messageRefChips.clear(); planBar.updatePlan(null); rebuildConversation() },
+            Cmd("/new",   "新会话") { needFullRebuild = true; viewModel.clearConversation(); messageRefChips.clear(); refChips.clear(); selectionRefChip = null; rebuildChips(); planBar.updatePlan(null); rebuildConversation() },
             Cmd("/plan",  "创建执行计划") { sendQuick("请为当前任务创建执行计划。先分析需求，然后调用 create_plan 工具。") },
             Cmd("/init",  "初始化项目文档") { sendQuick("请分析当前项目结构，创建 CLAUDE.md 文档，包含项目概述、常用命令、架构说明和关键约定。") },
             Cmd("/review","审查当前改动") { sendQuick("请审查当前分支的代码改动，分析潜在问题并给出修复建议。") },
@@ -1562,7 +1577,7 @@ class ChatToolWindow(private val project: Project) {
         selectionRefChip = chip
         refChips.add(chip)
         rebuildChips()
-        activateToolWindow()
+        // 不调用 activateToolWindow()：划词选中是静默操作，不应抢走编辑器焦点
     }
 
     /** 取消选中时移除选区芯片 */

@@ -129,14 +129,20 @@ class GenerateCommitAction : AnAction() {
     }
 
     private fun runGitCommand(basePath: String, vararg args: String): String {
-        return try {
-            val process = ProcessBuilder("git", "-C", basePath, *args)
+        val process = try {
+            ProcessBuilder("git", "-C", basePath, *args)
                 .redirectErrorStream(true)
                 .start()
-            val output = process.inputStream.bufferedReader().readText()
+        } catch (_: Exception) { return "" }
+        return try {
+            val output = process.inputStream.bufferedReader().use { it.readText() }
             process.waitFor(10, TimeUnit.SECONDS)
             output.take(5000)
-        } catch (_: Exception) { "" }
+        } catch (_: Exception) {
+            ""
+        } finally {
+            try { process.destroyForcibly() } catch (_: Exception) {}
+        }
     }
 
     private fun buildSimpleDiff(project: Project): String {

@@ -40,12 +40,16 @@ class ExecuteCommandTool : AgentTool {
                 .redirectErrorStream(true)
                 .start()
 
-            val output = process.inputStream.bufferedReader().use { it.readText() }
+            // 后台线程读取输出，避免 readText 在进程不退出时永久阻塞导致 waitFor 超时失效
+            val outputFuture = java.util.concurrent.CompletableFuture.supplyAsync {
+                process.inputStream.bufferedReader().use { it.readText() }
+            }
             val finished = process.waitFor(30, TimeUnit.SECONDS)
             if (!finished) {
                 process.destroyForcibly()
                 process.waitFor(2, TimeUnit.SECONDS) // 等待强制终止完成
             }
+            val output = try { outputFuture.get(5, TimeUnit.SECONDS) } catch (_: Exception) { "" }
             val exitCode = if (finished) process.exitValue() else -1
 
             // 工具结果截断（防止超大规模输出耗尽 token）
