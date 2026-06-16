@@ -129,7 +129,9 @@ class MarkdownRenderer {
 
         val html = markdownToHtml(markdown)
         textPane.text = buildStyledHtml(html, textPane)
-        textPane.caretPosition = textPane.document.length
+        // 注意：不设置 caretPosition 到末尾，否则会触发 scrollRectToVisible
+        // 强制父级 JScrollPane 滚动到底部，打断用户手动浏览历史消息。
+        // 滚动行为由 ChatToolWindow.autoScrollIfAtBottom() 统一管理。
 
         // 强制重新布局后测量，确保换行高度正确
         val w = container.width

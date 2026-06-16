@@ -1177,7 +1177,7 @@ class ChatToolWindow(private val project: Project) {
                 streamingBubble!!.repaint()
             }
             // 只在用户已在底部时才跟随
-            scrollToBottom(force = false)
+            autoScrollIfAtBottom()
         }
     }
 
@@ -1214,11 +1214,11 @@ class ChatToolWindow(private val project: Project) {
             val area = streamingThinkingTextArea
             if (area != null) {
                 area.text = content
-                area.caretPosition = content.length  // 流式滚动到底部
+                // 注意：不设置 caretPosition，否则触发 scrollRectToVisible 强制滚动
                 streamingThinkingRow!!.revalidate()
                 streamingThinkingRow!!.repaint()
             }
-            scrollToBottom(force = false)
+            autoScrollIfAtBottom()
         }
     }
 
@@ -1790,6 +1790,16 @@ class ChatToolWindow(private val project: Project) {
         errorLabel.isVisible = false
         warningLabel.isVisible = false
         errorBannerPanel.isVisible = false
+    }
+
+    /** 流式更新专用：立即检查用户是否在底部附近，仅在底部时才滚动。
+     *  相比 scrollThrottle 的优势是即时响应（不等待 50ms 节流），
+     *  确保流式输出时用户能看到新内容持续出现；同时严格守卫「用户不在底部时不滚动」，
+     *  让用户能自由向上翻阅历史记录。 */
+    private fun autoScrollIfAtBottom() {
+        val bar = conversationScrollPane.verticalScrollBar
+        val atBottom = bar.value + bar.visibleAmount >= bar.maximum - 80
+        if (atBottom) bar.value = bar.maximum
     }
 
     /** 仅当用户已在底部附近时才自动滚动，避免打断浏览历史消息 */
