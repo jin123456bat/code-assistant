@@ -239,17 +239,15 @@ class AnthropicSdkClient(
 
         // assistant 消息：thinking + text + tool_use 按需累加（合并后单消息可能含多种 block）
         if (msg.role == "assistant") {
-            // thinking block：thinking 模式下必须随后续请求传回（含 signature）
-            if (msg.thinking.isNotBlank() && msg.thinkingSignature.isNotBlank()) {
+            // thinking block：thinking 模式下必须随后续请求传回（SDK 要求 signature 非 null，DeepSeek V4 可能无签名则传空字符串）
+            if (msg.thinking.isNotBlank()) {
                 com.aiassistant.AppLogger.info("SDK构建: 添加thinking block thinkingLen=${msg.thinking.length} sigLen=${msg.thinkingSignature.length}")
                 blocks.add(ContentBlockParam.ofThinking(
                     ThinkingBlockParam.builder()
                         .thinking(msg.thinking)
-                        .signature(msg.thinkingSignature)
+                        .signature(msg.thinkingSignature)  // 空字符串也传，满足 SDK build() 的 checkRequired
                         .build()
                 ))
-            } else if (msg.thinking.isNotBlank() || msg.thinkingSignature.isNotBlank()) {
-                com.aiassistant.AppLogger.warn("SDK构建: thinking block不完整! thinkingLen=${msg.thinking.length} sigLen=${msg.thinkingSignature.length} — 跳过")
             }
             // 文本 block
             if (msg.content.isNotBlank()) {

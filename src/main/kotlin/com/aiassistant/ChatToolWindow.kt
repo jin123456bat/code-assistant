@@ -667,9 +667,17 @@ class ChatToolWindow(private val project: Project) {
     )
 
     // composer box: 包裹 chips + textarea + toolbar 的圆角边框容器
-    private val composerBox = JPanel(BorderLayout(0, 0)).apply {
-        isOpaque = true
-        background = ChatTheme.inputBg
+    private val composerBox = object : JPanel(BorderLayout(0, 0)) {
+        override fun paintComponent(g: java.awt.Graphics) {
+            val g2 = g.create() as java.awt.Graphics2D
+            g2.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON)
+            g2.color = ChatTheme.inputBg
+            g2.fillRoundRect(0, 0, width - 1, height - 1, 12, 12)
+            g2.dispose()
+            super.paintComponent(g)
+        }
+    }.apply {
+        isOpaque = false
         border = composerBorder
 
         add(chipPanel, BorderLayout.NORTH)
@@ -714,7 +722,7 @@ class ChatToolWindow(private val project: Project) {
         minimumSize = Dimension(150, 80)
         isOpaque = true
         background = ChatTheme.inputPanelBg
-        border = JBUI.Borders.empty(8, 12, 12, 12)  // 外边距对齐设计：上8 左右12 下12
+        border = JBUI.Borders.empty(4, 4, 4, 4)
         add(composerBox, BorderLayout.CENTER)
     }
 

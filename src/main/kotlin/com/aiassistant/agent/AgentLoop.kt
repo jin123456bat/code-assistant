@@ -186,7 +186,7 @@ class AgentLoop(
                                     "未知 Skill: $skillName。可用 skill: ${ctx.skillDefs.keys.joinToString(", ")}"
                                 }
                                 if (!firstToolCallTextAdded) {
-                                    if (!thinkingBlockAdded && thinking.isNotBlank() && thinkingSignature.isNotBlank()) {
+                                    if (!thinkingBlockAdded && thinking.isNotBlank()) {
                                         history.add(AnthropicMessage("assistant", "", thinking = thinking, thinkingSignature = thinkingSignature))
                                         thinkingBlockAdded = true
                                     }
@@ -215,7 +215,7 @@ class AgentLoop(
                                 }
                                 if (!firstToolCallTextAdded) {
                                     // thinking content block 必须在 assistant 消息中随后续请求传回 API
-                                    if (!thinkingBlockAdded && thinking.isNotBlank() && thinkingSignature.isNotBlank()) {
+                                    if (!thinkingBlockAdded && thinking.isNotBlank()) {
                                         AppLogger.info("AgentLoop: 添加thinking到history thinkingLen=${thinking.length} sigLen=${thinkingSignature.length}")
                                         history.add(AnthropicMessage(
                                             "assistant", "",
@@ -223,8 +223,6 @@ class AgentLoop(
                                             thinkingSignature = thinkingSignature
                                         ))
                                         thinkingBlockAdded = true
-                                    } else if (!thinkingBlockAdded && thinking.isNotBlank()) {
-                                        AppLogger.warn("AgentLoop: thinking存在但signature为空! thinkingLen=${thinking.length} sigLen=${thinkingSignature.length} — 不会回传")
                                     }
                                     history.add(AnthropicMessage(
                                         "assistant", textContent, toolUseId = tc.id,
@@ -261,7 +259,7 @@ class AgentLoop(
                                 }
                                 val msg = if (updated) "步骤 $stepIndex 状态更新为 $status" else "更新失败: 步骤 $stepIndex 不存在，当前计划共 ${ctx.currentPlan?.stepsSnapshot()?.size ?: 0} 步"
                                 if (!firstToolCallTextAdded) {
-                                    if (!thinkingBlockAdded && thinking.isNotBlank() && thinkingSignature.isNotBlank()) {
+                                    if (!thinkingBlockAdded && thinking.isNotBlank()) {
                                         history.add(AnthropicMessage(
                                             "assistant", "",
                                             thinking = thinking,
@@ -327,7 +325,7 @@ class AgentLoop(
 
                             if (!firstToolCallTextAdded) {
                                 // thinking content block 必须在 assistant 消息中随后续请求传回 API
-                                if (!thinkingBlockAdded && thinking.isNotBlank() && thinkingSignature.isNotBlank()) {
+                                if (!thinkingBlockAdded && thinking.isNotBlank()) {
                                     AppLogger.info("AgentLoop: 添加thinking到history thinkingLen=${thinking.length} sigLen=${thinkingSignature.length}")
                                     history.add(AnthropicMessage(
                                         "assistant", "",
@@ -335,8 +333,6 @@ class AgentLoop(
                                         thinkingSignature = thinkingSignature
                                     ))
                                     thinkingBlockAdded = true
-                                } else if (!thinkingBlockAdded && thinking.isNotBlank()) {
-                                    AppLogger.warn("AgentLoop: thinking存在但signature为空! thinkingLen=${thinking.length} sigLen=${thinkingSignature.length} — 不会回传")
                                 }
                                 history.add(AnthropicMessage(
                                     "assistant", textContent, toolUseId = tc.id,
@@ -366,7 +362,7 @@ class AgentLoop(
                     } else {
                         // 无工具调用：thinking block 必须传回 API（DeepSeek V4 硬性要求）
                         AppLogger.info("AgentLoop 最终回复: $textContent thinkingLen=${thinking.length} sigLen=${thinkingSignature.length}")
-                        if (thinking.isNotBlank() && thinkingSignature.isNotBlank()) {
+                        if (thinking.isNotBlank()) {
                             history.add(AnthropicMessage("assistant", textContent,
                                 thinking = thinking, thinkingSignature = thinkingSignature))
                         } else {
