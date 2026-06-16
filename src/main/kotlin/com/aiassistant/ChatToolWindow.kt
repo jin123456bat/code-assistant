@@ -373,20 +373,28 @@ class ChatToolWindow(private val project: Project) {
     private val refChips = mutableListOf<RefChip>()
     /** 待发送的粘贴图片（Claude 原生 image 块，非 Markdown data URL） */
     private val pastedImages = mutableListOf<ImageData>()
-    private val chipPanel = JPanel(WrapLayout(FlowLayout.LEFT, 4, 2)).apply {
+    private val chipPanel = JPanel(WrapLayout(FlowLayout.LEFT, 4, 6)).apply {
         isOpaque = false
+        isVisible = false  // 初始无 chip，高度为 0
+        border = JBUI.Borders.empty(2, 0, 4, 0)
     }
 
     private fun rebuildChips() {
         chipPanel.removeAll()
         // 图片芯片
         for ((idx, img) in pastedImages.withIndex()) {
-            val chipComp = JPanel(FlowLayout(FlowLayout.LEFT, 2, 0)).apply {
-                background = ChatTheme.chipBg
-                border = BorderFactory.createCompoundBorder(
-                    roundedBorder(ChatTheme.chipBorder),
-                    BorderFactory.createEmptyBorder(1, 6, 1, 4)
-                )
+            val chipComp = object : JPanel(FlowLayout(FlowLayout.LEFT, 2, 0)) {
+                override fun paintComponent(g: java.awt.Graphics) {
+                    val g2 = g.create() as java.awt.Graphics2D
+                    g2.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON)
+                    g2.color = ChatTheme.chipBg; g2.fillRoundRect(0, 0, width - 1, height - 1, 8, 8)
+                    g2.color = ChatTheme.chipBorder; g2.stroke = java.awt.BasicStroke(1f); g2.drawRoundRect(0, 0, width - 1, height - 1, 8, 8)
+                    g2.dispose()
+                    super.paintComponent(g)
+                }
+            }.apply {
+                isOpaque = false
+                border = BorderFactory.createEmptyBorder(1, 6, 1, 4)
                 toolTipText = "已粘贴图片 (${img.mediaType})"
             }
             chipComp.add(JLabel("图片 ${idx + 1}").apply {
@@ -411,12 +419,18 @@ class ChatToolWindow(private val project: Project) {
         }
         // 文件引用芯片
         for (chip in refChips) {
-            val chipComp = JPanel(FlowLayout(FlowLayout.LEFT, 2, 0)).apply {
-                background = ChatTheme.chipBg
-                border = BorderFactory.createCompoundBorder(
-                    roundedBorder(ChatTheme.chipBorder),
-                    BorderFactory.createEmptyBorder(1, 6, 1, 4)
-                )
+            val chipComp = object : JPanel(FlowLayout(FlowLayout.LEFT, 2, 0)) {
+                override fun paintComponent(g: java.awt.Graphics) {
+                    val g2 = g.create() as java.awt.Graphics2D
+                    g2.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON)
+                    g2.color = ChatTheme.chipBg; g2.fillRoundRect(0, 0, width - 1, height - 1, 8, 8)
+                    g2.color = ChatTheme.chipBorder; g2.stroke = java.awt.BasicStroke(1f); g2.drawRoundRect(0, 0, width - 1, height - 1, 8, 8)
+                    g2.dispose()
+                    super.paintComponent(g)
+                }
+            }.apply {
+                isOpaque = false
+                border = BorderFactory.createEmptyBorder(1, 6, 1, 4)
                 toolTipText = chip.fullPath
             }
             // 只显示文件名，完整路径在 tooltip 中
@@ -448,7 +462,9 @@ class ChatToolWindow(private val project: Project) {
             chipComp.add(removeBtn)
             chipPanel.add(chipComp)
         }
+        chipPanel.isVisible = chipPanel.componentCount > 0  // 无 chip 时高度为 0
         chipPanel.revalidate()
+        composerBox.revalidate()
         chipPanel.repaint()
     }
 
@@ -490,15 +506,20 @@ class ChatToolWindow(private val project: Project) {
             val fileName = ref.fullPath.substringAfterLast('/')
             val lineSuffix = if (ref.startLine > 0) ":$ref.startLine" else ""
             val chipText = "📄 $fileName$lineSuffix"
-            val chip = JLabel(chipText).apply {
+            val chip = object : JLabel(chipText) {
+                override fun paintComponent(g: java.awt.Graphics) {
+                    val g2 = g.create() as java.awt.Graphics2D
+                    g2.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON)
+                    g2.color = ChatTheme.chipBg; g2.fillRoundRect(0, 0, width - 1, height - 1, 6, 6)
+                    g2.color = ChatTheme.chipBorder; g2.stroke = java.awt.BasicStroke(1f); g2.drawRoundRect(0, 0, width - 1, height - 1, 6, 6)
+                    g2.dispose()
+                    super.paintComponent(g)
+                }
+            }.apply {
                 font = ChatTheme.metaFont
                 foreground = ChatTheme.textSecondary
-                border = BorderFactory.createCompoundBorder(
-                    BorderFactory.createLineBorder(ChatTheme.chipBorder, 1),
-                    JBUI.Borders.empty(2, 8, 2, 8)
-                )
-                isOpaque = true
-                background = ChatTheme.chipBg
+                border = JBUI.Borders.empty(2, 8, 2, 8)
+                isOpaque = false
                 cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
                 toolTipText = "点击打开: ${ref.fullPath}${if (ref.startLine > 0) " (第${ref.startLine}行)" else ""}"
             }
@@ -650,12 +671,7 @@ class ChatToolWindow(private val project: Project) {
         background = ChatTheme.inputBg
         border = composerBorder
 
-        // 芯片行（仅 chips，加号移到左下角工具栏）
-        val topRow = JPanel(BorderLayout()).apply {
-            isOpaque = false
-            add(chipPanel, BorderLayout.CENTER)
-        }
-        add(topRow, BorderLayout.NORTH)
+        add(chipPanel, BorderLayout.NORTH)
 
         // 文本输入区
         val scrollInput = JBScrollPane(inputArea).apply {
