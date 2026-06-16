@@ -28,6 +28,8 @@ class ChatViewModel {
     @Volatile var currentToolName: String? = null
     /** 待审批工具: toolName → ApprovalState */
     @Volatile var pendingApprovals = mutableMapOf<String, ApprovalState>()
+    /** 消息关联的引用 chips，key=msgId。sendMessage 时在 onMessagesChanged 之前写入 */
+    val messageRefChips = mutableMapOf<Long, List<com.aiassistant.ChatToolWindow.RefChip>>()
     /**
      * Agent 当前活动状态 —— 单点表达 UI 指示器该显示什么，
      * 取代以前用 currentToolName 一字段三义（工具名/思考文本/null）+ 字符串嗅探，
@@ -245,7 +247,7 @@ class ChatViewModel {
      * @param refContent 文件引用的 Markdown 内容（仅发给 LLM，不显示在气泡中）
      */
     /** 发送用户消息，返回消息 ID（用于 messageRefChips 索引） */
-    fun sendMessage(apiKey: String, content: String, images: List<ImageData>? = null, refContent: String = ""): Long {
+    fun sendMessage(apiKey: String, content: String, images: List<ImageData>? = null, refContent: String = "", refChips: List<com.aiassistant.ChatToolWindow.RefChip> = emptyList()): Long {
         if (content.isBlank() || isStreaming || isRateLimited) return -1L
         generationId++  // 新轮次，DD旧回调
         streamingContent = ""
@@ -257,6 +259,9 @@ class ChatViewModel {
         // 气泡只显示用户可见文本（不含 skill prompt），引用内容以 chips 形式独立展示
         val msg = AgentMessage("user", resolved.displayContent, images = images)
         messages.add(msg)
+        if (refChips.isNotEmpty()) {
+            messageRefChips[msg.id] = refChips
+        }
         runOnEdt { onMessagesChanged?.invoke() }
         isStreaming = true
         // 立即显示"等待AI回复"指示器，消除用户发送消息后到首个 streaming 事件之间的空白等待感

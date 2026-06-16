@@ -19,7 +19,6 @@ object ChatTheme {
     // ═══════════════════════════════════════════════════════════════
     // 基础色 — 窗口/面板/文字
     // ═══════════════════════════════════════════════════════════════
-
     /** 窗口/面板背景 — ChatToolWindow、PlanBar 步骤列表 */
     val winBg = JBColor(0xFFFFFF, 0x2B2D30)
 
@@ -41,8 +40,8 @@ object ChatTheme {
     /** 标题/描述文字色 — conversationHeader "对话"标题、welcomePanel descLabel */
     val headerTitleFg = JBColor(0x666666, 0xAAAAAA)
 
-    /** 输入面板整体背景 — inputPanel、welcomePanel */
-    val inputPanelBg = JBColor(0xFAFBFC, 0x2B2D30)
+    /** 输入面板整体背景 — inputPanel、welcomePanel（对齐设计稿：.composer 继承 .toolwindow 的 win-bg） */
+    val inputPanelBg = winBg
 
     /** 欢迎面板弱文字 — welcomePanel poweredLabel */
     val welcomeMutedFg = JBColor(0x888888, 0x888888)

@@ -171,7 +171,7 @@ class ChatToolWindow(private val project: Project) {
         toolTipText = "新会话"
         border = JBUI.Borders.empty(2, 6, 2, 6)
         addMouseListener(object : MouseAdapter() {
-            override fun mouseClicked(e: MouseEvent) { needFullRebuild = true; viewModel.clearConversation(); messageRefChips.clear(); refChips.clear(); selectionRefChip = null; rebuildChips(); planBar.updatePlan(null); rebuildConversation() }
+            override fun mouseClicked(e: MouseEvent) { needFullRebuild = true; viewModel.clearConversation(); viewModel.messageRefChips.clear(); refChips.clear(); selectionRefChip = null; rebuildChips(); planBar.updatePlan(null); rebuildConversation() }
             override fun mouseEntered(e: MouseEvent) { foreground = ChatTheme.accentHover }
             override fun mouseExited(e: MouseEvent) { foreground = ChatTheme.codeLangFg }
         })
@@ -264,10 +264,27 @@ class ChatToolWindow(private val project: Project) {
     }
 
     // ---- input area ----
-    private val inputArea = JTextArea(3, 20).apply {
+    private val inputArea = object : JTextArea(3, 20) {
+        private val placeholder = "问点什么，或粘贴代码…"
+        override fun paintComponent(g: java.awt.Graphics) {
+            super.paintComponent(g)
+            if (text.isEmpty() && !isFocusOwner) {
+                val g2 = g.create() as java.awt.Graphics2D
+                g2.setRenderingHint(java.awt.RenderingHints.KEY_TEXT_ANTIALIASING, java.awt.RenderingHints.VALUE_TEXT_ANTIALIAS_ON)
+                g2.color = ChatTheme.textMuted
+                g2.font = font
+                val fm = g2.fontMetrics
+                g2.drawString(placeholder, insets.left + 1, fm.ascent + insets.top + 1)
+                g2.dispose()
+            }
+        }
+    }.apply {
         lineWrap = true
         wrapStyleWord = true
         font = ChatTheme.bodyFont
+        background = ChatTheme.inputBg
+        foreground = ChatTheme.textPrimary
+        caretColor = ChatTheme.textPrimary
         border = JBUI.Borders.empty(4, 4)
         addKeyListener(object : KeyAdapter() {
             override fun keyPressed(e: KeyEvent) {
@@ -296,6 +313,11 @@ class ChatToolWindow(private val project: Project) {
                 return originalHandler?.importData(support) ?: false
             }
         }
+        document.addDocumentListener(object : DocumentListener {
+            override fun insertUpdate(e: javax.swing.event.DocumentEvent) { repaint(); hideError() }
+            override fun removeUpdate(e: javax.swing.event.DocumentEvent) { repaint(); hideError() }
+            override fun changedUpdate(e: javax.swing.event.DocumentEvent) { repaint(); hideError() }
+        })
     }
 
     /** 收集项目文件列表 */
@@ -397,11 +419,13 @@ class ChatToolWindow(private val project: Project) {
                 )
                 toolTipText = chip.fullPath
             }
+            // 只显示文件名，完整路径在 tooltip 中
+            val fileName = chip.fullPath.substringAfterLast("/").ifEmpty { chip.fullPath }
             val displayText = if (chip.startLine > 0) {
                 val lineInfo = if (chip.startLine == chip.endLine || chip.endLine == 0) "${chip.startLine}" else "${chip.startLine}-${chip.endLine}"
-                "<html>${chip.label} <span style='color:#999'>$lineInfo</span></html>"
+                "<html>$fileName <span style='color:#999'>$lineInfo</span></html>"
             } else {
-                chip.label
+                fileName
             }
             chipComp.add(JLabel(displayText).apply {
                 font = ChatTheme.metaFont
@@ -458,7 +482,7 @@ class ChatToolWindow(private val project: Project) {
     private fun buildRefChipFooter(refs: List<RefChip>): JPanel {
         val viewportWidth = conversationScrollPane.viewport.width
         val maxWidth = (viewportWidth * ChatTheme.USER_FRACTION).toInt()
-        val chipRow = JPanel(WrapLayout(FlowLayout.RIGHT, 2, 2)).apply {
+        val chipRow = JPanel(WrapLayout(FlowLayout.LEFT, 2, 2)).apply {
             isOpaque = false
             maximumSize = Dimension(maxWidth, Int.MAX_VALUE)
         }
@@ -521,40 +545,91 @@ class ChatToolWindow(private val project: Project) {
         return chipRow
     }
 
-    // ---- plus button（点击后在输入框插入 @，复用 @ 文件引用弹窗及筛选机制）----
-    private val plusButton = JLabel("+").apply {
-        font = ChatTheme.largeFont
-        foreground = ChatTheme.codeLangFg
-        cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
-        border = BorderFactory.createEmptyBorder(0, 4, 0, 4)
-        toolTipText = "添加文件引用"
-        addMouseListener(object : MouseAdapter() {
-            override fun mouseClicked(e: MouseEvent) {
-                // 在光标位置插入 @，触发文件引用弹窗
-                val pos = inputArea.caretPosition
-                inputArea.insert("@", pos)
-                inputArea.caretPosition = pos + 1
-                inputArea.requestFocus()
+    // ---- plus button（对齐设计稿 .iconbtn：圆角 6px + hover 灰色背景 + 可见边框）----
+    private var plusBtnHovered = false
+    private val plusButton = object : JLabel("+") {
+        override fun paintComponent(g: java.awt.Graphics) {
+            val g2 = g.create() as java.awt.Graphics2D
+            g2.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON)
+            if (plusBtnHovered) {
+                g2.color = ChatTheme.chipHoverBg; g2.fillRoundRect(0, 0, width - 1, height - 1, 6, 6)
+                g2.color = ChatTheme.chipBorder; g2.stroke = java.awt.BasicStroke(1f); g2.drawRoundRect(0, 0, width - 1, height - 1, 6, 6)
+            } else {
+                g2.color = ChatTheme.inputBg; g2.fillRoundRect(0, 0, width - 1, height - 1, 6, 6)
             }
-        })
+            g2.dispose()
+            super.paintComponent(g)
+        }
+    }.apply {
+        font = ChatTheme.bodyFont.deriveFont(Font.BOLD, 18f)
+        foreground = ChatTheme.textMuted
+        cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
+        horizontalAlignment = SwingConstants.CENTER
+        isOpaque = false
+        border = null
+        minimumSize = Dimension(26, 26)
+        preferredSize = Dimension(26, 26)
+        maximumSize = Dimension(26, 26)
+        toolTipText = "添加文件引用"
+    }
+    // hover + click 全部挂在 label 上（Swing 父子组件 mouse 事件不冒泡）
+    init { plusButton.addMouseListener(object : MouseAdapter() {
+        override fun mouseEntered(e: MouseEvent) {
+            plusBtnHovered = true; plusButton.foreground = ChatTheme.textSecondary; plusButton.repaint()
+        }
+        override fun mouseExited(e: MouseEvent) {
+            plusBtnHovered = false; plusButton.foreground = ChatTheme.textMuted; plusButton.repaint()
+        }
+        override fun mouseClicked(e: MouseEvent) {
+            val pos = inputArea.caretPosition
+            inputArea.insert("@", pos)
+            inputArea.caretPosition = pos + 1
+            inputArea.requestFocus()
+        }
+    })}
+    // 仅用于布局占位
+    private val plusButtonWrapper = JPanel(BorderLayout()).apply {
+        isOpaque = false
+        minimumSize = Dimension(26, 26)
+        preferredSize = Dimension(26, 26)
+        maximumSize = Dimension(26, 26)
+        add(plusButton, BorderLayout.CENTER)
     }
 
+    // ---- composer box 边框（对齐设计稿：圆角+内边距+聚焦蓝切换）----
+    private val composerBorder = BorderFactory.createCompoundBorder(
+        roundedBorder(ChatTheme.inputBorder),
+        BorderFactory.createEmptyBorder(8, 10, 8, 10)
+    )
+    private val composerBorderFocused = BorderFactory.createCompoundBorder(
+        roundedBorder(ChatTheme.inputFocus),
+        BorderFactory.createEmptyBorder(8, 10, 8, 10)
+    )
+
     // ---- submit/stop button (arrow → stop) ----
-    private val lingmaSubmitBtn = JLabel("→").apply {
-        font = ChatTheme.largeFont
-        foreground = ChatTheme.submitBtnFg
+    private val lingmaSubmitBtn = object : JLabel("→") {
+        override fun paintComponent(g: java.awt.Graphics) {
+            val g2 = g.create() as java.awt.Graphics2D
+            g2.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON)
+            g2.color = ChatTheme.userBg
+            g2.fillRoundRect(0, 0, width - 1, height - 1, 8, 8)
+            g2.dispose()
+            super.paintComponent(g)
+        }
+    }.apply {
+        font = ChatTheme.bodyFont.deriveFont(Font.BOLD, 15f)
+        foreground = ChatTheme.userFg
         cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
-        border = BorderFactory.createEmptyBorder(0, 4, 4, 6)
+        horizontalAlignment = SwingConstants.CENTER
+        isOpaque = false
+        border = null
         toolTipText = "发送 (Enter)"
+        minimumSize = Dimension(28, 28)
+        preferredSize = Dimension(28, 28)
+        maximumSize = Dimension(28, 28)
         addMouseListener(object : MouseAdapter() {
             override fun mouseClicked(e: MouseEvent) {
                 if (viewModel.isStreaming) viewModel.stopGeneration() else sendMessage()
-            }
-            override fun mouseEntered(e: MouseEvent) {
-                if (!viewModel.isStreaming) foreground = ChatTheme.accentHover
-            }
-            override fun mouseExited(e: MouseEvent) {
-                if (!viewModel.isStreaming) foreground = ChatTheme.submitBtnFg
             }
         })
     }
@@ -569,28 +644,20 @@ class ChatToolWindow(private val project: Project) {
         BorderFactory.createEmptyBorder(7, 10, 7, 10)
     )
 
-    private val inputPanel = object : JPanel(BorderLayout(0, 0)) {
-        override fun getPreferredSize(): Dimension {
-            val natural = super.getPreferredSize()  // 由 BorderLayout + 子组件实际高度计算
-            return Dimension(maxOf(natural.width, 200), maxOf(natural.height, 80))
-        }
-    }.apply {
-        minimumSize = Dimension(150, 80)
-        border = lingmaInputBorder
+    // composer box: 包裹 chips + textarea + toolbar 的圆角边框容器
+    private val composerBox = JPanel(BorderLayout(0, 0)).apply {
         isOpaque = true
-        background = ChatTheme.inputPanelBg
+        background = ChatTheme.inputBg
+        border = composerBorder
 
-        // top row: plus + chips (wrapping)
-        val topRow = JPanel().apply {
-            layout = javax.swing.BoxLayout(this, javax.swing.BoxLayout.X_AXIS)
+        // 芯片行（仅 chips，加号移到左下角工具栏）
+        val topRow = JPanel(BorderLayout()).apply {
             isOpaque = false
-            add(plusButton)
-            add(chipPanel)
-            add(Box.createHorizontalGlue())
+            add(chipPanel, BorderLayout.CENTER)
         }
         add(topRow, BorderLayout.NORTH)
 
-        // center: text area (no border)
+        // 文本输入区
         val scrollInput = JBScrollPane(inputArea).apply {
             border = JBUI.Borders.empty()
             isOpaque = false
@@ -599,23 +666,50 @@ class ChatToolWindow(private val project: Project) {
         }
         add(scrollInput, BorderLayout.CENTER)
 
-        // bottom-right: submit button
-        val bottomRow = JPanel(FlowLayout(FlowLayout.RIGHT, 0, 0)).apply { isOpaque = false; add(lingmaSubmitBtn) }
-        add(bottomRow, BorderLayout.SOUTH)
+        // 工具栏：加号 + 发送按钮
+        val toolbar = JPanel().apply {
+            layout = javax.swing.BoxLayout(this, javax.swing.BoxLayout.X_AXIS)
+            isOpaque = false
+            border = JBUI.Borders.empty(6, 0, 0, 0)
+            add(plusButtonWrapper)
+            add(Box.createHorizontalGlue())
+            add(lingmaSubmitBtn)
+        }
+        add(toolbar, BorderLayout.SOUTH)
 
-        addFocusListener(object : FocusAdapter() {
-            override fun focusGained(e: FocusEvent) { border = lingmaInputBorderFocused }
-            override fun focusLost(e: FocusEvent) { border = lingmaInputBorder }
+        // 聚焦时边框变蓝，失焦恢复
+        fun updateBorder(focused: Boolean) {
+            border = if (focused) composerBorderFocused else composerBorder
+        }
+        // textarea 的 focus 事件触发 box 边框切换
+        inputArea.addFocusListener(object : FocusAdapter() {
+            override fun focusGained(e: FocusEvent) { updateBorder(true); inputArea.repaint() }
+            override fun focusLost(e: FocusEvent) { updateBorder(false); inputArea.repaint() }
         })
+    }
+
+    private val inputPanel = object : JPanel(BorderLayout(0, 0)) {
+        override fun getPreferredSize(): Dimension {
+            val natural = super.getPreferredSize()
+            return Dimension(maxOf(natural.width, 200), maxOf(natural.height, 80))
+        }
+    }.apply {
+        minimumSize = Dimension(150, 80)
+        isOpaque = true
+        background = ChatTheme.inputPanelBg
+        border = JBUI.Borders.empty(8, 12, 12, 12)  // 外边距对齐设计：上8 左右12 下12
+        add(composerBox, BorderLayout.CENTER)
     }
 
     // ---- error/warning banner（双独立标签，支持 error + warning 互不覆盖）----
     private val errorBannerPanel = JPanel().apply {
-        layout = BoxLayout(this, BoxLayout.Y_AXIS)
+        layout = javax.swing.BoxLayout(this, javax.swing.BoxLayout.Y_AXIS)
         isOpaque = false
         isVisible = false
     }
-    private val errorLabel = JLabel().apply {
+    private val errorLabel = object : JLabel() {
+        override fun getMaximumSize() = Dimension(Int.MAX_VALUE, super.getMaximumSize().height)
+    }.apply {
         isVisible = false
         isOpaque = true
         border = JBUI.Borders.empty(6, 12)
@@ -623,10 +717,10 @@ class ChatToolWindow(private val project: Project) {
         horizontalAlignment = SwingConstants.CENTER
         background = ChatTheme.errorBannerBg
         foreground = ChatTheme.errorBannerFg
-        // 宽度填满父容器（BorderLayout.NORTH 自动拉伸宽度，但需确保 JLabel 本身不限制）
-        maximumSize = Dimension(Int.MAX_VALUE, Int.MAX_VALUE)
     }
-    private val warningLabel = JLabel().apply {
+    private val warningLabel = object : JLabel() {
+        override fun getMaximumSize() = Dimension(Int.MAX_VALUE, super.getMaximumSize().height)
+    }.apply {
         isVisible = false
         isOpaque = true
         border = JBUI.Borders.empty(6, 12)
@@ -841,8 +935,8 @@ class ChatToolWindow(private val project: Project) {
                 inputArea.isEnabled = !streaming
                 lingmaSubmitBtn.text = if (streaming) "■" else "→"
                 lingmaSubmitBtn.toolTipText = if (streaming) "停止" else "发送 (Enter)"
+                // 发送/停止按钮样式保持一致，仅文字切换
                 if (!streaming) {
-                    lingmaSubmitBtn.foreground = ChatTheme.submitBtnFg
                     // 流式结束，触发一次布局失效；自测量气泡会按最终内容/宽度重测。
                     conversationContainer.revalidate()
                     conversationContainer.repaint()
@@ -954,7 +1048,7 @@ class ChatToolWindow(private val project: Project) {
 
                 renderedMsgVersions[msg.id] = msg.version
                 val component = if (msg.role == "user") {
-                    val refs = messageRefChips[msg.id]
+                    val refs = viewModel.messageRefChips[msg.id]
                     if (refs != null && refs.isNotEmpty()) {
                         createUserBubbleWithFooter(msg, buildRefChipFooter(refs))
                     } else {
@@ -1112,14 +1206,15 @@ class ChatToolWindow(private val project: Project) {
         }
     }
 
-    private fun roundedBorder(color: JBColor, thickness: Int = 1): javax.swing.border.Border {
+    /** 仅绘制圆角边框轮廓 */
+    private fun roundedBorder(color: JBColor, thickness: Int = 1, radius: Int = 12): javax.swing.border.Border {
         return object : javax.swing.border.AbstractBorder() {
             override fun paintBorder(c: Component, g: java.awt.Graphics, x: Int, y: Int, w: Int, h: Int) {
                 val g2 = g.create() as java.awt.Graphics2D
                 g2.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING, java.awt.RenderingHints.VALUE_ANTIALIAS_ON)
                 g2.color = color
                 g2.stroke = java.awt.BasicStroke(thickness.toFloat())
-                g2.drawRoundRect(x, y, w - 1, h - 1, 12, 12)
+                g2.drawRoundRect(x, y, w - 1, h - 1, radius, radius)
                 g2.dispose()
             }
         }
@@ -1278,7 +1373,7 @@ class ChatToolWindow(private val project: Project) {
         }
 
         val commands = listOf(
-            Cmd("/new",   "新会话") { needFullRebuild = true; viewModel.clearConversation(); messageRefChips.clear(); refChips.clear(); selectionRefChip = null; rebuildChips(); planBar.updatePlan(null); rebuildConversation() },
+            Cmd("/new",   "新会话") { needFullRebuild = true; viewModel.clearConversation(); viewModel.messageRefChips.clear(); refChips.clear(); selectionRefChip = null; rebuildChips(); planBar.updatePlan(null); rebuildConversation() },
             Cmd("/plan",  "创建执行计划") { sendQuick("请为当前任务创建执行计划。先分析需求，然后调用 create_plan 工具。") },
             Cmd("/init",  "初始化项目文档") { sendQuick("请分析当前项目结构，创建 CLAUDE.md 文档，包含项目概述、常用命令、架构说明和关键约定。") },
             Cmd("/review","审查当前改动") { sendQuick("请审查当前分支的代码改动，分析潜在问题并给出修复建议。") },
@@ -1477,9 +1572,6 @@ class ChatToolWindow(private val project: Project) {
         fileRefPopup = popup
     }
 
-    /** 用户消息对应的引用文件（用于气泡下方显示可点击跳转的 chips），消息 ID → RefChip 列表 */
-    private val messageRefChips = mutableMapOf<Long, List<RefChip>>()
-
     private fun sendMessage() {
         val textContent = inputArea.text.trim()
         val refContent = buildRefContent()
@@ -1499,10 +1591,11 @@ class ChatToolWindow(private val project: Project) {
                     return@invokeLater
                 }
                 hideError()
-                // 记录引用文件用于气泡下方可点击跳转的 chips 展示
-                val msgId = viewModel.sendMessage(apiKey, textContent, images.ifEmpty { null }, refContent)
-                if (msgId > 0 && refChips.isNotEmpty()) {
-                    messageRefChips[msgId] = refChips.toList() // 快照
+                if (refChips.isNotEmpty()) {
+                    // chips 由 sendMessage 内部在 onMessagesChanged 之前写入 viewModel.messageRefChips
+                    viewModel.sendMessage(apiKey, textContent, images.ifEmpty { null }, refContent, refChips.toList())
+                } else {
+                    viewModel.sendMessage(apiKey, textContent, images.ifEmpty { null }, refContent)
                 }
                 inputArea.text = ""
                 refChips.clear()

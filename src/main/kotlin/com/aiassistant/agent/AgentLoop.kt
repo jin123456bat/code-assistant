@@ -124,6 +124,7 @@ class AgentLoop(
                     val result = callAnthropic(apiKey, history)
                     if (result == null) {
                         edt { onError?.invoke("API 调用失败") }
+                        callback("", "")  // 通知调用方（如 TaskTool）执行失败
                         break
                     }
 
@@ -357,7 +358,11 @@ class AgentLoop(
                             }
                         }
 
-                        if (consecutiveFailures >= MAX_FAILURES) break
+                        if (consecutiveFailures >= MAX_FAILURES) {
+                            edt { onError?.invoke("连续失败超过 $MAX_FAILURES 次，已中止") }
+                            callback("", "")  // 通知调用方执行失败
+                            break
+                        }
                     } else {
                         // 无工具调用：thinking block 必须传回 API（DeepSeek V4 硬性要求）
                         AppLogger.info("AgentLoop 最终回复: $textContent thinkingLen=${thinking.length} sigLen=${thinkingSignature.length}")

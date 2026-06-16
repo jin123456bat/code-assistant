@@ -43,8 +43,14 @@ class TaskTool : AgentTool {
                 latch.countDown()
             }
 
-            val finished = latch.await(5, TimeUnit.MINUTES)
+            val finished = try {
+                latch.await(5, TimeUnit.MINUTES)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                false
+            }
             if (!finished) {
+                childLoop.stop()
                 return ToolResult.err("子 Agent 执行超时（超过 5 分钟），任务: $description")
             }
             val result = resultRef.get() ?: ""
@@ -56,7 +62,7 @@ class TaskTool : AgentTool {
         } catch (e: Exception) {
             return ToolResult.err("子 Agent 执行失败: ${e.message}")
         } finally {
-            childLoop.stop()  // 确保子 agent 线程被中断释放，防止资源泄漏
+            childLoop.stop()
         }
     }
 }
