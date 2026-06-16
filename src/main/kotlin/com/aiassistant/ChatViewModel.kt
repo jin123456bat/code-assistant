@@ -248,7 +248,7 @@ class ChatViewModel {
      */
     /** 发送用户消息，返回消息 ID（用于 messageRefChips 索引） */
     fun sendMessage(apiKey: String, content: String, images: List<ImageData>? = null, refContent: String = "", refChips: List<com.aiassistant.ChatToolWindow.RefChip> = emptyList()): Long {
-        if (content.isBlank() || isStreaming || isRateLimited) return -1L
+        if ((content.isBlank() && images.isNullOrEmpty()) || isStreaming || isRateLimited) return -1L
         generationId++  // 新轮次，DD旧回调
         streamingContent = ""
         streamingThinking = ""

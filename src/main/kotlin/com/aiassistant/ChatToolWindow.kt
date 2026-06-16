@@ -192,6 +192,7 @@ class ChatToolWindow(private val project: Project) {
     // 确保内部 X_AXIS 行的水平 glue 有足够空间把气泡推到正确对侧。
     private val conversationContainer = JPanel().apply {
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
+        background = ChatTheme.winBg
         border = JBUI.Borders.empty(4, 4, 8, 4)
     }
     private val conversationScrollPane = JBScrollPane(
@@ -790,7 +791,8 @@ class ChatToolWindow(private val project: Project) {
     }
 
     private val conversationPanel = JPanel(BorderLayout()).apply {
-        isOpaque = false
+        isOpaque = true
+        background = ChatTheme.winBg
         add(northStack, BorderLayout.NORTH)
         add(conversationScrollPane, BorderLayout.CENTER)
     }
@@ -1607,11 +1609,18 @@ class ChatToolWindow(private val project: Project) {
                     return@invokeLater
                 }
                 hideError()
+                // 纯引用无文字时用 refContent 作为消息正文（避免 sendMessage 内 content.isBlank() 拦截）
+                val msgText = textContent.ifBlank { if (refContent.isNotEmpty()) refContent else "" }
+                if (msgText.isEmpty() && images.isEmpty()) {
+                    showWarning(AiAssistantBundle.message("chat.error.empty"))
+                    return@invokeLater
+                }
+                // msgText 已包含 refContent 时不再重复拼接
+                val effectiveRef = if (msgText == refContent) "" else refContent
                 if (refChips.isNotEmpty()) {
-                    // chips 由 sendMessage 内部在 onMessagesChanged 之前写入 viewModel.messageRefChips
-                    viewModel.sendMessage(apiKey, textContent, images.ifEmpty { null }, refContent, refChips.toList())
+                    viewModel.sendMessage(apiKey, msgText, images.ifEmpty { null }, effectiveRef, refChips.toList())
                 } else {
-                    viewModel.sendMessage(apiKey, textContent, images.ifEmpty { null }, refContent)
+                    viewModel.sendMessage(apiKey, msgText, images.ifEmpty { null }, effectiveRef)
                 }
                 inputArea.text = ""
                 refChips.clear()

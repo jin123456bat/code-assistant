@@ -107,6 +107,12 @@ msgIdToComponent:    Map<msgId → Component>  ← 已渲染组件引用
 
 **agent 包**（`agent/`）：包含 Agent 核心实现和共享类型——`AgentLoop`、`AgentContext`（贯穿生命周期的共享上下文，含 `Plan`/`Step`/`ImageData`/`AgentMessage`（`id: Long` 消息唯一标识 + `version: Int` 增量渲染版本号）、`skillDefs: Map<String, SkillDef>` 已加载 skill 定义）、`ToolRegistryV3`、`SkillEngine`、`AgentTool` 接口。
 
+**跨轮对话历史**：`AgentContext.conversationHistory`（`synchronizedList<AnthropicMessage>`）跨 `sendMessage()` 调用保留完整 assistant/tool 消息，使 LLM 能感知之前的所有交互。每轮 `run()` 追加当前轮消息，`clearConversation()` 清空。线程安全：单操作由 `synchronizedList` 保护，复合操作（`toList()`+`clear()`+`addAll()`）使用 `historyLock`。
+
+**对话压缩（Compact）**：对齐 Claude Code `/compact`。手动 `/compact` 命令 + 自动 token 阈值触发。自动触发基于 API 返回的 `inputTokens`（通过 `MessageAccumulator` 提取），达到上下文窗口 90%（可配置 10%-100%）时自动压缩。压缩逻辑：`AgentLoop.compact()` 调用 LLM 生成 200-500 字中文摘要 → 注入 `ctx.systemPrompt` → 保留最近 30 条历史记录。手动 compact 先 `stopGeneration()` 防并发。
+
+**子 Agent（TaskTool）**：`task` 工具创建独立 `AgentLoop` 实例执行子任务，不污染主对话 history。子 Agent 完成或主 Agent 中断时通过 `finally { childLoop.stop() }` 确保线程释放。API 失败时 `callback("", "")` 通知调用方避免 5 分钟超时等待。
+
 **ViewModel 状态机**：`ChatViewModel.Activity` 密封类表达 Agent 当前活动：
 - `Idle` → 无指示器
 - `Thinking` → 模型推理中（显示思考指示器或 spinner）
@@ -123,6 +129,26 @@ msgIdToComponent:    Map<msgId → Component>  ← 已渲染组件引用
 **Skills**（`agent/SkillEngine.kt`）：扫描 `<project>/.claude/skills/**/SKILL.md` 和 `~/.claude/skills/**/SKILL.md`，解析为 `SkillDef` 存入 `AgentContext.skillDefs`。对齐 Claude Code：skill 不作为独立工具注册，而是通过统一的 `Skill` 元工具（`Skill(skill=名称, args=输入)`）激活。激活后 skill prompt 注入 system prompt（而非 tool_result 消息），描述列表则始终在 system prompt 的 Skills 段落中渐进披露。支持 `/skill-name` 客户端拦截和 `preferredModel` 模型路由。
 
 **Plan**：LLM 通过 `create_plan` 元工具自主决定是否创建执行计划，不再使用本地关键词判定。
+
+### 输入区域（Composer）
+
+对齐设计稿 `Chat UI Redesign.html` 的 `.composer` 结构：
+
+```
+inputPanel (border: Empty(8,12,12,12), bg: winBg)
+  └── composerBox (BorderLayout, bg: inputBg, 圆角, focus→蓝色)
+        ├── NORTH  → chipPanel (WrapLayout, 引用/图片芯片)
+        ├── CENTER → JBScrollPane → inputArea (JTextArea, placeholder)
+        └── SOUTH  → toolbar (➕ 加号 + → 发送按钮)
+```
+
+**按钮圆角实现**：JLabel 设为 `isOpaque=false`，在 `paintComponent` 中用 `fillRoundRect` 画圆角背景，再用 `super.paintComponent(g)` 画文字（border 画填充会覆盖文字）。发送按钮 `userBg` 底 + 8px 圆角，加号 `inputBg` 底（默认融合）+ hover 时 `chipHoverBg` 底 + `chipBorder` 描边 + 6px 圆角。
+
+**引用芯片**：输入区 chipPanel 和气泡底部 footer chips 统一使用 `paintComponent` 画 `chipBg` 圆角底 + `chipBorder` 描边。`messageRefChips` 存储在 `ChatViewModel` 中，在 `onMessagesChanged` 触发前写入，确保气泡渲染时 chips 已存在。
+
+**文件路径点击跳转**：`FilePathNavigator` 工具类，通过 `MouseListener + viewToModel2D` 检测点击位置的文件路径/URL。Markdown 气泡的 JTextPane 和工具结果的 JTextArea 均附加此监听器。文件路径 → IDE 跳转，http/https/ftp URL → `BrowserUtil.browse()` 浏览器打开。
+
+**横幅**：`errorLabel`/`warningLabel` 重写 `getMaximumSize()` 返回 `Int.MAX_VALUE` 宽度确保文字居中全宽。输入文字时 `DocumentListener` 自动 `hideError()`。
 
 ## 编码约定
 

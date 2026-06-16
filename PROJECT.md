@@ -12,6 +12,9 @@ Code Assistant 是 IntelliJ IDEA 的开源 AI 编程 Agent 插件（IntelliJ Pla
 - **计划模式**：LLM 自主决定是否创建执行计划，并跟踪步骤进度
 - **安全机制**：工具审批流、白名单、文件越界防护
 - **输入增强**：文件引用、编辑器选区自动引用、图片粘贴、斜杠命令
+- **跨轮对话**：完整 conversation history 跨 `sendMessage()` 保留，LLM 感知全部上下文
+- **对话压缩**：手动 `/compact` + 自动 token 阈值触发，摘要注入 system prompt 释放 token 预算
+- **文件链接**：气泡中文件路径悬停手型光标，点击跳转 IDE 编辑器；URL 点击浏览器打开
 
 ## 技术栈
 
@@ -76,6 +79,7 @@ src/main/kotlin/com/aiassistant/
 │   ├── SimpleDiff.kt          # 行级 diff 计算
 │   ├── AskUserBridge.kt       # ask_user 工具 ↔ UI 桥接
 │   ├── MarkdownRenderer.kt     # Markdown → Swing JPanel（位于 com.aiassistant 根包）
+│   ├── FilePathNavigator.kt     # 文件路径/URL 点击跳转（MouseListener + viewToModel2D）
 │   └── WrapLayout.kt            # 可换行 FlowLayout 变体（preferredSize 基于容器宽度模拟换行）
 │
 ├── actions/                   # IntelliJ Actions
@@ -211,6 +215,13 @@ AgentLoop 内置三个不由 ToolRegistryV3 管理的元工具，由 `buildSdkTo
 
 - `deepseek-v4-flash`：默认，快速、工具调用
 - `deepseek-v4-pro`：复杂编码、深度推理
+
+### 对话压缩
+
+- 手动 `/compact` — 压缩历史释放 token
+- 自动 compact — 达到上下文窗口 N%（设置面板可配，默认 90%）自动触发
+- 压缩策略：LLM 生成 200-500 字摘要 → 注入 system prompt → 保留最近 30 条历史
+- Token 追踪：优先用 `MessageAccumulator` 提取 API 返回的 `inputTokens`，SDK 未返回时降级为字符估算
 
 ### MCP 配置
 
