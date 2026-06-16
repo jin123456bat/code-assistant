@@ -378,6 +378,9 @@ class MarkdownRenderer {
             return JScrollPane(area).apply {
                 horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED
                 verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_NEVER
+                // 禁用代码块内 JScrollPane 的滚轮滚动，让滚轮事件向上冒泡到
+                // 父级 conversationScrollPane，否则鼠标在代码块上时无法上下翻阅对话。
+                setWheelScrollingEnabled(false)
                 border = null
                 isOpaque = false
                 viewport.isOpaque = false
