@@ -112,7 +112,7 @@ ChatToolWindowFactory → ChatToolWindow (Swing UI, ~1590 行)
 - `resolveSkillInvocation()` 返回 `SkillResolution(displayContent, llmContent, skillName, preferredModel)`——将 skill prompt 注入 LLM 上下文的同时，保留用户可见文本用于气泡展示
 - `AgentLoop.run(activatedSkill=...)` 接收客户端激活的 skill 名称，存入 `AgentContext.activatedSkill`
 - `AgentLoop.callAnthropic()` 返回 `AnthropicResponse(textContent, thinking, thinkingSignature, toolCalls)`
-- `AnthropicSdkClient.mergeConsecutiveSameRole()` 将连续同 role 的 `AnthropicMessage`（含 `thinking`/`thinkingSignature` 字段）合并为单个 `MessageParam`，确保 DeepSeek V4 thinking 回传要求
+- `AnthropicSdkClient.mergeConsecutiveSameRole()` 将连续同 role 的 `AnthropicMessage`（含 `thinking`/`thinkingSignature` 字段）合并为单个 `MessageParam`。`thinking` 模式已禁用（DeepSeek V4 不兼容 Anthropic thinking 协议）
 
 ### Agent 循环
 
@@ -272,7 +272,7 @@ model: claude-sonnet-4-6  # 可选，声明后激活时自动切换模型
 
 ## 关键约定与坑
 
-- **DeepSeek V4 thinking 回传**：启用 thinking 模式时，assistant 回复中的 `thinking` content block 必须随后续请求传回 API。`AnthropicMessage` 新增 `thinking` 和 `thinkingSignature` 字段存储。`mergeConsecutiveSameRole()` 负责将 thinking + text + tool_use 合并为单条消息，`buildSdkMessage()` 构建含 `ThinkingBlockParam` 的完整 content blocks（`.signature()` 始终传入，空字符串也传，满足 SDK `checkRequired` 要求）。`AgentLoop` 中 thinking 判断仅需 `thinking.isNotBlank()`，不要求 signature 非空（DeepSeek V4 可能返回无签名的 thinking）。
+- **DeepSeek V4 thinking 模式已禁用**：DeepSeek V4 的 Anthropic 兼容 API 返回的 thinking 签名始终为空，回传触发 400。`enabledThinking(8192)` 已注释。DeepSeek 通过 `<think>` 标签自动处理推理。`AnthropicMessage` 保留 `thinking`/`thinkingSignature` 字段供未来重新启用。
 - **流式气泡清理**：`streamingBubble` 必须存 row（container 的直接子组件），不能存 ChatBubble（row 的子组件），否则 `container.remove(streamingBubble)` 找不到直接子组件导致流式气泡永远删不掉。
 - **错误恢复**：`ChatViewModel.onError` 回调中清理全部流式状态（`isStreaming=false`、`streamingContent=""`、`streamingThinking=""`、`isThinking=false`、`activity=Idle`）并触发 `onMessagesChanged` 强制 UI 重建，移除残留流式组件。`onStateChange(false)` 在停止时同样清理 `streamingContent`。
 - **发送后等待指示**：`sendMessage()` 中设置 `streamingThinking="等待 AI 回复..."` + `activity=Activity.Thinking`，立即显示等待指示器，收到首个 streaming 事件后自动替换。

@@ -23,8 +23,8 @@ data class AnthropicMessage(
     val toolName: String? = null,      // tool_use 的 name
     val toolInput: String = "",        // tool_use 的 input JSON
     val images: List<ImageData>? = null, // 用户消息附带的图片（Claude 原生 image 块）
-    val thinking: String = "",          // thinking 内容（DeepSeek V4 thinking 模式，必须随后续请求回传）
-    val thinkingSignature: String = "", // thinking 签名（DeepSeek V4 thinking 模式，必须随后续请求回传）
+    val thinking: String = "",          // thinking 内容（DeepSeek 自动处理 <think> 标签，不回传 Anthropic 协议）
+    val thinkingSignature: String = "", // thinking 签名（DeepSeek 不返回签名，SDK 层已跳过不回传）
     val groupId: Int = 0                // 轮次分组：同一 API 响应的消息同组，防止跨轮合并破坏 tool_use 配对
 )
 

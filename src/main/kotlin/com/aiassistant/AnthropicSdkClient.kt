@@ -43,9 +43,8 @@ class AnthropicSdkClient(
             .maxTokens(maxTokens)
             .system(systemPrompt)
 
-        if (thinkingEnabled) {
-            paramsBuilder.enabledThinking(8192)
-        }
+        // DeepSeek V4 不完全支持 Anthropic thinking 协议（无签名，回传 400），禁用 thinking
+        // if (thinkingEnabled) { paramsBuilder.enabledThinking(8192) }
 
         for (td in tools) {
             val propsBuilder = Tool.InputSchema.Properties.builder()
@@ -76,6 +75,9 @@ class AnthropicSdkClient(
         com.aiassistant.AppLogger.info("SDK消息合并: ${messages.size}条 → ${mergedMessages.size}条")
         for (msg in mergedMessages) {
             val sdkMsg = buildSdkMessage(msg) ?: continue
+            val hasThinking = msg.thinking.isNotBlank()
+            val hasToolUse = msg.toolUseId != null
+            com.aiassistant.AppLogger.info("SDK添加消息: role=${msg.role} thinking=$hasThinking sigLen=${msg.thinkingSignature.length} toolUse=$hasToolUse contentLen=${msg.content.length}")
             paramsBuilder.addMessage(sdkMsg)
         }
 
@@ -240,13 +242,12 @@ class AnthropicSdkClient(
 
         // assistant 消息：thinking + text + tool_use 按需累加（合并后单消息可能含多种 block）
         if (msg.role == "assistant") {
-            // thinking block：thinking 模式下必须随后续请求传回（SDK 要求 signature 非 null，DeepSeek V4 可能无签名则传空字符串）
+            // thinking block：DeepSeek 要求工具调用轮必须回传 thinking
             if (msg.thinking.isNotBlank()) {
-                com.aiassistant.AppLogger.info("SDK构建: 添加thinking block thinkingLen=${msg.thinking.length} sigLen=${msg.thinkingSignature.length}")
                 blocks.add(ContentBlockParam.ofThinking(
                     ThinkingBlockParam.builder()
                         .thinking(msg.thinking)
-                        .signature(msg.thinkingSignature)  // 空字符串也传，满足 SDK build() 的 checkRequired
+                        .signature(msg.thinkingSignature)
                         .build()
                 ))
             }

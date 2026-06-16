@@ -193,7 +193,7 @@ class AgentLoop(
                                     history.add(AnthropicMessage("assistant", textContent))
                                     firstToolCallTextAdded = true
                                 }
-                                history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments))
+                                history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments, thinking = thinking, thinkingSignature = thinkingSignature))
                                 history.add(AnthropicMessage("user", skillResult, toolCallId = tc.id))
                                 edt { onToolResult?.invoke(tc.name, skillResult) }
                                 continue
@@ -215,7 +215,7 @@ class AgentLoop(
                                     "计划已创建，共 ${newPlan.stepsSnapshot().size} 步。请从第一步开始执行。"
                                 }
                                 if (!firstToolCallTextAdded) {
-                                    // thinking content block 必须在 assistant 消息中随后续请求传回 API
+                                    // thinking 记录在 history 中供 UI 展示，SDK 层已跳过不回传 Anthropic 协议
                                     if (!thinkingBlockAdded && thinking.isNotBlank()) {
                                         AppLogger.info("AgentLoop: 添加thinking到history thinkingLen=${thinking.length} sigLen=${thinkingSignature.length}")
                                         history.add(AnthropicMessage(
@@ -230,7 +230,8 @@ class AgentLoop(
                                 }
                                 history.add(AnthropicMessage(
                                     "assistant", "", toolUseId = tc.id,
-                                    toolName = tc.name, toolInput = tc.arguments
+                                    toolName = tc.name, toolInput = tc.arguments,
+                                    thinking = thinking, thinkingSignature = thinkingSignature
                                 ))
                                 history.add(AnthropicMessage(
                                     "user", planResult, toolCallId = tc.id
@@ -272,7 +273,7 @@ class AgentLoop(
                                     history.add(AnthropicMessage("assistant", textContent))
                                     firstToolCallTextAdded = true
                                 }
-                                history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments))
+                                history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments, thinking = thinking, thinkingSignature = thinkingSignature))
                                 history.add(AnthropicMessage("user", msg, toolCallId = tc.id))
                                 edt { onToolResult?.invoke(tc.name, msg) }
                                 continue
@@ -342,7 +343,8 @@ class AgentLoop(
                             }
                             history.add(AnthropicMessage(
                                 "assistant", "", toolUseId = tc.id,
-                                toolName = tc.name, toolInput = tc.arguments
+                                toolName = tc.name, toolInput = tc.arguments,
+                                thinking = thinking, thinkingSignature = thinkingSignature
                             ))
                             history.add(AnthropicMessage(
                                 "user", resultText, toolCallId = tc.id
@@ -364,7 +366,7 @@ class AgentLoop(
                             break
                         }
                     } else {
-                        // 无工具调用：thinking block 必须传回 API（DeepSeek V4 硬性要求）
+                        // 无工具调用：thinking 仅用于 UI 展示，SDK 层已跳过不回传
                         AppLogger.info("AgentLoop 最终回复: $textContent thinkingLen=${thinking.length} sigLen=${thinkingSignature.length}")
                         if (thinking.isNotBlank()) {
                             history.add(AnthropicMessage("assistant", textContent,
@@ -537,7 +539,7 @@ class AgentLoop(
             append("\n请用 200-500 字输出摘要，不要使用标题或列表标记。\n\n")
             append("对话历史：\n")
             for (msg in messages) {
-                // 跳过 thinking-only 消息（不包含实质内容，仅 API 协议需要）
+                // 跳过 thinking-only 消息（不包含实质内容，UI 展示用）
                 if (msg.thinking.isNotBlank() && msg.content.isBlank() && msg.toolUseId == null) continue
                 val prefix = when {
                     msg.toolCallId != null -> "工具结果"
