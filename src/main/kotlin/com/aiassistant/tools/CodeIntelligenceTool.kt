@@ -78,7 +78,7 @@ class CodeIntelligenceTool : AgentTool {
                 }
             }
         } catch (e: Exception) {
-            ToolResult.err("$operation 执行失败: ${e.message}")
+            ToolResult.err("$operation 执行失败: ${e.message ?: e.javaClass.simpleName}")
         }
     }
 

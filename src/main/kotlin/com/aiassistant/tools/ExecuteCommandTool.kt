@@ -26,6 +26,10 @@ class ExecuteCommandTool : AgentTool {
             if (File(wd).isAbsolute) File(wd) else File(basePath, wd)
         } ?: File(basePath)
 
+        // 路径穿越防护：防止 LLM 传入 ../../etc 绕过项目目录限制
+        if (!com.aiassistant.shared.PathUtils.isInsideProject(workingDir.path, basePath)) {
+            return ToolResult.err("安全限制：不能操作项目目录之外的工作目录")
+        }
         if (!workingDir.exists()) return ToolResult.err("工作目录不存在: ${workingDir.path}")
 
         return try {

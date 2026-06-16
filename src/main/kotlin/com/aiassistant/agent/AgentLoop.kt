@@ -167,9 +167,25 @@ class AgentLoop(
 
                             // Skill 元工具：统一的 skill 激活入口（对齐 Claude Code）
                             if (tc.name == "Skill") {
-                                val skillName = Regex(""""skill"\s*:\s*"([^"]*)"""").find(tc.arguments)?.groupValues?.get(1)
-                                val skillArgs = Regex(""""args"\s*:\s*"([^"]*)"""").find(tc.arguments)?.groupValues?.get(1)
-                                val def = if (skillName != null) ctx.skillDefs[skillName] else null
+                                val skillParams = parseParams(tc.arguments)
+                                val skillName = skillParams["skill"]?.takeIf { it.isNotBlank() }
+                                val skillArgs = skillParams["args"]
+                                if (skillName == null) {
+                                    val errMsg = "Skill 调用失败：缺少 skill 参数。可用 skill: ${ctx.skillDefs.keys.joinToString(", ")}"
+                                    if (!firstToolCallTextAdded) {
+                                        if (!thinkingBlockAdded && thinking.isNotBlank()) {
+                                            history.add(AnthropicMessage("assistant", "", thinking = thinking, thinkingSignature = thinkingSignature))
+                                            thinkingBlockAdded = true
+                                        }
+                                        history.add(AnthropicMessage("assistant", textContent))
+                                        firstToolCallTextAdded = true
+                                    }
+                                    history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments, thinking = thinking, thinkingSignature = thinkingSignature))
+                                    history.add(AnthropicMessage("user", errMsg, toolCallId = tc.id))
+                                    edt { onToolResult?.invoke(tc.name, errMsg) }
+                                    continue
+                                }
+                                val def = ctx.skillDefs[skillName]
                                 val skillResult = if (def != null) {
                                     // 注入 skill prompt 到 system prompt（对齐 Claude Code）
                                     ctx.activatedSkillPrompt = def.prompt
@@ -202,6 +218,23 @@ class AgentLoop(
                             // create_plan 元工具：LLM 自主决定是否创建执行计划
                             if (tc.name == "create_plan") {
                                 val newPlan = parsePlanFromArgs(tc.arguments)
+                                // 如果 steps 为空（LLM 未提供步骤），返回错误提示让 LLM 修正重试
+                                if (newPlan.stepsSnapshot().isEmpty()) {
+                                    val errorResult = "计划创建失败：缺少有效的 steps 参数。请提供至少一个步骤（含 subject 和可选的 description）后重试。"
+                                    if (!firstToolCallTextAdded) {
+                                        if (!thinkingBlockAdded && thinking.isNotBlank()) {
+                                            AppLogger.info("AgentLoop: 添加thinking到history thinkingLen=${thinking.length} sigLen=${thinkingSignature.length}")
+                                            history.add(AnthropicMessage("assistant", "", thinking = thinking, thinkingSignature = thinkingSignature))
+                                            thinkingBlockAdded = true
+                                        }
+                                        history.add(AnthropicMessage("assistant", textContent))
+                                        firstToolCallTextAdded = true
+                                    }
+                                    history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments, thinking = thinking, thinkingSignature = thinkingSignature))
+                                    history.add(AnthropicMessage("user", errorResult, toolCallId = tc.id))
+                                    edt { onToolResult?.invoke(tc.name, errorResult) }
+                                    continue
+                                }
                                 val existingPlan = ctx.currentPlan
                                 val planResult = if (existingPlan != null) {
                                     // 已有计划 → 追加步骤到末尾
@@ -242,25 +275,34 @@ class AgentLoop(
 
                             // update_plan_step 元工具：LLM 更新计划步骤状态
                             if (tc.name == "update_plan_step") {
-                                val stepIndex = Regex(""""index"\s*:\s*(\d+)""").find(tc.arguments)?.groupValues?.get(1)?.toIntOrNull()
-                                val status = Regex(""""status"\s*:\s*"([^"]*)"""").find(tc.arguments)?.groupValues?.get(1)
-                                val result = Regex(""""result"\s*:\s*"([^"]*)"""").find(tc.arguments)?.groupValues?.get(1)
+                                val stepParams = parseParams(tc.arguments)
+                                val stepIndex = stepParams["index"]?.toIntOrNull()
+                                val status = stepParams["status"]
+                                val stepResult = stepParams["result"]
                                 var updated = false
-                                if (stepIndex != null && status != null) {
-                                    val stepStatus = when (status) {
-                                        "in_progress" -> AgentContext.StepStatus.IN_PROGRESS
-                                        "done" -> AgentContext.StepStatus.DONE
-                                        "failed" -> AgentContext.StepStatus.FAILED
-                                        else -> null
-                                    }
-                                    if (stepStatus != null) {
-                                        updated = ctx.currentPlan?.updateStep(stepIndex, stepStatus, result) ?: false
-                                        if (updated) {
-                                            ctx.currentPlan?.let { edt { onPlanUpdate?.invoke(it) } }
+                                val msg = when {
+                                    stepIndex == null -> "更新失败：缺少或无效的 index 参数，请提供步骤编号（整数）"
+                                    status == null -> "更新失败：缺少 status 参数，请提供 in_progress / done / failed 之一"
+                                    else -> {
+                                        val stepStatus = when (status) {
+                                            "in_progress" -> AgentContext.StepStatus.IN_PROGRESS
+                                            "done" -> AgentContext.StepStatus.DONE
+                                            "failed" -> AgentContext.StepStatus.FAILED
+                                            else -> null
+                                        }
+                                        if (stepStatus == null) {
+                                            "更新失败：无效的 status 值 '$status'，仅支持 in_progress / done / failed"
+                                        } else {
+                                            updated = ctx.currentPlan?.updateStep(stepIndex, stepStatus, stepResult) ?: false
+                                            if (updated) {
+                                                ctx.currentPlan?.let { edt { onPlanUpdate?.invoke(it) } }
+                                                "步骤 $stepIndex 状态更新为 $status"
+                                            } else {
+                                                "更新失败：步骤 $stepIndex 不存在，当前计划共 ${ctx.currentPlan?.stepsSnapshot()?.size ?: 0} 步"
+                                            }
                                         }
                                     }
                                 }
-                                val msg = if (updated) "步骤 $stepIndex 状态更新为 $status" else "更新失败: 步骤 $stepIndex 不存在，当前计划共 ${ctx.currentPlan?.stepsSnapshot()?.size ?: 0} 步"
                                 if (!firstToolCallTextAdded) {
                                     if (!thinkingBlockAdded && thinking.isNotBlank()) {
                                         history.add(AnthropicMessage(
@@ -775,17 +817,30 @@ $claudeMdContent
 
     /** 将 create_plan 元工具拼接到 tools JSON 末尾（ToolRegistryV3 的 ToolParameter 无法表达嵌套 items 子结构） */
     // 用于解析 create_plan JSON 参数的数据类
-    private data class PlanArgs(val title: String, val steps: List<StepArg>)
-    private data class StepArg(val subject: String, val description: String = "")
+    private data class PlanArgs(val title: String?, val steps: List<StepArg>?)
+    private data class StepArg(val subject: String?, val description: String? = null)
 
-    /** 从 create_plan 的 JSON 参数中解析 Plan */
+    /** 从 create_plan 的 JSON 参数中解析 Plan。
+     *  容错：LLM 可能返回 null/missing fields，使用 try-catch + 空值兜底防止 NPE 中断 AgentLoop。 */
     private fun parsePlanFromArgs(args: String): AgentContext.Plan {
-        val gson = com.google.gson.Gson()
-        val planArgs = gson.fromJson(args, PlanArgs::class.java)
-        val steps = planArgs.steps.mapIndexed { i, s ->
-            AgentContext.Step(index = i + 1, subject = s.subject, description = s.description)
+        return try {
+            val gson = com.google.gson.Gson()
+            val planArgs = gson.fromJson(args, PlanArgs::class.java)
+            val steps = (planArgs.steps ?: emptyList()).mapIndexed { i, s ->
+                AgentContext.Step(
+                    index = i + 1,
+                    subject = s.subject ?: "步骤 ${i + 1}",
+                    description = s.description ?: ""
+                )
+            }
+            AgentContext.Plan(
+                title = planArgs.title?.takeIf { it.isNotBlank() } ?: "执行计划",
+                steps = steps.toMutableList()
+            )
+        } catch (e: Exception) {
+            AppLogger.warn("解析 create_plan 参数失败: ${e.message}, args=$args")
+            AgentContext.Plan(title = "执行计划", steps = mutableListOf())
         }
-        return AgentContext.Plan(title = planArgs.title, steps = steps.toMutableList())
     }
 
     /** 动态生成当前计划状态提示，每次 API 调用前注入，确保 LLM 不会忘记未完成的计划 */

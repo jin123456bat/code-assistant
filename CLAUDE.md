@@ -153,7 +153,7 @@ inputPanel (border: Empty(8,12,12,12), bg: winBg)
 ## 编码约定
 
 - **Git commit message 必须使用中文**：遵循 Conventional Commits 格式（`feat:`/`fix:`/`refactor:`/`chore:`/`docs:`/`test:`），但描述部分用中文撰写。示例：`feat(agent): 添加 update_plan_step 元工具`、`fix(ui): 修复气泡对齐问题`
-- **文档优先（强制）**：任何代码改动或功能改动，**先更新文档，再写代码**——`DESIGN.md`（设计规范/交互行为）和 `PROJECT.md`（项目结构/架构/配置）是唯一真相来源。代码是文档的实现，文档未更新则不允许开始写代码。流程：① 更新文档描述目标行为和方案 → ② 按文档实现代码 → ③ 验证代码与文档一致。
+- **对抗审查工作流（强制）**：任何代码工作遵循 `adversarial-review-requirement` memory 文档——新功能：① 制定方案 → ② 写入文档 → ③ 按文档开发 → ④ 对抗审查（文档未更新，不允许写代码）；修 Bug/重构：① 定位根因 → ② 改代码 → ③ 对抗审查 → ④ 更新文档。
 
 ## 关键约定与坑
 

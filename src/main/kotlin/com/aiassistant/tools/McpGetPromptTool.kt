@@ -28,8 +28,8 @@ class McpGetPromptTool : AgentTool {
                 @Suppress("UNCHECKED_CAST")
                 gson.fromJson(it, Map::class.java) as? Map<String, String> ?: emptyMap()
             } ?: emptyMap()
-        } catch (_: Exception) {
-            emptyMap()
+        } catch (e: Exception) {
+            return ToolResult.err("arguments 格式错误，请提供有效的 JSON 字符串: ${e.message}")
         }
 
         val content = mcpManager.getPrompt(name, args)

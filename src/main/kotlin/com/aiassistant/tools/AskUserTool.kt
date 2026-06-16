@@ -75,7 +75,11 @@ class AskUserTool : AgentTool {
         val multiple = params["multiple"]?.trim()?.lowercase() == "true"
 
         // 阻塞背景线程直到用户选择（或超时），AskUserBridge 负责 EDT 调度
-        val choice = AskUserBridge.request(question, options, multiple)
+        val choice = try {
+            AskUserBridge.request(question, options, multiple)
+        } catch (e: Exception) {
+            return ToolResult.err("用户选择请求失败: ${e.message ?: e.javaClass.simpleName}")
+        }
 
         return ToolResult.ok("用户选择: $choice")
     }

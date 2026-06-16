@@ -14,9 +14,6 @@
 
 ## P1 — 交互增强
 
-- [ ] **上下文压缩**
-  长对话自动压缩历史保留关键信息，释放 token 预算（参考 Claude Code `/compact`）
-
 - [ ] **更多斜杠命令**
   `/review` 代码审查、`/test` 运行测试、`/diff` 查看变更、`/security-review` 安全审查
 

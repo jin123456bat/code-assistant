@@ -127,16 +127,15 @@ AgentLoop 是核心调度器，在后台 `Thread` 上运行 `while` 循环：
 
 三类工具来源统一由 `ToolRegistryV3` 管理：
 
-1. **内置工具**（14 个）：`search_code`、`read_file`、`write_file`、`list_directory`、`execute_command`、`git_diff`、`git_log`、`git_status`、`ask_user`、`web_search`、`web_fetch`、`notebook_edit`、`task`、`code_intelligence`
+1. **内置工具**（15 个）：`search_code`、`read_file`、`write_file`、`list_directory`、`execute_command`、`git_diff`、`git_log`、`git_status`、`ask_user`、`web_search`、`web_fetch`、`notebook_edit`、`task`、`code_intelligence`、`mcp_get_prompt`
 2. **MCP 工具**：通过 `registerMcp()` 注册，来自 MCP 服务器的工具发现
 ### 元工具（Meta-Tools）
 
 AgentLoop 内置三个不由 ToolRegistryV3 管理的元工具，由 `buildSdkToolDefs()` 硬编码注入：
 
-- **`Skill(skill, args)`**：统一 skill 激活入口（对齐 Claude Code）。激活后 prompt 注入 system prompt，支持模型路由
-
-- **`create_plan`**：LLM 自主决定是否创建执行计划。`input_schema` 含嵌套 `items` 结构（`ToolParameter` 无法表达）
-- **`update_plan_step`**：更新计划步骤状态（`in_progress` / `done` / `failed`）
+- **`create_plan`**：LLM 自主决定是否创建执行计划。`input_schema` 含嵌套 `items` 结构（`ToolParameter` 无法表达）。`parsePlanFromArgs()` 对 LLM 返回的 JSON 参数做空值容错，`steps` 为空时返回错误提示让 LLM 修正重试。参数解析使用 Gson（非手写正则）
+- **`Skill(skill, args)`**：统一 skill 激活入口（对齐 Claude Code）。激活后 prompt 注入 system prompt，支持模型路由。参数解析使用 `parseParams()`（Gson），`skill` 缺失时返回明确错误提示
+- **`update_plan_step`**：更新计划步骤状态（`in_progress` / `done` / `failed`）。参数解析使用 `parseParams()`（Gson），`index`/`status` 无效时各自返回独立错误提示
 
 ### 安全模型
 

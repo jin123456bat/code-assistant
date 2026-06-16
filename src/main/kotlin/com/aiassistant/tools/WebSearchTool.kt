@@ -42,8 +42,12 @@ class WebSearchTool : AgentTool {
             } else {
                 ToolResult.ok(if (results.length > 10000) results.take(10000) + "\n… (已截断)" else results)
             }
+        } catch (e: java.net.UnknownHostException) {
+            ToolResult.err("网络不可达，请检查网络连接")
+        } catch (e: java.net.SocketTimeoutException) {
+            ToolResult.err("搜索请求超时，请重试")
         } catch (e: Exception) {
-            ToolResult.err("搜索失败: ${e.message}")
+            ToolResult.err("搜索失败: ${e.message ?: e.javaClass.simpleName}")
         }
     }
 

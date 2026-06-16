@@ -46,7 +46,9 @@ class NotebookEditTool : AgentTool {
                 "replace" -> {
                     val cellId = params["cell_id"] ?: return ToolResult.err("replace 模式需要 cell_id 参数")
                     val newSource = params["new_source"] ?: return ToolResult.err("replace 模式需要 new_source 参数")
-                    replaceCell(cells, cellId, newSource)
+                    if (!replaceCell(cells, cellId, newSource)) {
+                        return ToolResult.err("未找到 cell id: $cellId，请检查 cell_id 是否正确")
+                    }
                 }
                 "insert" -> {
                     val insertAfterId = params["cell_id"]
@@ -56,7 +58,9 @@ class NotebookEditTool : AgentTool {
                 }
                 "delete" -> {
                     val cellId = params["cell_id"] ?: return ToolResult.err("delete 模式需要 cell_id 参数")
-                    deleteCell(cells, cellId)
+                    if (!deleteCell(cells, cellId)) {
+                        return ToolResult.err("未找到 cell id: $cellId，请检查 cell_id 是否正确")
+                    }
                 }
                 else -> return ToolResult.err("未知编辑模式: $editMode，支持 replace/insert/delete")
             }
@@ -69,17 +73,18 @@ class NotebookEditTool : AgentTool {
         }
     }
 
-    private fun replaceCell(cells: JsonArray, cellId: String, newSource: String): Int {
+    /** @return true 找到并替换，false 未找到对应 cell */
+    private fun replaceCell(cells: JsonArray, cellId: String, newSource: String): Boolean {
         for (i in 0 until cells.size()) {
             val cell = cells[i].asJsonObject
             if (cell.get("id")?.asString == cellId) {
                 val srcArr = JsonArray()
                 for (line in newSource.lines()) srcArr.add(com.google.gson.JsonPrimitive(line))
                 cell.add("source", srcArr)
-                return 1
+                return true
             }
         }
-        throw IllegalStateException("未找到 cell id: $cellId")
+        return false
     }
 
     private fun insertCell(cells: JsonArray, afterId: String?, newSource: String, cellType: String) {
@@ -112,15 +117,17 @@ class NotebookEditTool : AgentTool {
         cells.addAll(clone)
     }
 
-    private fun deleteCell(cells: JsonArray, cellId: String) {
+    /** @return true 找到并删除，false 未找到对应 cell */
+    private fun deleteCell(cells: JsonArray, cellId: String): Boolean {
         val clone = JsonArray()
         for (i in 0 until cells.size()) {
             if (cells[i].asJsonObject.get("id")?.asString != cellId) {
                 clone.add(cells[i])
             }
         }
-        if (clone.size() == cells.size()) throw IllegalStateException("未找到 cell id: $cellId")
+        if (clone.size() == cells.size()) return false
         for (i in cells.size() - 1 downTo 0) cells.remove(i)
         cells.addAll(clone)
+        return true
     }
 }

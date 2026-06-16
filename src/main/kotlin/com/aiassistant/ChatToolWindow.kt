@@ -763,13 +763,6 @@ class ChatToolWindow(private val project: Project) {
     private var streamingThinkingRow: JPanel? = null
     private var streamingThinkingTextArea: JTextArea? = null
 
-    /** 滚动节流器：50ms 内多次请求只执行一次实际滚动，避免流式 token 高频排队 EDT */
-    private val scrollThrottle = javax.swing.Timer(50) {
-        val bar = conversationScrollPane.verticalScrollBar
-        val atBottom = bar.value + bar.visibleAmount >= bar.maximum - 80
-        if (atBottom) bar.value = bar.maximum
-    }.apply { isRepeats = false }
-
     // 自动引用去重
     private var lastAutoInsertedHash: Int = 0
     private var lastAutoInsertTime: Long = 0
@@ -1017,7 +1010,7 @@ class ChatToolWindow(private val project: Project) {
         conversationContainer.add(card, maxOf(0, conversationContainer.componentCount - 1))
         conversationContainer.revalidate()
         conversationContainer.repaint()
-        scrollToBottom(force = true)
+        scrollToBottom()
     }
 
     /** 已渲染的消息版本：msgId → version，用于增量更新变更检测 */
@@ -1127,7 +1120,7 @@ class ChatToolWindow(private val project: Project) {
         }
         conversationContainer.revalidate()
         conversationContainer.repaint()
-        scrollToBottom(force = true)
+        scrollToBottom()
     }
 
     private val markdownRenderer = MarkdownRenderer()
@@ -1164,7 +1157,7 @@ class ChatToolWindow(private val project: Project) {
                 streamingContentPane = entry.second
             }
             conversationContainer.revalidate()
-            scrollToBottom(force = true)
+            scrollToBottom()
         } else {
             // 原地更新 JTextPane 文本，不 remove/add 组件
             val contentPane = streamingContentPane
@@ -1208,7 +1201,7 @@ class ChatToolWindow(private val project: Project) {
                 conversationContainer.add(row)
             }
             conversationContainer.revalidate()
-            scrollToBottom(force = true)
+            scrollToBottom()
         } else {
             // 后续：原地更新 JTextArea 文本
             val area = streamingThinkingTextArea
@@ -1793,7 +1786,6 @@ class ChatToolWindow(private val project: Project) {
     }
 
     /** 流式更新专用：立即检查用户是否在底部附近，仅在底部时才滚动。
-     *  相比 scrollThrottle 的优势是即时响应（不等待 50ms 节流），
      *  确保流式输出时用户能看到新内容持续出现；同时严格守卫「用户不在底部时不滚动」，
      *  让用户能自由向上翻阅历史记录。 */
     private fun autoScrollIfAtBottom() {
@@ -1802,16 +1794,10 @@ class ChatToolWindow(private val project: Project) {
         if (atBottom) bar.value = bar.maximum
     }
 
-    /** 仅当用户已在底部附近时才自动滚动，避免打断浏览历史消息 */
-    private fun scrollToBottom(force: Boolean = false) {
-        if (force) {
-            // 强制滚动（发送消息后）立即执行，不节流
-            SwingUtilities.invokeLater {
-                conversationScrollPane.verticalScrollBar.value = conversationScrollPane.verticalScrollBar.maximum
-            }
-        } else {
-            // 节流：50ms 内多次调用只执行最后一次，减少 EDT 排队
-            scrollThrottle.restart()
+    /** 强制立即滚动到底部，用于 rebuildConversation、首次创建流式组件、showSelectionCard 等场景 */
+    private fun scrollToBottom() {
+        SwingUtilities.invokeLater {
+            conversationScrollPane.verticalScrollBar.value = conversationScrollPane.verticalScrollBar.maximum
         }
     }
 }

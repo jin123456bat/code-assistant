@@ -419,9 +419,9 @@ panel (BorderLayout)
 
 ### 6.3 滚动跟随
 
-- `scrollToBottom(force=false)`：仅在用户已在底部附近（bar.value + visibleAmount >= bar.maximum - 80）时跟随
-- `scrollToBottom(force=true)`：强制滚动到底部（新建组件/发送消息时）
-- 双重 `invokeLater`：确保 revalidate 触发的 layout 完成后才读取 scrollBar.maximum
+- `scrollToBottom()`：无条件立即滚动到底部（rebuildConversation、首次创建流式组件、showSelectionCard）
+- `autoScrollIfAtBottom()`：仅在用户已在底部 80px 内时才滚动（流式更新每 token）
+- 禁止通过 `caretPosition` 驱动滚动：会触发 `scrollRectToVisible` 强制父级 JScrollPane 滚动
 
 ### 6.4 SSE 事件处理流程
 

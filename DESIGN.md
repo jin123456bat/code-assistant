@@ -224,7 +224,11 @@ panel (BorderLayout)
 - `conversationContainer`：直接作为 `JBScrollPane` 视图。`HORIZONTAL_SCROLLBAR_NEVER` 强制视图宽度 = 视口宽，确保 rowPanel 的 X_AXIS glue 有足够空间把气泡推到正确对侧
 - `BoxLayout.Y_AXIS` 无 vertical glue → 内容从顶部开始，多余空间留白在底部，等价 web `flex-direction: column`
 - 气泡对齐：`rowPanel`（X_AXIS）+ `Box.createHorizontalGlue()`，等价 CSS `justify-content`
-- 滚动到末尾：双重 `invokeLater` 确保 revalidate 完成后再读取 scrollBar.maximum
+- **滚动策略**：两种方法分工明确：
+  - `scrollToBottom()`：无条件立即滚动到底部，用于 rebuildConversation、首次创建流式组件、showSelectionCard 等需要确保可见性的场景
+  - `autoScrollIfAtBottom()`：流式更新专用，仅当用户已在底部 80px 内时才滚动到底部，确保流式输出跟随流畅同时不打断用户浏览历史
+  - **禁止通过 `caretPosition` 驱动滚动**：`JTextComponent.caretPosition` 会触发 `scrollRectToVisible` 强制父级 JScrollPane 滚动到光标位置，无视用户滚动意图。流式更新中不设置 caretPosition，统一由上述两个方法管理
+- **代码块内层 JScrollPane**：代码块由外层 JScrollPane 包裹（`HORIZONTAL_SCROLLBAR_AS_NEEDED`），用于长行横向滚动。通过 `setWheelScrollingEnabled(false)` 禁用内层滚轮事件消费，确保鼠标在代码块上时滚轮事件冒泡到 `conversationScrollPane`，对话可正常上下翻阅
 
 ## Components
 
@@ -258,7 +262,7 @@ LLM 通过 `create_plan` 元工具自主创建执行计划，`update_plan_step` 
 - 统一左侧 3px 色条（`toolBar`）+ 淡 `toolBg` 背景
 - `toolCallRow`: 列出每个 toolCall 的 name + args 预览，不可折叠
 - `toolResultRow`: 默认折叠 "结果 · toolName" + "✓ N 行"，展开显示内容（超 2000 chars 截断）
-- `thinkingRow`: 默认折叠，摘要取前 100 chars 双行截断；展开显示全文。流式展示时 `initiallyExpanded=true`，通过 `updateStreamingThinking()` 原地更新 JTextArea 文本（`area.text = content`），避免 remove/add 布局震荡
+- `thinkingRow`: 默认折叠，摘要取前 100 chars 双行截断；展开显示全文。流式展示时 `initiallyExpanded=true`，通过 `updateStreamingThinking()` 原地更新 JTextArea 文本（`area.text = content`），避免 remove/add 布局震荡。**不设置 caretPosition**，滚动由 `autoScrollIfAtBottom()` 统一管理
 - `runningRow`: 盲文 spinner（⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏）+ "执行中 · toolName"
 - `errorCardRow`: 失败时红色左栏 + "✕ toolName 失败" + errorCodeBg 详情
 - **审批选项**（`approvalActions != null` 时启用）：
