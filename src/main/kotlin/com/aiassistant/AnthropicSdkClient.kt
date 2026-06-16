@@ -173,9 +173,10 @@ class AnthropicSdkClient(
                 i++
                 continue
             }
-            // 收集连续同 role 的非 tool_result 消息
+            // 收集连续同 role + 同 groupId 的非 tool_result 消息（跨轮不合并）
             val group = mutableListOf<AnthropicMessage>()
-            while (i < messages.size && messages[i].role == current.role && messages[i].toolCallId == null) {
+            while (i < messages.size && messages[i].role == current.role
+                && messages[i].toolCallId == null && messages[i].groupId == current.groupId) {
                 group.add(messages[i])
                 i++
             }

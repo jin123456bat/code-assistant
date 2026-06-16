@@ -190,9 +190,10 @@ class AgentLoop(
                                         history.add(AnthropicMessage("assistant", "", thinking = thinking, thinkingSignature = thinkingSignature))
                                         thinkingBlockAdded = true
                                     }
-                                    history.add(AnthropicMessage("assistant", textContent, toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments))
+                                    history.add(AnthropicMessage("assistant", textContent))
                                     firstToolCallTextAdded = true
                                 }
+                                history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments))
                                 history.add(AnthropicMessage("user", skillResult, toolCallId = tc.id))
                                 edt { onToolResult?.invoke(tc.name, skillResult) }
                                 continue
@@ -224,12 +225,13 @@ class AgentLoop(
                                         ))
                                         thinkingBlockAdded = true
                                     }
-                                    history.add(AnthropicMessage(
-                                        "assistant", textContent, toolUseId = tc.id,
-                                        toolName = tc.name, toolInput = tc.arguments
-                                    ))
+                                    history.add(AnthropicMessage("assistant", textContent))
                                     firstToolCallTextAdded = true
                                 }
+                                history.add(AnthropicMessage(
+                                    "assistant", "", toolUseId = tc.id,
+                                    toolName = tc.name, toolInput = tc.arguments
+                                ))
                                 history.add(AnthropicMessage(
                                     "user", planResult, toolCallId = tc.id
                                 ))
@@ -267,9 +269,10 @@ class AgentLoop(
                                         ))
                                         thinkingBlockAdded = true
                                     }
-                                    history.add(AnthropicMessage("assistant", textContent, toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments))
+                                    history.add(AnthropicMessage("assistant", textContent))
                                     firstToolCallTextAdded = true
                                 }
+                                history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments))
                                 history.add(AnthropicMessage("user", msg, toolCallId = tc.id))
                                 edt { onToolResult?.invoke(tc.name, msg) }
                                 continue
@@ -334,12 +337,13 @@ class AgentLoop(
                                     ))
                                     thinkingBlockAdded = true
                                 }
-                                history.add(AnthropicMessage(
-                                    "assistant", textContent, toolUseId = tc.id,
-                                    toolName = tc.name, toolInput = tc.arguments
-                                ))
+                                history.add(AnthropicMessage("assistant", textContent))
                                 firstToolCallTextAdded = true
                             }
+                            history.add(AnthropicMessage(
+                                "assistant", "", toolUseId = tc.id,
+                                toolName = tc.name, toolInput = tc.arguments
+                            ))
                             history.add(AnthropicMessage(
                                 "user", resultText, toolCallId = tc.id
                             ))
