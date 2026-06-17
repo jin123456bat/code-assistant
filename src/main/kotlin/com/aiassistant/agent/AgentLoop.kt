@@ -15,6 +15,7 @@ class AgentLoop(
     companion object {
         const val MAX_LOOPS = 100
         const val MAX_FAILURES = 3
+        const val MAX_CONTINUATIONS = 5  // max_tokens 续写上限，防止死循环
 
         /** 安全工具白名单 — 无需用户确认直接执行 */
         val SAFE_TOOLS = setOf(
@@ -117,6 +118,7 @@ class AgentLoop(
 
                 var loopCount = 0
                 var consecutiveFailures = 0
+                var continuationCount = 0
 
                 while (loopCount < MAX_LOOPS && !cancelled) {
                     edt { onThinking?.invoke("思考中...") }
@@ -128,7 +130,15 @@ class AgentLoop(
                         break
                     }
 
-                    val (textContent, thinking, thinkingSignature, toolCalls) = result
+                    val (textContent, thinking, thinkingSignature, toolCalls, stopReason) = result
+                    val truncated = stopReason == "max_tokens"
+                    if (truncated) {
+                        continuationCount++
+                        AppLogger.info("AgentLoop: max_tokens 截断，续写 #$continuationCount（textLen=${textContent.length}, tools=${toolCalls.size}）")
+                        if (continuationCount >= MAX_CONTINUATIONS) {
+                            AppLogger.warn("AgentLoop: 续写次数已达上限 $MAX_CONTINUATIONS，返回已有内容")
+                        }
+                    }
                     edt { onThinking?.invoke(null) }
 
                     if (toolCalls.isNotEmpty()) {
@@ -407,8 +417,33 @@ class AgentLoop(
                             callback("", "")  // 通知调用方执行失败
                             break
                         }
+                        if (truncated && continuationCount >= MAX_CONTINUATIONS) {
+                            AppLogger.warn("AgentLoop: 续写次数已达上限 $MAX_CONTINUATIONS（工具调用后），返回已有内容")
+                            callback(textContent, thinking)
+                            break
+                        }
                     } else {
-                        // 无工具调用：thinking 仅用于 UI 展示，SDK 层已跳过不回传
+                        // 无工具调用
+                        if (truncated) {
+                            // max_tokens 截断：将已生成内容加入 history
+                            if (thinking.isNotBlank()) {
+                                history.add(AnthropicMessage("assistant", textContent,
+                                    thinking = thinking, thinkingSignature = thinkingSignature))
+                            } else {
+                                history.add(AnthropicMessage("assistant", textContent))
+                            }
+                            if (continuationCount >= MAX_CONTINUATIONS) {
+                                // 续写次数达上限，返回已有内容
+                                AppLogger.warn("AgentLoop: 续写次数已达上限 $MAX_CONTINUATIONS，返回已有内容")
+                                callback(textContent, thinking)
+                                break
+                            }
+                            // 继续循环让模型续写
+                            AppLogger.info("AgentLoop: max_tokens 截断续写，textLen=${textContent.length}")
+                            loopCount++
+                            continue
+                        }
+                        // 正常结束：thinking 仅用于 UI 展示，SDK 层已跳过不回传
                         AppLogger.info("AgentLoop 最终回复: $textContent thinkingLen=${thinking.length} sigLen=${thinkingSignature.length}")
                         if (thinking.isNotBlank()) {
                             history.add(AnthropicMessage("assistant", textContent,
@@ -454,7 +489,8 @@ class AgentLoop(
         val textContent: String,
         val thinking: String,
         val thinkingSignature: String,
-        val toolCalls: List<ToolCallResult>
+        val toolCalls: List<ToolCallResult>,
+        val stopReason: String = "end_turn"
     )
 
     private fun callAnthropic(
@@ -476,6 +512,7 @@ class AgentLoop(
         var hasResponse = false
         var errorDetail: String? = null
         var thinkingSignature = ""
+        var capturedStopReason = "end_turn"
 
         // 复用 SDK 客户端，仅在 API Key 变更时重建，避免每轮创建新连接池
         if (sdkClient == null || lastApiKey != apiKey) {
@@ -491,6 +528,7 @@ class AgentLoop(
             messages = history,
             tools = tools,
             thinkingEnabled = thinkingEnabled,
+            maxTokens = com.aiassistant.AnthropicAdapter.MAX_TOKENS,
             callback = object : com.aiassistant.AnthropicSdkClient.Callback {
                 override fun onTextDelta(fullText: String) {
                     hasResponse = true
@@ -506,15 +544,16 @@ class AgentLoop(
                     AppLogger.info("SDK tool_use: id=$id name=$name")
                 }
                 override fun onToolInputDelta(partial: String) {}
-                override fun onStreamComplete(textContent: String, thinking: String, thinkingSig: String, sdkToolCalls: List<com.aiassistant.AnthropicSdkClient.StreamToolCall>, inputTokens: Int) {
+                override fun onStreamComplete(textContent: String, thinking: String, thinkingSig: String, sdkToolCalls: List<com.aiassistant.AnthropicSdkClient.StreamToolCall>, inputTokens: Int, stopReason: String) {
                     ctx.lastInputTokens = inputTokens
                     textBuffer.clear(); textBuffer.append(textContent)
                     thinkingBuffer.clear(); thinkingBuffer.append(thinking)
                     thinkingSignature = thinkingSig
+                    capturedStopReason = stopReason
                     sdkToolCalls.forEach { tc ->
                         toolCalls.add(ToolCallResult(tc.id, tc.name, tc.arguments))
                     }
-                    AppLogger.info("SDK stream complete: textLen=${textContent.length} thinkingLen=${thinking.length} thinkingSigLen=${thinkingSig.length} tools=${toolCalls.size}")
+                    AppLogger.info("SDK stream complete: textLen=${textContent.length} thinkingLen=${thinking.length} thinkingSigLen=${thinkingSig.length} tools=${toolCalls.size} stopReason=$stopReason")
                     synchronized(done) { done.notifyAll() }
                 }
                 override fun onError(error: Throwable) {
@@ -546,10 +585,10 @@ class AgentLoop(
 
         if (resultToolCalls.isEmpty() && finalText.isEmpty() && thinking.isNotEmpty()) {
             AppLogger.info("callAnthropic: thinking 降级为 text（DeepSeek V4 behavior）")
-            return AnthropicResponse(thinking, "", thinkingSignature, resultToolCalls)
+            return AnthropicResponse(thinking, "", thinkingSignature, resultToolCalls, capturedStopReason)
         }
 
-        return AnthropicResponse(finalText, thinking, thinkingSignature, resultToolCalls)
+        return AnthropicResponse(finalText, thinking, thinkingSignature, resultToolCalls, capturedStopReason)
     }
 
     /**
@@ -615,7 +654,7 @@ class AgentLoop(
                     override fun onThinkingDelta(fullThinking: String) {}
                     override fun onToolUseStart(id: String, name: String) {}
                     override fun onToolInputDelta(partial: String) {}
-                    override fun onStreamComplete(textContent: String, thinking: String, thinkingSignature: String, toolCalls: List<com.aiassistant.AnthropicSdkClient.StreamToolCall>, inputTokens: Int) {
+                    override fun onStreamComplete(textContent: String, thinking: String, thinkingSignature: String, toolCalls: List<com.aiassistant.AnthropicSdkClient.StreamToolCall>, inputTokens: Int, stopReason: String) {
                         summaryText = textContent
                         synchronized(done) { done.notifyAll() }
                     }

@@ -199,7 +199,7 @@ private val skillTools = mutableMapOf<String, AgentTool>()  // Skill
 ```json
 {
   "model": "deepseek-v4-flash",
-  "max_tokens": 4096,
+  "max_tokens": 32768,
   "system": "<systemPrompt>",
   "messages": [{ "role": "user/assistant", "content": [...] }],
   "tools": [{ "name": "...", "description": "...", "input_schema": {...} }],

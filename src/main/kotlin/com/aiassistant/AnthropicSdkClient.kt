@@ -23,7 +23,7 @@ class AnthropicSdkClient(
         fun onThinkingDelta(fullThinking: String)
         fun onToolUseStart(id: String, name: String)
         fun onToolInputDelta(partial: String)
-        fun onStreamComplete(textContent: String, thinking: String, thinkingSignature: String, toolCalls: List<StreamToolCall>, inputTokens: Int)
+        fun onStreamComplete(textContent: String, thinking: String, thinkingSignature: String, toolCalls: List<StreamToolCall>, inputTokens: Int, stopReason: String)
         fun onError(error: Throwable)
     }
 
@@ -35,7 +35,7 @@ class AnthropicSdkClient(
         messages: List<AnthropicMessage>,
         tools: List<AnthropicToolDef>,
         thinkingEnabled: Boolean,
-        maxTokens: Long = 4096,
+        maxTokens: Long = 32768,
         callback: Callback
     ) {
         val paramsBuilder = MessageCreateParams.builder()
@@ -136,16 +136,21 @@ class AnthropicSdkClient(
                             toolInputBuffer.clear()
                         }
                     } else if (event.isMessageStop()) {
+                        val message = accumulator.message()
                         val inputTokens = try {
-                            accumulator.message().usage().inputTokens().toInt()
+                            message.usage().inputTokens().toInt()
                         } catch (_: Exception) { 0 }
-                        com.aiassistant.AppLogger.info("SDK响应: text=${textBuffer} inputTokens=$inputTokens")
+                        val stopReason = try {
+                            message.stopReason().map { it.toString() }.orElse("end_turn")
+                        } catch (_: Exception) { "end_turn" }
+                        com.aiassistant.AppLogger.info("SDK响应: text=${textBuffer} inputTokens=$inputTokens stopReason=$stopReason")
                         callback.onStreamComplete(
                             textBuffer.toString(),
                             thinkingBuffer.toString(),
                             currentThinkingSignature ?: "",
                             toolCalls.toList(),
-                            inputTokens
+                            inputTokens,
+                            stopReason
                         )
                         latch.countDown()
                     }

@@ -121,6 +121,7 @@ AgentLoop 是核心调度器，在后台 `Thread` 上运行 `while` 循环：
 - **最大轮次**：`MAX_LOOPS=100`
 - **连续失败上限**：`MAX_FAILURES=3`，达到后中止
 - **流程**：每轮调用模型 → 若返回 `tool_use` 则执行工具并把结果回填到 `history` → 继续下一轮 → 若返回纯文本则结束
+- **max_tokens 续写**：`max_tokens=32768`（DeepSeek V4 Pro 默认输出上限）。当 API 返回 `stop_reason=max_tokens` 时，AgentLoop 自动将已生成内容加入 history 并继续循环让模型续写，最多续写 `MAX_CONTINUATIONS=5` 次，防止死循环
 - **UI 更新**：所有回调（`onMessage`/`onStreaming`/`onToolExecute`...）通过 `invokeLater`/`invokeAndWait` 切回 EDT
 
 ### 工具系统

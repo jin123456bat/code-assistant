@@ -11,7 +11,7 @@ import com.aiassistant.shared.JsonUtils
 object AnthropicAdapter {
     const val DEFAULT_ENDPOINT = "https://api.deepseek.com/anthropic/v1/messages"
     const val DEFAULT_MODEL = "deepseek-v4-pro"
-    const val MAX_TOKENS = 4096
+    const val MAX_TOKENS = 32768L
 }
 
 /** Anthropic 格式消息 */
