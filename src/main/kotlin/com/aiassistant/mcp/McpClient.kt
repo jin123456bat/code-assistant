@@ -196,16 +196,23 @@ class McpClient(private val config: McpServerConfig) {
         } catch (_: Exception) {}
     }
 
-    /** 处理收到的消息：
-     *  - 有 id + method → 服务器请求（如 sampling/createMessage）
-     *  - 有 id 无 method → 响应
-     *  - 无 id → 通知 */
+    /** 从 JSON-RPC 消息中提取字段值（用 Gson 解析，不再手写正则） */
+    private fun parseJsonField(json: String, key: String): Any? {
+        return try {
+            val gson = com.google.gson.Gson()
+            @Suppress("UNCHECKED_CAST")
+            val map = gson.fromJson(json, Map::class.java) as? Map<String, Any>
+            map?.get(key)
+        } catch (_: Exception) { null }
+    }
+
+    /** 处理收到的消息 */
     private fun processMessage(json: String) {
-        val hasId = Regex(""""id"\s*:\s*\d+""").containsMatchIn(json)
-        val method = Regex(""""method"\s*:\s*"([^"]+)"""").find(json)?.groupValues?.get(1)
-        if (hasId && method != null) {
+        val id = parseJsonField(json, "id")
+        val method = parseJsonField(json, "method")?.toString()
+        if (id != null && method != null) {
             handleServerRequest(method, json)
-        } else if (hasId) {
+        } else if (id != null) {
             synchronized(responseLock) {
                 pendingResponseBody = json
                 responseLock.notifyAll()
@@ -217,20 +224,18 @@ class McpClient(private val config: McpServerConfig) {
 
     /** 处理服务器主动发起的请求（对齐 Claude Code：ping、sampling 协议） */
     private fun handleServerRequest(method: String, json: String) {
+        val id = (parseJsonField(json, "id") as? Number)?.toInt() ?: return
         when (method) {
             "ping" -> {
-                val id = Regex(""""id"\s*:\s*(\d+)""").find(json)?.groupValues?.get(1)?.toIntOrNull() ?: return
                 val response = """{"jsonrpc":"2.0","id":$id,"result":{}}"""
                 if (isHttpTransport) sendHttpRequest(response) else sendStdioRequest(response)
             }
             "sampling/createMessage" -> {
                 val handler = samplingHandler
                 if (handler != null) {
-                    val params = try {
-                        Regex(""""params"\s*:\s*(\{.*})""").find(json)?.groupValues?.get(1)
-                    } catch (_: Exception) { null }
-                    val result = handler.handleCreateMessage(params ?: "{}")
-                    val id = Regex(""""id"\s*:\s*(\d+)""").find(json)?.groupValues?.get(1)?.toIntOrNull() ?: return
+                    val params = parseJsonField(json, "params")
+                    val paramsJson = if (params != null) com.google.gson.Gson().toJson(params) else "{}"
+                    val result = handler.handleCreateMessage(paramsJson)
                     val response = if (result != null) {
                         """{"jsonrpc":"2.0","id":$id,"result":{"role":"assistant","content":{"type":"text","text":${com.google.gson.Gson().toJson(result)}}}}"""
                     } else {
@@ -244,17 +249,18 @@ class McpClient(private val config: McpServerConfig) {
 
     /** 分发服务器推送通知（对齐 Claude Code：含 logging 通知） */
     private fun dispatchNotification(json: String) {
-        val method = try {
-            Regex(""""method"\s*:\s*"([^"]+)"""").find(json)?.groupValues?.get(1)
-        } catch (_: Exception) { null } ?: return
+        val method = parseJsonField(json, "method")?.toString() ?: return
         when (method) {
             "notifications/tools/list_changed" -> notificationHandler?.onToolsChanged()
             "notifications/prompts/list_changed" -> notificationHandler?.onPromptsChanged()
             "notifications/resources/list_changed" -> notificationHandler?.onResourcesChanged()
             "notifications/logging/message" -> {
                 try {
-                    val level = Regex(""""level"\s*:\s*"([^"]+)"""").find(json)?.groupValues?.get(1) ?: "info"
-                    val msg = Regex(""""message"\s*:\s*"([^"]*)"""").find(json)?.groupValues?.get(1) ?: ""
+                    val gson = com.google.gson.Gson()
+                    @Suppress("UNCHECKED_CAST")
+                    val params = (gson.fromJson(json, Map::class.java) as? Map<String, Any>)?.get("params") as? Map<String, Any>
+                    val level = params?.get("level")?.toString() ?: "info"
+                    val msg = params?.get("message")?.toString() ?: ""
                     com.aiassistant.AppLogger.info("MCP[${config.name}] $level: $msg")
                 } catch (_: Exception) {}
             }

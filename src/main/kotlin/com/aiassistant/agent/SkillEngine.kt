@@ -54,28 +54,28 @@ object SkillEngine {
         }
     }
 
-    /** 解析 SKILL.md 的 YAML front matter 和正文内容 */
-    private fun parseSkill(name: String, content: String): SkillDef? {
-        // 提取 YAML front matter（--- 包裹的部分），限制 2000 字符防止正则回溯溢出
-        val head = content.take(2000)
-        val nameMatch = Regex("""^name:\s*(.+)$""", RegexOption.MULTILINE).find(head)
-        val descMatch = Regex("""^description:\s*(.+)$""", RegexOption.MULTILINE).find(head)
-        val modelMatch = Regex("""^model:\s*(.+)$""", RegexOption.MULTILINE).find(head)
-        val skillName = nameMatch?.groupValues?.get(1)?.trim() ?: name.replace('-', ' ')
-        val description = descMatch?.groupValues?.get(1)?.trim() ?: "Skill: $skillName"
-        val preferredModel = modelMatch?.groupValues?.get(1)?.trim()
-        // 提取 YAML front matter 之后的正文（跳过元数据字段，LLM 不需要 version/preamble-tier 等）
-        val bodyContent = extractBody(content)
-        return SkillDef(skillName, description, bodyContent, preferredModel)
-    }
+    // YAML frontmatter 分隔符
+    private val FRONTMATTER = Regex("^---\\s*\\n(.*?)\\n---\\s*\\n(.*)", setOf(RegexOption.DOT_MATCHES_ALL))
 
-    /** 提取 SKILL.md 中 YAML front matter（---...---）之后的内容，过滤元数据噪声 */
-    private fun extractBody(content: String): String {
-        val match = Regex("""---\s*\n.*?\n---\s*\n""", RegexOption.DOT_MATCHES_ALL).find(content)
-        return if (match != null) {
-            content.substring(match.range.last + 1).trim()
+    /** 解析 SKILL.md 的 YAML front matter 和正文内容（使用 SnakeYAML） */
+    private fun parseSkill(name: String, content: String): SkillDef? {
+        val match = FRONTMATTER.find(content)
+        val (frontmatter, body) = if (match != null) {
+            match.groupValues[1] to match.groupValues[2].trim()
         } else {
-            content  // 没有 YAML front matter，全文作为 prompt
+            "" to content
         }
+
+        val yaml = org.yaml.snakeyaml.Yaml()
+        @Suppress("UNCHECKED_CAST")
+        val fields = if (frontmatter.isNotBlank()) {
+            try { yaml.load(frontmatter) as? Map<String, Any> ?: emptyMap() }
+            catch (_: Exception) { emptyMap() }
+        } else emptyMap()
+
+        val skillName = fields["name"]?.toString()?.trim() ?: name.replace('-', ' ')
+        val description = fields["description"]?.toString()?.trim() ?: "Skill: $skillName"
+        val preferredModel = fields["model"]?.toString()?.trim()
+        return SkillDef(skillName, description, body, preferredModel)
     }
 }

@@ -44,62 +44,42 @@ data class McpServerConfig(
         }
 
         /**
-         * 从 JSON 字符串解析多个 MCP 服务器配置
+         * 从 JSON 字符串解析多个 MCP 服务器配置（使用 Gson）
          */
         fun parseConfigs(json: String): List<McpServerConfig> {
             val configs = mutableListOf<McpServerConfig>()
+            return try {
+                val gson = com.google.gson.Gson()
+                @Suppress("UNCHECKED_CAST")
+                val root = gson.fromJson(json, Map::class.java) as? Map<String, Any> ?: return configs
+                @Suppress("UNCHECKED_CAST")
+                val servers = root["mcpServers"] as? Map<String, Any> ?: return configs
 
-            // 查找 mcpServers 对象中的每个条目
-            val serversPattern = Regex(""""mcpServers"\s*:\s*\{""")
-            val serversStart = serversPattern.find(json)?.range?.last ?: return configs
+                for ((name, serverObj) in servers) {
+                    @Suppress("UNCHECKED_CAST")
+                    val obj = serverObj as? Map<String, Any> ?: continue
+                    val command = obj["command"]?.toString() ?: ""
+                    val url = obj["url"]?.toString() ?: ""
+                    val type = obj["type"]?.toString() ?: ""
+                    val transport = when {
+                        type.equals("http", ignoreCase = true) -> "http"
+                        url.isNotBlank() -> "http"
+                        else -> "stdio"
+                    }
+                    // args 数组
+                    val args = (obj["args"] as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
+                    // env 对象
+                    @Suppress("UNCHECKED_CAST")
+                    val envMap = obj["env"] as? Map<String, Any> ?: emptyMap()
+                    val env = envMap.mapValues { it.value.toString() }
 
-            // 简化解析：提取每个 "name": { ... } 对象
-            val entryPattern = Regex(""""([\w-]+)"\s*:\s*\{([^}]*(?:\{[^}]*\}[^}]*)*)\}""")
-            for (match in entryPattern.findAll(json.substring(serversStart))) {
-                val name = match.groupValues[1]
-                val body = match.groupValues[2]
-                val config = parseServerBody(name, body)
-                configs.add(config)
+                    configs.add(McpServerConfig(name = name, transport = transport,
+                        command = command, args = args, env = env, url = url))
+                }
+                configs
+            } catch (_: Exception) {
+                configs
             }
-            return configs
-        }
-
-        private fun parseServerBody(name: String, body: String): McpServerConfig {
-            val command = extractJsonValue(body, "command")
-            val url = extractJsonValue(body, "url")
-            val type = extractJsonValue(body, "type")  // Claude 格式: "stdio" | "http"
-            val transport = when {
-                type.equals("http", ignoreCase = true) -> "http"
-                url.isNotBlank() -> "http"  // fallback: 有 url 就是 http
-                else -> "stdio"
-            }
-
-            // 解析 args 数组
-            val args = mutableListOf<String>()
-            val argsPattern = Regex(""""args"\s*:\s*\[([^\]]*)\]""")
-            val argsMatch = argsPattern.find(body)
-            if (argsMatch != null) {
-                val argsStr = argsMatch.groupValues[1]
-                val argPattern = Regex(""""((?:[^"\\]|\\.)*)"""")
-                argPattern.findAll(argsStr).forEach { args.add(it.groupValues[1]) }
-            }
-
-            // 解析 env 对象
-            val env = mutableMapOf<String, String>()
-            val envPattern = Regex(""""env"\s*:\s*\{([^}]*)\}""")
-            val envMatch = envPattern.find(body)
-            if (envMatch != null) {
-                val envStr = envMatch.groupValues[1]
-                val kvPattern = Regex(""""(\w+)"\s*:\s*"((?:[^"\\]|\\.)*)"""")
-                kvPattern.findAll(envStr).forEach { env[it.groupValues[1]] = it.groupValues[2] }
-            }
-
-            return McpServerConfig(name = name, transport = transport, command = command, args = args, env = env, url = url)
-        }
-
-        private fun extractJsonValue(json: String, key: String): String {
-            val pattern = Regex(""""$key"\s*:\s*"((?:[^"\\]|\\.)*)"""")
-            return pattern.find(json)?.groupValues?.getOrNull(1) ?: ""
         }
 
         /**
