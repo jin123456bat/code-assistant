@@ -237,12 +237,15 @@ panel (BorderLayout)
 ### 工具执行行 — streamingToolRow
 
 所有工具执行时统一显示可折叠运行行，**默认折叠**：
-- **折叠态**：`▸ ⠋ 执行中 · toolName`（spinner + 工具名），task 用紫色左栏，其他用蓝色
-- **展开态**：`▾ ⠋ 执行中 · toolName` + 结构化内容区：
-  - 纯文本：`JTextArea`
-  - 子代理工具调用：**组件化行**（`subAgentToolRunningRow` / `subAgentToolResultRow`），紫色左栏（`agentBar`），默认折叠可展开，与主 Agent 蓝色工具行区分
+- **折叠态**：`▸ ⠋ 执行中 · toolName`，task 用紫色左栏，其他用蓝色
+- **展开态**：`▾ ⠋ 执行中 · toolName` + 结构化内容区（纯文本增量更新 + 子代理工具行增量添加）
 - **点击标题行**切换折叠/展开
-- **执行完成**：清理运行行，`rebuildConversation` 渲染最终 `toolResultRow`
+- **执行完成**：`add-before-remove` 无缝替换为 `toolResultRow`，无闪烁无位置跳动
+- 子代理内部工具行增量渲染，不重建已有组件
+
+### 主 Agent 工具行
+
+- 版本变更时 `add(new, index)` 后 `remove(old)`，同位置替换无闪烁
 
 ### 子代理工具行 — subAgentToolRow
 
