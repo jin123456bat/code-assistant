@@ -341,7 +341,7 @@ class ToolRowFactory(
     /** 流式工具行引用，供外部原地更新 */
     data class StreamingToolRow(
         val outerRow: JPanel,
-        val contentArea: JTextArea,
+        val contentArea: JPanel,
         val collapsed: java.util.concurrent.atomic.AtomicBoolean
     )
 
@@ -394,14 +394,11 @@ class ToolRowFactory(
             add(Box.createHorizontalGlue())
         }
 
-        val contentArea = JTextArea().apply {
-            font = ChatTheme.metaFont
-            foreground = ChatTheme.textSecondary
+        val contentArea = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            isOpaque = false
             background = bgColor
-            isEditable = false
-            lineWrap = true
-            wrapStyleWord = true
-            border = JBUI.Borders.empty(4, 16, 6, 10)
+            border = JBUI.Borders.empty(4, 0, 6, 0)
         }
 
         val leftBar = JPanel(BorderLayout()).apply {
@@ -431,11 +428,109 @@ class ToolRowFactory(
     }
 
     /** 切换流式工具行的折叠状态 */
-    fun applyStreamingCollapsed(bar: JPanel, collapsed: Boolean, chevron: JLabel, contentArea: JTextArea) {
+    fun applyStreamingCollapsed(bar: JPanel, collapsed: Boolean, chevron: JLabel, contentArea: JComponent) {
         chevron.text = if (collapsed) "▸" else "▾"
         contentArea.isVisible = !collapsed
         bar.revalidate()
         bar.repaint()
+    }
+
+    /** 子代理工具执行中行：agentBar 色 spinner + 工具名，默认折叠 */
+    fun subAgentToolRunningRow(toolName: String): JPanel {
+        val collapsed = java.util.concurrent.atomic.AtomicBoolean(true)
+        val chevron = JLabel("▸").apply {
+            font = ChatTheme.metaFont
+            foreground = ChatTheme.agentBar
+            border = JBUI.Borders.empty(0, 12, 0, 4)
+        }
+        val spinner = BrailleSpinnerLabel(ChatTheme.agentBar)
+        val label = JLabel(toolName).apply {
+            font = toolFont
+            foreground = ChatTheme.textSecondary
+        }
+        val header = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.X_AXIS)
+            isOpaque = false
+            add(chevron)
+            add(spinner)
+            add(hGap(4))
+            add(label)
+            add(Box.createHorizontalGlue())
+        }
+        val leftBar = JPanel(BorderLayout()).apply {
+            isOpaque = false
+            background = ChatTheme.agentBg
+            border = LeftBarBorder(ChatTheme.agentBar, 2, 4)
+            add(header, BorderLayout.NORTH)
+            addMouseListener(object : java.awt.event.MouseAdapter() {
+                override fun mouseClicked(e: java.awt.event.MouseEvent) {
+                    collapsed.set(!collapsed.get())
+                }
+            })
+            cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
+        }
+        val outer = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.X_AXIS)
+            isOpaque = false
+            add(leftBar)
+            add(Box.createHorizontalGlue())
+        }
+        return outer
+    }
+
+    /** 子代理工具结果行：agentBar 色左栏，默认折叠，可展开查看结果 */
+    fun subAgentToolResultRow(toolName: String, content: String): JPanel {
+        val collapsed = java.util.concurrent.atomic.AtomicBoolean(true)
+        val chevron = JLabel("▸").apply {
+            font = ChatTheme.metaFont
+            foreground = ChatTheme.agentBar
+            border = JBUI.Borders.empty(0, 12, 0, 4)
+        }
+        val label = JLabel("结果 · $toolName").apply {
+            font = toolFont
+            foreground = ChatTheme.toolFg
+        }
+        val header = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.X_AXIS)
+            isOpaque = false
+            add(chevron)
+            add(label)
+            add(Box.createHorizontalGlue())
+        }
+        val textArea = JTextArea(content.take(500)).apply {
+            font = ChatTheme.metaFont
+            foreground = ChatTheme.textSecondary
+            background = ChatTheme.agentBg
+            isEditable = false
+            lineWrap = true
+            wrapStyleWord = true
+            border = JBUI.Borders.empty(2, 16, 4, 8)
+            isVisible = false
+        }
+        val leftBar = JPanel(BorderLayout()).apply {
+            isOpaque = false
+            background = ChatTheme.agentBg
+            border = LeftBarBorder(ChatTheme.agentBar, 2, 4)
+            add(header, BorderLayout.NORTH)
+            add(textArea, BorderLayout.CENTER)
+            addMouseListener(object : java.awt.event.MouseAdapter() {
+                override fun mouseClicked(e: java.awt.event.MouseEvent) {
+                    collapsed.set(!collapsed.get())
+                    chevron.text = if (collapsed.get()) "▸" else "▾"
+                    textArea.isVisible = !collapsed.get()
+                    revalidate()
+                    repaint()
+                }
+            })
+            cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
+        }
+        val outer = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.X_AXIS)
+            isOpaque = false
+            add(leftBar)
+            add(Box.createHorizontalGlue())
+        }
+        return outer
     }
 
     /**

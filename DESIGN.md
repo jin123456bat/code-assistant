@@ -238,10 +238,18 @@ panel (BorderLayout)
 
 所有工具执行时统一显示可折叠运行行，**默认折叠**：
 - **折叠态**：`▸ ⠋ 执行中 · toolName`（spinner + 工具名），task 用紫色左栏，其他用蓝色
-- **展开态**：`▾ ⠋ 执行中 · toolName` + 内容区。有实时输出的工具（task、execute_command）内容逐行填入，无输出的仅显示 spinner
+- **展开态**：`▾ ⠋ 执行中 · toolName` + 结构化内容区：
+  - 纯文本：`JTextArea`
+  - 子代理工具调用：**组件化行**（`subAgentToolRunningRow` / `subAgentToolResultRow`），紫色左栏（`agentBar`），默认折叠可展开，与主 Agent 蓝色工具行区分
 - **点击标题行**切换折叠/展开
 - **执行完成**：清理运行行，`rebuildConversation` 渲染最终 `toolResultRow`
-- **错误/拒绝**：`errorCardRow` 红色左栏
+
+### 子代理工具行 — subAgentToolRow
+
+子代理内部工具调用以组件化行渲染在流式工具行的内容区中：
+- **运行中**：`▸ ⠋ toolName`（`agentBar` 色 spinner，默认折叠）
+- **结果**：`▸ 结果 · toolName`（`agentBar` 左栏，默认折叠，可展开查看结果）
+- 与主 Agent 工具行（蓝色 `toolBar`）通过紫色 `agentBar` 区分
 
 ### SubAgentCard — 子代理结果卡片
 
