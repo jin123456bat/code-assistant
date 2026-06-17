@@ -56,12 +56,20 @@ class TaskTool : AgentTool {
             childLoop.switchModel(overrideModel)
         }
 
+        // Worktree 隔离：为子 Agent 创建独立 git worktree
+        val workTreePath: String? = if (agentType.isolation == "worktree") {
+            createWorktree(project.basePath)
+        } else null
+        if (workTreePath != null) {
+            childLoop.workTreePath = workTreePath
+        }
+
         // 子 Agent 自动批准工具（免审批），非 autoApprove 时拒绝非 SAFE_TOOLS
         childLoop.onConfirmTool = { toolName, _, latch, choice ->
             if (agentType.autoApprove) {
                 choice.set(true)
             } else {
-                choice.set(false)  // 拒绝非安全工具
+                choice.set(false)
             }
             latch.countDown()
         }
@@ -79,7 +87,6 @@ class TaskTool : AgentTool {
             onProgress?.invoke(line)
         }
         childLoop.onStreaming = { text ->
-            // 子 Agent 流式输出实时推送
             onProgress?.invoke(text)
         }
 
@@ -87,27 +94,43 @@ class TaskTool : AgentTool {
         val thinkingRef = AtomicReference<String>()
         val latch = CountDownLatch(1)
 
+        // Fork：从 params 读取父对话上下文（AgentLoop 注入的 JSON）
+        val forkCtx: List<com.aiassistant.AnthropicMessage>? = if (agentType.fork) {
+            try {
+                val json = params["_forkHistory"]
+                if (json != null) {
+                    com.google.gson.Gson().fromJson(json, Array<com.aiassistant.AnthropicMessage>::class.java).toList()
+                } else null
+            } catch (_: Exception) { null }
+        } else null
+
         return try {
             if (background) {
-                // 后台模式：异步执行，立即返回
+                val subId = "sub-${System.currentTimeMillis()}"
+                com.aiassistant.agent.SubAgentRegistry.register(subId, description)
                 CompletableFuture.runAsync {
                     try {
-                        childLoop.run(prompt, apiKey) { finalText, thinking ->
+                        childLoop.run(prompt, apiKey, forkHistory = forkCtx) { finalText, thinking ->
                             resultRef.set(finalText)
                             thinkingRef.set(thinking)
-                            latch.countDown()
                         }
                         latch.await(agentType.timeoutMinutes, TimeUnit.MINUTES)
-                    } catch (_: InterruptedException) {
-                        Thread.currentThread().interrupt()
+                        val result = resultRef.get()?.takeIf { it.isNotBlank() } ?: ""
+                        if (result.isNotBlank()) {
+                            com.aiassistant.agent.SubAgentRegistry.complete(subId, result)
+                        } else {
+                            com.aiassistant.agent.SubAgentRegistry.fail(subId, "未返回结果")
+                        }
+                    } catch (e: Exception) {
+                        com.aiassistant.agent.SubAgentRegistry.fail(subId, e.message ?: "未知错误")
                     } finally {
                         childLoop.stop()
+                        removeWorktree(workTreePath)
                     }
                 }
-                ToolResult.ok("子代理已启动（后台运行）: $description\n\n类型: ${agentType.name} | 超时: ${agentType.timeoutMinutes}min")
+                ToolResult.ok("子代理已启动: $description\n\nID: $subId | 类型: ${agentType.name} | 超时: ${agentType.timeoutMinutes}min")
             } else {
-                // 前台模式：阻塞等待结果
-                childLoop.run(prompt, apiKey) { finalText, thinking ->
+                childLoop.run(prompt, apiKey, forkHistory = forkCtx) { finalText, thinking ->
                     resultRef.set(finalText)
                     thinkingRef.set(thinking)
                     latch.countDown()
@@ -138,7 +161,48 @@ class TaskTool : AgentTool {
         } finally {
             if (!background) {
                 childLoop.stop()
+                removeWorktree(workTreePath)
             }
+        }
+    }
+
+    // ---- Worktree 隔离辅助 ----
+
+    /** 创建 git worktree，返回路径；失败返回 null（降级为 in-process） */
+    private fun createWorktree(basePath: String?): String? {
+        if (basePath == null) return null
+        val worktreeDir = java.io.File(basePath, ".claude/worktrees/subagent-${System.currentTimeMillis()}")
+        return try {
+            val process = ProcessBuilder("git", "-C", basePath, "worktree", "add", worktreeDir.absolutePath)
+                .redirectErrorStream(true).start()
+            val output = process.inputStream.bufferedReader().readText()
+            process.waitFor(30, java.util.concurrent.TimeUnit.SECONDS)
+            if (process.exitValue() == 0) {
+                com.aiassistant.AppLogger.info("Worktree 创建成功: ${worktreeDir.absolutePath}")
+                worktreeDir.absolutePath
+            } else {
+                com.aiassistant.AppLogger.warn("Worktree 创建失败: $output")
+                null
+            }
+        } catch (e: Exception) {
+            com.aiassistant.AppLogger.warn("Worktree 创建异常: ${e.message}")
+            null
+        }
+    }
+
+    /** 删除 git worktree */
+    private fun removeWorktree(path: String?) {
+        if (path == null) return
+        try {
+            // 找就近的 base path（worktree 的父目录）
+            val worktreeDir = java.io.File(path)
+            val basePath = worktreeDir.parentFile?.parentFile?.absolutePath ?: return
+            val process = ProcessBuilder("git", "-C", basePath, "worktree", "remove", path, "--force")
+                .redirectErrorStream(true).start()
+            process.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)
+            com.aiassistant.AppLogger.info("Worktree 已删除: $path")
+        } catch (e: Exception) {
+            com.aiassistant.AppLogger.warn("Worktree 删除失败: ${e.message}")
         }
     }
 }

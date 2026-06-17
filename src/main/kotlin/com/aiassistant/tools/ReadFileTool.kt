@@ -36,7 +36,7 @@ class ReadFileTool : AgentTool {
             return ToolResult.ok(content)
         }
 
-        val basePath = project.basePath ?: return ToolResult.err("项目路径不可用")
+        val basePath = params["_worktree"] ?: project.basePath ?: return ToolResult.err("项目路径不可用")
         val file = if (File(path).isAbsolute) File(path) else File(basePath, path)
 
         if (!file.exists()) return ToolResult.err("文件不存在: ${file.absolutePath}")

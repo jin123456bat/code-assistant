@@ -21,7 +21,7 @@ class ExecuteCommandTool : AgentTool {
 
     override fun execute(params: Map<String, String>, project: Project, onProgress: ((String) -> Unit)?): ToolResult {
         val command = params["command"]?.takeIf { it.isNotBlank() } ?: return ToolResult.err("command 不能为空")
-        val basePath = project.basePath ?: return ToolResult.err("项目路径不可用")
+        val basePath = params["_worktree"] ?: project.basePath ?: return ToolResult.err("项目路径不可用")
         val workingDir = params["working_dir"]?.let { wd ->
             if (File(wd).isAbsolute) File(wd) else File(basePath, wd)
         } ?: File(basePath)

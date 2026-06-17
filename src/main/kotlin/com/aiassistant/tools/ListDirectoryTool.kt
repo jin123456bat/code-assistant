@@ -19,7 +19,7 @@ class ListDirectoryTool : AgentTool {
     )
 
     override fun execute(params: Map<String, String>, project: Project, onProgress: ((String) -> Unit)?): ToolResult {
-        val basePath = project.basePath ?: return ToolResult.err("项目路径不可用")
+        val basePath = params["_worktree"] ?: project.basePath ?: return ToolResult.err("项目路径不可用")
         val relativePath = params["path"] ?: ""
         val maxDepth = params["max_depth"]?.toIntOrNull() ?: 3
         // 支持绝对路径（LLM 可能传完整路径）

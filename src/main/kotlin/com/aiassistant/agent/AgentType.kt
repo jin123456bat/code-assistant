@@ -12,7 +12,11 @@ data class AgentType(
     val defaultModel: String? = null,
     val maxLoops: Int = AgentLoop.MAX_LOOPS,
     val maxFailures: Int = AgentLoop.MAX_FAILURES,
-    val timeoutMinutes: Long = 5
+    val timeoutMinutes: Long = 5,
+    // 隔离模式：worktree = 独立 git worktree，null = in-process（共享工作区）
+    val isolation: String? = null,
+    // Fork 上下文继承：子 Agent 继承父对话 history（复朋 prompt cache）
+    val fork: Boolean = false
 )
 
 // 预置 Agent 类型，对齐 Claude Code sub-agent 类型

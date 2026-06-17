@@ -103,7 +103,14 @@ class AgentLoop(
         ctx.systemPrompt = buildSystemPrompt()
     }
 
-    fun run(userMessage: String, apiKey: String, images: List<ImageData>? = null, activatedSkill: String? = null, callback: (String, String) -> Unit) {
+    // Fork 上下文继承：子 Agent 继承父对话历史（复用 prompt cache 省 token）
+    private var forkHistory: List<AnthropicMessage>? = null
+    // Worktree 隔离：子 Agent 的工作目录（git worktree path）
+    var workTreePath: String? = null
+
+    fun run(userMessage: String, apiKey: String, images: List<ImageData>? = null, activatedSkill: String? = null,
+            forkHistory: List<AnthropicMessage>? = null, callback: (String, String) -> Unit) {
+        this.forkHistory = forkHistory
         cancelled = false
         onStateChange?.invoke(true)
         // 恢复或重建 system prompt：skill 激活时排除该 skill，普通消息时恢复完整 skill 列表
@@ -128,13 +135,51 @@ class AgentLoop(
                 val toolNames = ctx.toolRegistry.getAll().joinToString(", ") { it.name }
                 edt { onMessage?.invoke(AgentMessage("system", "$toolCount 个工具已就绪: $toolNames")) }
 
+                // Fork：注入父对话上下文（复用 prompt cache 省 token）
+                forkHistory?.let { history.addAll(0, it) }
                 history.add(AnthropicMessage("user", userMessage, images = images))
+
+                // 检查并行子代理结果，注入到对话（主 Agent 下一轮 API 调用可感知）
+                val subResults = SubAgentRegistry.drainCompleted()
+                if (subResults.isNotEmpty()) {
+                    AppLogger.info("AgentLoop: 注入 ${subResults.size} 个并行子代理结果")
+                }
+                for (entry in subResults) {
+                    val resultText = when (entry.status) {
+                        SubAgentRegistry.Status.DONE ->
+                            "子代理 ${entry.id}（${entry.description}）已完成：\n${entry.result}"
+                        SubAgentRegistry.Status.FAILED ->
+                            "子代理 ${entry.id}（${entry.description}）失败：${entry.error}"
+                        else -> null
+                    }
+                    if (resultText != null) {
+                        history.add(AnthropicMessage("user", resultText))
+                        edt { onMessage?.invoke(AgentMessage("sub_agent", resultText)) }
+                    }
+                }
 
                 var loopCount = 0
                 var consecutiveFailures = 0
                 var continuationCount = 0
 
                 while (loopCount < MAX_LOOPS && !cancelled) {
+                    // 每轮检查并行子代理结果，注入到 history
+                    val newSubResults = SubAgentRegistry.drainCompleted()
+                    for (entry in newSubResults) {
+                        val text = when (entry.status) {
+                            SubAgentRegistry.Status.DONE ->
+                                "子代理 ${entry.id}（${entry.description}）已完成：\n${entry.result}"
+                            SubAgentRegistry.Status.FAILED ->
+                                "子代理 ${entry.id}（${entry.description}）失败：${entry.error}"
+                            else -> null
+                        }
+                        if (text != null) {
+                            history.add(AnthropicMessage("user", text))
+                            edt { onMessage?.invoke(AgentMessage("sub_agent", text)) }
+                            AppLogger.info("AgentLoop: 注入子代理结果 ${entry.id} status=${entry.status}")
+                        }
+                    }
+
                     edt { onThinking?.invoke("思考中...") }
 
                     val result = callAnthropic(apiKey, history)
@@ -345,7 +390,13 @@ class AgentLoop(
                                 continue
                             }
 
-                            val params = parseParams(tc.arguments)
+                            val params = parseParams(tc.arguments).toMutableMap()
+                            // Worktree 隔离：子 Agent 的工具操作指向独立 worktree
+                            workTreePath?.let { params["_worktree"] = it }
+                            // Fork：注入父对话历史（JSON 序列化）供 TaskTool 使用
+                            if (tc.name == "task") {
+                                params["_forkHistory"] = com.google.gson.Gson().toJson(history.toList())
+                            }
                             // read_file 特殊处理：仅在项目目录内自动放行，跨目录需用户确认
                             val readFileOutside = tc.name == "read_file" && params["path"] != null &&
                                 !com.aiassistant.shared.PathUtils.isInsideProject(params["path"]!!, project.basePath)

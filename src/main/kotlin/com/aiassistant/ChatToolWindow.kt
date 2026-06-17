@@ -1365,6 +1365,7 @@ class ChatToolWindow(private val project: Project) {
         return when (message.role) {
             "thinking" -> createCollapsibleThinkingBubble(message.content)
             "tool" -> createToolResultBubble(message)    // 工具调用+结果，可折叠
+            "sub_agent" -> createSubAgentStatusBubble(message)
             "user" -> createUserBubble(message)
             "assistant" -> createAssistantBubble(message)
             else -> createAssistantBubble(message)
@@ -1396,6 +1397,41 @@ class ChatToolWindow(private val project: Project) {
         val (row, bubble, content) = bubbleFactory.userBubbleWithFooter(message, footer)
         bubbleSizeConstraints.add(Pair(bubble, content))
         return row
+    }
+
+    /** 并行子代理状态消息 — agentBar 左栏，根据内容前缀显示 ✓ 或 ✕ */
+    private fun createSubAgentStatusBubble(message: AgentMessage): JPanel {
+        val content = message.content
+        val isError = content.contains("失败")
+        val outer = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.X_AXIS)
+            isOpaque = false
+        }
+        val leftBar = JPanel(BorderLayout()).apply {
+            isOpaque = false
+            background = ChatTheme.agentBg
+            border = javax.swing.border.CompoundBorder(
+                javax.swing.border.MatteBorder(0, 3, 0, 0, if (isError) ChatTheme.error else ChatTheme.doneCheck),
+                javax.swing.border.EmptyBorder(0, 7, 0, 0)
+            )
+        }
+        val icon = JLabel(if (isError) "✕" else "✓").apply {
+            font = ChatTheme.metaFont
+            foreground = if (isError) ChatTheme.error else ChatTheme.doneCheck
+            border = JBUI.Borders.empty(4, 10, 4, 4)
+        }
+        val text = JTextArea(content.replace('\n', ' ').take(120)).apply {
+            font = ChatTheme.metaFont
+            foreground = ChatTheme.textSecondary
+            background = ChatTheme.agentBg
+            isEditable = false; lineWrap = true; wrapStyleWord = true
+            border = JBUI.Borders.empty(4, 4, 4, 6)
+        }
+        leftBar.add(icon, BorderLayout.WEST)
+        leftBar.add(text, BorderLayout.CENTER)
+        outer.add(leftBar)
+        outer.add(Box.createHorizontalGlue())
+        return outer
     }
 
     private fun createAssistantBubble(message: AgentMessage): JPanel {
