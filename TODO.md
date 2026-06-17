@@ -6,9 +6,6 @@
 
 ## P0 — 核心能力
 
-- [ ] **Sub-Agent 子代理系统**
-  支持创建子代理执行独立任务，前后台运行，可自定义工具集、模型、权限、隔离模式
-
 - [ ] **Task 任务跟踪**
   `TaskCreate` / `TaskList` / `TaskGet` / `TaskUpdate`，Agent 自动分解任务并跟踪进度
 

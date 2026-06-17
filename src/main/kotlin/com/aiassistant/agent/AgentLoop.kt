@@ -144,8 +144,8 @@ class AgentLoop(
                 if (forkHistory != null && forkHistory.isNotEmpty()) {
                     val lastRole = forkHistory.last().role
                     if (lastRole == "user") {
-                        // 末尾是 user → 插入占位 assistant 保持交替
-                        history.add(AnthropicMessage("assistant", ""))
+                        // 末尾是 user → 插入非空占位 assistant 保持交替（空 content 会被 SDK 丢弃）
+                        history.add(AnthropicMessage("assistant", "."))
                     }
                     history.addAll(0, forkHistory)
                 }

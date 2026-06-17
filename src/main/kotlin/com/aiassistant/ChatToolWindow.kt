@@ -106,8 +106,10 @@ class ChatToolWindow(private val project: Project) {
             val instance = instances[project]
             if (instance != null) {
                 ApplicationManager.getApplication().invokeLater {
-                    instance.insertAtCursor(text)
-                    instance.activateToolWindow()
+                    if (instances[project] != null) {  // 防止 dispose 后执行
+                        instance.insertAtCursor(text)
+                        instance.activateToolWindow()
+                    }
                 }
             } else {
                 pendingTexts[project] = text

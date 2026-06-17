@@ -465,6 +465,7 @@ class ToolRowFactory(
             addMouseListener(object : java.awt.event.MouseAdapter() {
                 override fun mouseClicked(e: java.awt.event.MouseEvent) {
                     collapsed.set(!collapsed.get())
+                    chevron.text = if (collapsed.get()) "▸" else "▾"
                 }
             })
             cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
@@ -497,7 +498,7 @@ class ToolRowFactory(
             add(label)
             add(Box.createHorizontalGlue())
         }
-        val textArea = JTextArea(content.take(500)).apply {
+        val textArea = JTextArea(content).apply {
             font = ChatTheme.metaFont
             foreground = ChatTheme.textSecondary
             background = ChatTheme.agentBg
