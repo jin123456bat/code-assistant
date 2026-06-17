@@ -20,6 +20,13 @@ class AppSettingsService {
         private const val MODEL_KEY = "$SERVICE_NAME.MODEL"
         private const val THINKING_KEY = "$SERVICE_NAME.THINKING"
         private const val COMPACT_RATIO_KEY = "$SERVICE_NAME.COMPACT_RATIO"
+        private const val COMPLETION_ENABLED_KEY = "$SERVICE_NAME.COMPLETION.ENABLED"
+        private const val COMPLETION_MAX_TOKENS_KEY = "$SERVICE_NAME.COMPLETION.MAX_TOKENS"
+        private const val COMPLETION_DEBOUNCE_MS_KEY = "$SERVICE_NAME.COMPLETION.DEBOUNCE_MS"
+        private const val COMPLETION_NUM_CANDIDATES_KEY = "$SERVICE_NAME.COMPLETION.NUM_CANDIDATES"
+        private const val COMPLETION_MANUAL_SHORTCUT_KEY = "$SERVICE_NAME.COMPLETION.MANUAL_SHORTCUT"
+        private const val COMPLETION_PREV_CANDIDATE_KEY = "$SERVICE_NAME.COMPLETION.PREV_CANDIDATE"
+        private const val COMPLETION_NEXT_CANDIDATE_KEY = "$SERVICE_NAME.COMPLETION.NEXT_CANDIDATE"
 
         val AVAILABLE_MODELS = listOf(
             "deepseek-v4-flash" to "DeepSeek V4 Flash (快速/工具调用)",
@@ -239,5 +246,74 @@ feat(新功能) | fix(修复) | chore(杂项) | docs(文档) | style(格式) | r
     fun setCompactRatio(ratio: Double) {
         com.intellij.ide.util.PropertiesComponent.getInstance()
             .setValue(COMPACT_RATIO_KEY, ratio.coerceIn(0.1, 1.0).toString())
+    }
+
+    // ---- 补全设置 ----
+
+    fun isCompletionEnabled(): Boolean {
+        val raw = com.intellij.ide.util.PropertiesComponent.getInstance().getValue(COMPLETION_ENABLED_KEY)
+        return raw == null || raw.toBooleanStrictOrNull() != false
+    }
+
+    fun setCompletionEnabled(enabled: Boolean) {
+        com.intellij.ide.util.PropertiesComponent.getInstance().setValue(COMPLETION_ENABLED_KEY, enabled.toString())
+    }
+
+    fun getCompletionMaxTokens(): Int {
+        val raw = com.intellij.ide.util.PropertiesComponent.getInstance().getValue(COMPLETION_MAX_TOKENS_KEY)
+        return raw?.toIntOrNull()?.coerceIn(1, 1024) ?: 1024
+    }
+
+    fun setCompletionMaxTokens(tokens: Int) {
+        com.intellij.ide.util.PropertiesComponent.getInstance()
+            .setValue(COMPLETION_MAX_TOKENS_KEY, tokens.coerceIn(1, 1024).toString())
+    }
+
+    fun getCompletionDebounceMs(): Int {
+        val raw = com.intellij.ide.util.PropertiesComponent.getInstance().getValue(COMPLETION_DEBOUNCE_MS_KEY)
+        return raw?.toIntOrNull()?.coerceIn(100, 2000) ?: 300
+    }
+
+    fun setCompletionDebounceMs(ms: Int) {
+        com.intellij.ide.util.PropertiesComponent.getInstance()
+            .setValue(COMPLETION_DEBOUNCE_MS_KEY, ms.coerceIn(100, 2000).toString())
+    }
+
+    fun getCompletionNumCandidates(): Int {
+        val raw = com.intellij.ide.util.PropertiesComponent.getInstance().getValue(COMPLETION_NUM_CANDIDATES_KEY)
+        return raw?.toIntOrNull()?.coerceIn(1, 10) ?: 10
+    }
+
+    fun setCompletionNumCandidates(n: Int) {
+        com.intellij.ide.util.PropertiesComponent.getInstance()
+            .setValue(COMPLETION_NUM_CANDIDATES_KEY, n.coerceIn(1, 10).toString())
+    }
+
+    fun getCompletionManualShortcut(): String {
+        val default = if (System.getProperty("os.name").lowercase().contains("mac")) "meta P" else "alt P"
+        return com.intellij.ide.util.PropertiesComponent.getInstance()
+            .getValue(COMPLETION_MANUAL_SHORTCUT_KEY, default)
+    }
+
+    fun setCompletionManualShortcut(shortcut: String) {
+        com.intellij.ide.util.PropertiesComponent.getInstance().setValue(COMPLETION_MANUAL_SHORTCUT_KEY, shortcut)
+    }
+
+    fun getCompletionPrevCandidateKey(): String {
+        return com.intellij.ide.util.PropertiesComponent.getInstance()
+            .getValue(COMPLETION_PREV_CANDIDATE_KEY, "UP")
+    }
+
+    fun setCompletionPrevCandidateKey(key: String) {
+        com.intellij.ide.util.PropertiesComponent.getInstance().setValue(COMPLETION_PREV_CANDIDATE_KEY, key)
+    }
+
+    fun getCompletionNextCandidateKey(): String {
+        return com.intellij.ide.util.PropertiesComponent.getInstance()
+            .getValue(COMPLETION_NEXT_CANDIDATE_KEY, "DOWN")
+    }
+
+    fun setCompletionNextCandidateKey(key: String) {
+        com.intellij.ide.util.PropertiesComponent.getInstance().setValue(COMPLETION_NEXT_CANDIDATE_KEY, key)
     }
 }
