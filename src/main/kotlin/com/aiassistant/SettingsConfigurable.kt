@@ -1,5 +1,6 @@
 package com.aiassistant
 
+import com.aiassistant.completion.CompletionStats
 import com.intellij.openapi.options.Configurable
 import com.intellij.ui.JBColor
 import com.intellij.ui.components.JBCheckBox
@@ -45,6 +46,14 @@ class SettingsConfigurable : Configurable {
     init {
         toolWhitelistPanel.layout = BoxLayout(toolWhitelistPanel, BoxLayout.Y_AXIS)
         commandWhitelistPanel.layout = BoxLayout(commandWhitelistPanel, BoxLayout.Y_AXIS)
+    }
+    // ---- 补全设置 ----
+    private val completionEnabledCheckBox = JBCheckBox("启用 AI 代码补全").apply { isSelected = true }
+    private val completionMaxTokensSpinner = JSpinner(SpinnerNumberModel(1024, 1, 1024, 1))
+    private val completionDebounceSpinner = JSpinner(SpinnerNumberModel(300, 100, 2000, 100))
+    private val completionNumCandidatesSpinner = JSpinner(SpinnerNumberModel(10, 1, 10, 1))
+    private val completionStatsLabel = JBLabel().apply {
+        foreground = JBColor(0x666666, 0x8C8C8C)
     }
     private val mainPanel = JPanel(BorderLayout())
 
@@ -189,8 +198,61 @@ class SettingsConfigurable : Configurable {
         gbc.insets = JBUI.insets(8, 8, 2, 8)
         contentPanel.add(statusLabel, gbc)
 
+        // ---- 补全设置 Section ----
+        gbc.gridy = 16; gbc.gridx = 0; gbc.gridwidth = 2; gbc.weighty = 0.0
+        gbc.fill = GridBagConstraints.HORIZONTAL
+        gbc.insets = JBUI.insets(16, 8, 4, 8)
+        contentPanel.add(
+            JBLabel("<html><b>代码补全</b></html>"), gbc
+        )
+
+        gbc.gridy = 17; gbc.gridx = 0; gbc.gridwidth = 2
+        gbc.insets = JBUI.insets(4, 8, 4, 8)
+        contentPanel.add(completionEnabledCheckBox, gbc)
+
+        gbc.gridy = 18; gbc.gridx = 0; gbc.gridwidth = 1; gbc.weightx = 0.0
+        gbc.insets = JBUI.insets(4, 16, 4, 8)
+        contentPanel.add(JLabel("最大补全长度 (tokens)"), gbc)
+        gbc.gridx = 1; gbc.weightx = 1.0
+        gbc.insets = JBUI.insets(4, 8, 4, 8)
+        contentPanel.add(completionMaxTokensSpinner, gbc)
+
+        gbc.gridy = 19; gbc.gridx = 0; gbc.weightx = 0.0
+        gbc.insets = JBUI.insets(4, 16, 4, 8)
+        contentPanel.add(JLabel("防抖延迟 (ms)"), gbc)
+        gbc.gridx = 1; gbc.weightx = 1.0
+        gbc.insets = JBUI.insets(4, 8, 4, 8)
+        contentPanel.add(completionDebounceSpinner, gbc)
+
+        gbc.gridy = 20; gbc.gridx = 0; gbc.weightx = 0.0
+        gbc.insets = JBUI.insets(4, 16, 4, 8)
+        contentPanel.add(JLabel("候选数量"), gbc)
+        gbc.gridx = 1; gbc.weightx = 1.0
+        gbc.insets = JBUI.insets(4, 8, 4, 8)
+        contentPanel.add(completionNumCandidatesSpinner, gbc)
+
+        // ---- 统计卡片 ----
+        gbc.gridy = 21; gbc.gridx = 0; gbc.gridwidth = 2
+        gbc.insets = JBUI.insets(12, 16, 4, 8)
+        contentPanel.add(JLabel("<html><b>补全统计</b></html>"), gbc)
+
+        gbc.gridy = 22; gbc.insets = JBUI.insets(2, 16, 4, 8)
+        contentPanel.add(completionStatsLabel, gbc)
+
+        gbc.gridy = 23; gbc.gridx = 0; gbc.gridwidth = 2
+        gbc.insets = JBUI.insets(4, 16, 4, 8)
+        gbc.fill = GridBagConstraints.NONE
+        gbc.anchor = GridBagConstraints.WEST
+        val resetStatsBtn = JButton("重置统计")
+        resetStatsBtn.addActionListener {
+            CompletionStats.reset()
+            refreshCompletionStatsUI()
+        }
+        contentPanel.add(resetStatsBtn, gbc)
+
         // Filler
-        gbc.gridy = 16; gbc.weighty = 1.0; gbc.fill = GridBagConstraints.BOTH
+        gbc.gridy = 24; gbc.weighty = 1.0; gbc.fill = GridBagConstraints.BOTH
+        gbc.anchor = GridBagConstraints.NORTHWEST
         contentPanel.add(JPanel(), gbc)
 
         mainPanel.add(contentPanel, BorderLayout.NORTH)
@@ -217,6 +279,12 @@ class SettingsConfigurable : Configurable {
 
         val savedRatio = (service.getCompactRatio() * 100).toInt()
         if (savedRatio != (compactRatioSpinner.value as Int)) return true
+
+        val svc = AppSettingsService.getInstance()
+        if (svc.isCompletionEnabled() != completionEnabledCheckBox.isSelected) return true
+        if (svc.getCompletionMaxTokens() != (completionMaxTokensSpinner.value as Int)) return true
+        if (svc.getCompletionDebounceMs() != (completionDebounceSpinner.value as Int)) return true
+        if (svc.getCompletionNumCandidates() != (completionNumCandidatesSpinner.value as Int)) return true
 
         return false
     }
@@ -250,6 +318,12 @@ class SettingsConfigurable : Configurable {
 
         service.setCompactRatio((compactRatioSpinner.value as Int) / 100.0)
 
+        val svc = AppSettingsService.getInstance()
+        svc.setCompletionEnabled(completionEnabledCheckBox.isSelected)
+        svc.setCompletionMaxTokens(completionMaxTokensSpinner.value as Int)
+        svc.setCompletionDebounceMs(completionDebounceSpinner.value as Int)
+        svc.setCompletionNumCandidates(completionNumCandidatesSpinner.value as Int)
+
         statusLabel.text = AiAssistantBundle.message("settings.key.saved")
         statusLabel.foreground = JBColor(0x1B5E20, 0x80C080)
         ChatToolWindow.notifySettingsChanged()
@@ -265,6 +339,21 @@ class SettingsConfigurable : Configurable {
         if (idx >= 0) modelCombo.selectedIndex = idx
         compactRatioSpinner.value = (service.getCompactRatio() * 100).toInt()
         statusLabel.text = ""
+        val service1 = AppSettingsService.getInstance()
+        completionEnabledCheckBox.isSelected = service1.isCompletionEnabled()
+        completionMaxTokensSpinner.value = service1.getCompletionMaxTokens()
+        completionDebounceSpinner.value = service1.getCompletionDebounceMs()
+        completionNumCandidatesSpinner.value = service1.getCompletionNumCandidates()
+        refreshCompletionStatsUI()
         refreshWhitelistUI()
+    }
+
+    private fun refreshCompletionStatsUI() {
+        val stats = CompletionStats
+        val acceptRate = "%.1f".format(stats.getAcceptRate())
+        completionStatsLabel.text = """
+            显示: ${stats.getShownCount()}   接受: ${stats.getAcceptedCount()}   接受率: ${acceptRate}%
+            平均延迟: ${stats.getAverageLatencyMs()}ms
+        """.trimIndent()
     }
 }
