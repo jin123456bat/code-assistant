@@ -105,8 +105,10 @@ class ChatToolWindow(private val project: Project) {
         fun insertText(project: Project, text: String) {
             val instance = instances[project]
             if (instance != null) {
-                instance.insertAtCursor(text)
-                instance.activateToolWindow()
+                ApplicationManager.getApplication().invokeLater {
+                    instance.insertAtCursor(text)
+                    instance.activateToolWindow()
+                }
             } else {
                 pendingTexts[project] = text
                 val toolWindow = ToolWindowManager.getInstance(project)
@@ -772,8 +774,8 @@ class ChatToolWindow(private val project: Project) {
     // 子代理工具行增量跟踪
     private var renderedToolNames = mutableSetOf<String>()
     private var lastStreamingTextArea: JTextArea? = null
-    // 已原地完成的工具名（createToolResultBubble 跳过，避免重复渲染）
-    private var completedStreamingToolName: String? = null
+    // 已原地完成的工具名集合（createToolResultBubble 跳过，避免重复渲染）
+    private val completedStreamingToolNames = mutableSetOf<String>()
 
     // 自动引用去重
     private var lastAutoInsertedHash: Int = 0
@@ -1362,7 +1364,7 @@ class ChatToolWindow(private val project: Project) {
         streamingToolCollapsed = null
         streamingToolLeftBar = null
         streamingToolChevron = null
-        completedStreamingToolName = toolName
+        completedStreamingToolNames.add(toolName)
         streamingToolName = null
         renderedToolNames.clear()
         lastStreamingTextArea = null
@@ -1434,8 +1436,8 @@ class ChatToolWindow(private val project: Project) {
     private fun createToolResultBubble(message: AgentMessage): JPanel {
         val name = message.toolName ?: "tool"
         // completeStreamingToolRow 已原地渲染结果行，跳过 rebuild 的重复行
-        if (name == completedStreamingToolName) {
-            completedStreamingToolName = null  // 仅跳过一次
+        if (name in completedStreamingToolNames) {
+            completedStreamingToolNames.remove(name)
             return JPanel().apply { isVisible = false; setSize(0, 0) }
         }
         // 仅当审批尚未完成时才显示按钮（latch 未被 countDown）

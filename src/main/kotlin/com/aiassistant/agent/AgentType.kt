@@ -74,8 +74,9 @@ object AgentTypes {
             else -> null
         }
         if (builtIn != null) return builtIn
-        // 自定义
+        // 自定义（不区分大小写）
         val custom = customDefs[name] ?: customDefs[key]
+            ?: customDefs.entries.firstOrNull { it.key.lowercase() == key }?.value
         if (custom != null) return AgentLoader.toAgentType(custom)
         return GENERAL_PURPOSE
     }

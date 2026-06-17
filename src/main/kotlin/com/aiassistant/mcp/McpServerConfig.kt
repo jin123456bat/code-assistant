@@ -89,6 +89,7 @@ data class McpServerConfig(
             val serversJson = configs.joinToString(",\n") { config ->
                 buildString {
                     append("    \"${config.name}\": {\n")
+                    append("      \"type\": \"${config.transport}\",\n")
                     if (config.transport == "http") {
                         append("      \"url\": \"${JsonUtils.escapeJson(config.url)}\"\n")
                     } else {

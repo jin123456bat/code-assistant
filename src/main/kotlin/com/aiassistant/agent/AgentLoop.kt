@@ -140,7 +140,15 @@ class AgentLoop(
                 edt { onMessage?.invoke(AgentMessage("system", "$toolCount 个工具已就绪: $toolNames")) }
 
                 // Fork：注入父对话上下文（复用 prompt cache 省 token）
-                forkHistory?.let { history.addAll(0, it) }
+                // 确保消息交替——fork 末尾不能和当前 user 消息产生连续同 role
+                if (forkHistory != null && forkHistory.isNotEmpty()) {
+                    val lastRole = forkHistory.last().role
+                    if (lastRole == "user") {
+                        // 末尾是 user → 插入占位 assistant 保持交替
+                        history.add(AnthropicMessage("assistant", ""))
+                    }
+                    history.addAll(0, forkHistory)
+                }
                 history.add(AnthropicMessage("user", userMessage, images = images))
 
                 // 检查并行子代理结果，注入到对话（主 Agent 下一轮 API 调用可感知）
@@ -536,6 +544,7 @@ class AgentLoop(
             } catch (e: Exception) {
                 AppLogger.error("AgentLoop 异常: ${e.message}\n${e.stackTraceToString()}")
                 edt { onError?.invoke("Agent 错误: ${e.message}") }
+                callback("", "")  // 通知调用方（如 TaskTool）执行失败，防止 latch 永久阻塞
             } finally {
                 onStateChange?.invoke(false)
                 edt { onThinking?.invoke(null) }

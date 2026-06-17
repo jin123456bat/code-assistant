@@ -31,26 +31,30 @@ object SkillEngine {
 
     private fun loadFromDir(dir: File, defs: MutableList<SkillDef>) {
         if (!dir.exists()) return
-        // 遍历全深度目录树（用户 skill 可能嵌套在子目录中，如 gstack/review/SKILL.md）
-        // 跳过隐藏目录（.git、.hermes 等）中的文件
-        dir.walkTopDown().forEach { file ->
-            val relativePath = file.relativeTo(dir).path
-            val pathParts = relativePath.split(File.separator)
-            // 跳过隐藏目录内的所有文件
-            if (pathParts.any { it.startsWith(".") }) return@forEach
-            if (file.name == "SKILL.md" && file.isFile && file.length() < 200_000) {
-                try {
-                    val content = file.readText()
-                    val skill = parseSkill(file.parentFile.name, content)
-                    if (skill != null) {
-                        // 项目 skill 覆盖全局同名 skill
-                        defs.removeAll { it.name == skill.name }
-                        defs.add(skill)
+        try {
+            // 遍历全深度目录树（用户 skill 可能嵌套在子目录中，如 gstack/review/SKILL.md）
+            // 跳过隐藏目录（.git、.hermes 等）中的文件
+            dir.walkTopDown().forEach { file ->
+                val relativePath = file.relativeTo(dir).path
+                val pathParts = relativePath.split(File.separator)
+                // 跳过隐藏目录内的所有文件
+                if (pathParts.any { it.startsWith(".") }) return@forEach
+                if (file.name == "SKILL.md" && file.isFile && file.length() < 200_000) {
+                    try {
+                        val content = file.readText()
+                        val skill = parseSkill(file.parentFile.name, content)
+                        if (skill != null) {
+                            // 项目 skill 覆盖全局同名 skill
+                            defs.removeAll { it.name == skill.name }
+                            defs.add(skill)
+                        }
+                    } catch (e: Exception) {
+                        // 单个 skill 解析失败不影响其他 skill 加载
                     }
-                } catch (e: Exception) {
-                    // 单个 skill 解析失败不影响其他 skill 加载
                 }
             }
+        } catch (e: Exception) {
+            // walkTopDown 遇权限/符号链接异常不中断初始化
         }
     }
 

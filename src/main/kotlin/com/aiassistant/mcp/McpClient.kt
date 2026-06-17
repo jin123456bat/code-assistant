@@ -409,11 +409,15 @@ class McpClient(private val config: McpServerConfig) {
     }
 
     private fun readStdioResponse(expectedId: Int, timeoutMs: Long = 10_000): String? {
+        val deadline = System.currentTimeMillis() + timeoutMs
         synchronized(responseLock) {
-            // 清除可能残留的过期响应，防止超时后读到上一次请求的数据
             pendingResponseBody = null
             try {
-                responseLock.wait(timeoutMs)
+                while (pendingResponseBody == null) {
+                    val remaining = deadline - System.currentTimeMillis()
+                    if (remaining <= 0) break
+                    responseLock.wait(remaining)
+                }
             } catch (_: InterruptedException) {
                 Thread.currentThread().interrupt()
                 return null
@@ -630,11 +634,19 @@ class McpToolAdapter(
         }
     }
 
-    /** 从 Map<String,String> 重建 JSON 参数的降级方案 */
+    /** 从 Map<String,String> 重建 JSON 参数，用 Gson 区分字符串值 vs JSON 值 */
     private fun buildArgsFromMap(params: Map<String, String>): String {
         if (params.isEmpty()) return "{}"
-        return params.entries.joinToString(",", "{", "}") { (k, v) ->
-            "\"$k\":${if (v.startsWith("{") || v.startsWith("[") || v == "true" || v == "false" || v == "null" || v.toDoubleOrNull() != null) v else "\"${v.replace("\"", "\\\"")}\""}"
+        val gson = com.google.gson.GsonBuilder().disableHtmlEscaping().create()
+        val obj = com.google.gson.JsonObject()
+        for ((k, v) in params) {
+            obj.add(k, try {
+                // 尝试解析为 JSON 元素（对象/数组/数字/布尔/null），否则当作字符串
+                com.google.gson.JsonParser.parseString(v)
+            } catch (_: Exception) {
+                com.google.gson.JsonPrimitive(v)
+            })
         }
+        return gson.toJson(obj)
     }
 }

@@ -34,6 +34,12 @@ object SubAgentRegistry {
     fun stopAll() {
         loops.values.forEach { it.stop() }
         loops.clear()
+        // 标记所有 RUNNING 条目为 FAILED，防止内存泄漏
+        entries.forEach { (id, entry) ->
+            if (entry.status == Status.RUNNING) {
+                entries[id] = entry.copy(status = Status.FAILED, error = "主对话停止")
+            }
+        }
     }
 
     fun complete(id: String, result: String) {
