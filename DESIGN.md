@@ -272,6 +272,7 @@ LLM 通过 `create_plan` 元工具自主创建执行计划，`update_plan_step` 
 - 展开态：步骤列表通过 `JLayeredPane.POPUP_LAYER` 悬浮展示，**不推挤下方对话区**
 - 每行显示 `subject`（主名称）+ `description`（灰色小字副描述，可选）+ 状态图标
 - 步骤过多时内部滚动（max-height 168px），点击对话区自动收起
+- **增量更新**：`update_plan_step` 后同引用 Plan 不重建，只更新变化的步骤行（marker + 颜色 + 字体）+ 进度文字/进度条
 - 全部完成自动隐藏
 
 **LLM 上下文注入：**

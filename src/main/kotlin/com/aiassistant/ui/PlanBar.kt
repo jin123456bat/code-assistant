@@ -1,7 +1,6 @@
 package com.aiassistant.ui
 
 import com.aiassistant.agent.AgentContext
-import com.intellij.ui.JBColor
 import com.intellij.util.ui.JBUI
 import java.awt.BorderLayout
 import java.awt.Dimension
@@ -24,67 +23,137 @@ import javax.swing.SwingConstants
 import javax.swing.SwingUtilities
 
 /**
- * 置顶可折叠执行计划条（M2-B）。
- *
- * 放置在 conversationPanel NORTH 区域，位于消息滚动区域之外，不随消息滚动。
- *
- * 折叠（默认）：单行摘要 — "▸ 执行计划  2/4  · 当前步骤描述" + 右侧迷你进度条。
- * 展开：步骤列表（最高 168px 内部滚动）。
- *
- * 当 plan == null 或 steps 为空时自动隐藏。
+ * 置顶可折叠执行计划条。增量更新，不重建。
  */
 class PlanBar : JPanel(BorderLayout()) {
 
     private var expanded = false
     private var currentPlan: AgentContext.Plan? = null
+    private var prevStepStatuses = mutableMapOf<Int, AgentContext.StepStatus>()
+
+    // 缓存的 UI 组件引用（增量更新用）
+    private var summaryProgressLabel: JLabel? = null
+    private var summaryStepDescLabel: JLabel? = null
+    private var summaryMiniBar: MiniProgressBar? = null
+    private var stepMarkerLabels = mutableMapOf<Int, JLabel>()
+    private var stepNameLabels = mutableMapOf<Int, JLabel>()
 
     init {
         isOpaque = false
         isVisible = false
     }
 
-    /**
-     * 更新计划数据并重建 UI。
-     * plan == null 或 steps 为空 → 隐藏整个 PlanBar。
-     */
+    /** 更新计划：同引用走增量，异引用或 null 走重建 */
     fun updatePlan(plan: AgentContext.Plan?) {
-        currentPlan = plan
         if (plan == null || plan.stepsSnapshot().isEmpty() || plan.isComplete()) {
             isVisible = false
             removeOverlay()
-            parent?.revalidate()
-            revalidate()
-            repaint()
+            parent?.revalidate(); revalidate(); repaint()
+            currentPlan = null
+            clearComponentRefs()
+            prevStepStatuses.clear()
             return
         }
-        isVisible = true
-        rebuild()
-        parent?.revalidate()
+        val samePlan = plan === currentPlan
+        currentPlan = plan
+        if (!samePlan) {
+            // 新计划 → 全量重建
+            clearComponentRefs()
+            prevStepStatuses.clear()
+            isVisible = true
+            rebuild()
+            parent?.revalidate()
+        } else {
+            // 同引用 → 增量更新
+            isVisible = true
+            incrementalUpdate(plan)
+        }
     }
 
-    // ---- 私有构建 ----
+    // ---- 增量更新 ----
+
+    private fun incrementalUpdate(plan: AgentContext.Plan) {
+        val steps = plan.stepsSnapshot()
+        val progress = plan.progress()
+
+        // 更新摘要行进度
+        summaryProgressLabel?.text = "  $progress"
+        summaryMiniBar?.let { bar ->
+            val done = steps.count { it.status == AgentContext.StepStatus.DONE }
+            bar.update(done, steps.size)
+            bar.repaint()
+        }
+
+        // 当前步骤描述
+        val currentStep = steps.firstOrNull { it.status == AgentContext.StepStatus.IN_PROGRESS }
+            ?: steps.firstOrNull { it.status == AgentContext.StepStatus.PENDING }
+        summaryStepDescLabel?.text = if (!expanded && currentStep != null) " · ${currentStep.subject}" else ""
+
+        // 增量更新每行（只改变化的状态）
+        for (step in steps) {
+            val prev = prevStepStatuses[step.index]
+            if (prev == step.status) continue  // 未变，跳过
+
+            // 更新状态记录
+            prevStepStatuses[step.index] = step.status
+
+            // 更新标记符号
+            val (marker, markerColor) = when (step.status) {
+                AgentContext.StepStatus.DONE -> "☑" to ChatTheme.doneCheck
+                AgentContext.StepStatus.IN_PROGRESS -> "◉" to ChatTheme.toolBar
+                AgentContext.StepStatus.PENDING -> "☐" to ChatTheme.textSecondary
+                AgentContext.StepStatus.FAILED -> "✕" to ChatTheme.error
+            }
+            stepMarkerLabels[step.index]?.let {
+                it.text = "$marker  "
+                it.foreground = markerColor
+            }
+
+            // 更新名称样式
+            val (nameColor, nameStyle) = when (step.status) {
+                AgentContext.StepStatus.DONE -> ChatTheme.textMuted to Font.PLAIN
+                AgentContext.StepStatus.IN_PROGRESS -> ChatTheme.textPrimary to Font.BOLD
+                AgentContext.StepStatus.PENDING -> ChatTheme.textSecondary to Font.PLAIN
+                AgentContext.StepStatus.FAILED -> ChatTheme.error to Font.PLAIN
+            }
+            stepNameLabels[step.index]?.let {
+                it.font = ChatTheme.metaFont.deriveFont(nameStyle.toFloat())
+                it.foreground = nameColor
+            }
+        }
+
+        // 如果新步骤被追加（appendSteps），需要重建
+        if (stepMarkerLabels.size != steps.size) {
+            rebuild()
+        }
+    }
+
+    private fun clearComponentRefs() {
+        summaryProgressLabel = null
+        summaryStepDescLabel = null
+        summaryMiniBar = null
+        stepMarkerLabels.clear()
+        stepNameLabels.clear()
+    }
+
+    // ---- 全量构建 ----
 
     private fun rebuild() {
         removeAll()
+        clearComponentRefs()
         val plan = currentPlan ?: return
 
-        // 摘要行（固定高度，点击切换折叠/展开）
+        // 摘要行
         add(buildSummaryRow(plan), BorderLayout.NORTH)
 
-        // 底部分隔线
-        val dividerLine = object : JPanel() {
+        // 分隔线
+        add(object : JPanel() {
             override fun getPreferredSize() = Dimension(Int.MAX_VALUE, 1)
             override fun getMaximumSize() = Dimension(Int.MAX_VALUE, 1)
-            override fun paintComponent(g: Graphics) {
-                val g2 = g.create() as Graphics2D
-                g2.color = ChatTheme.divider
-                g2.fillRect(0, 0, width, height)
-                g2.dispose()
-            }
-        }.apply { isOpaque = false }
-        add(dividerLine, BorderLayout.SOUTH)
+            override fun paintComponent(g: Graphics) { g.create().also { g2 -> g2.color = ChatTheme.divider; g2.fillRect(0, 0, width, height); (g2 as Graphics2D).dispose() } }
+        }.apply { isOpaque = false }, BorderLayout.SOUTH)
 
-        // 展开内容：通过 JLayeredPane 悬浮在下层之上，不推挤对话区
+        // 展开
         removeOverlay()
         if (expanded) {
             val stepScroll = buildStepList(plan)
@@ -94,20 +163,16 @@ class PlanBar : JPanel(BorderLayout()) {
             overlay = stepScroll
             val rootPane = SwingUtilities.getRootPane(this)
             if (rootPane != null) {
-                // 先定位再添加，避免闪现（默认位置在 (0,0)）
                 val pt = SwingUtilities.convertPoint(this, 0, height, rootPane.layeredPane)
                 stepScroll.setBounds(pt.x, pt.y, rootPane.layeredPane.width, minOf(stepScroll.preferredSize.height, ChatTheme.PLAN_STEP_MAX_H))
                 rootPane.layeredPane.add(stepScroll, JLayeredPane.POPUP_LAYER)
-                rootPane.layeredPane.revalidate()
-                rootPane.layeredPane.repaint()
-                // 点击外部关闭（先移除旧监听器防累积泄漏）
+                rootPane.layeredPane.revalidate(); rootPane.layeredPane.repaint()
                 overlayClickListener?.let { rootPane.layeredPane.removeMouseListener(it) }
                 overlayClickListener = object : MouseAdapter() {
                     override fun mouseClicked(e: MouseEvent) {
                         val comp = rootPane.layeredPane.getComponentAt(e.point)
                         if (comp != stepScroll && !SwingUtilities.isDescendingFrom(comp, stepScroll)) {
-                            expanded = false
-                            rebuild()
+                            expanded = false; rebuild()
                         }
                     }
                 }
@@ -115,8 +180,11 @@ class PlanBar : JPanel(BorderLayout()) {
             }
         }
 
-        revalidate()
-        repaint()
+        // 记录初始状态用于增量比较
+        prevStepStatuses.clear()
+        plan.stepsSnapshot().forEach { prevStepStatuses[it.index] = it.status }
+
+        revalidate(); repaint()
     }
 
     private var overlay: JComponent? = null
@@ -127,17 +195,13 @@ class PlanBar : JPanel(BorderLayout()) {
             val rootPane = SwingUtilities.getRootPane(this)
             overlayClickListener?.let { rootPane?.layeredPane?.removeMouseListener(it) }
             overlayClickListener = null
-            rootPane?.layeredPane?.remove(it)
-            rootPane?.layeredPane?.repaint()
+            rootPane?.layeredPane?.remove(it); rootPane?.layeredPane?.repaint()
         }
         overlay = null
     }
 
-    /**
-     * 摘要行：
-     * - 折叠："▸ 执行计划  2/4  · <当前步骤描述>"  + 右侧迷你进度条
-     * - 展开："▾ 执行计划  2/4"
-     */
+    // ---- 摘要行 ----
+
     private fun buildSummaryRow(plan: AgentContext.Plan): JPanel {
         val chevron = if (expanded) "▾" else "▸"
         val progress = plan.progress()
@@ -151,150 +215,100 @@ class PlanBar : JPanel(BorderLayout()) {
             border = JBUI.Borders.empty(5, 10, 5, 10)
             cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
         }
+        val leftPanel = JPanel().apply { layout = BoxLayout(this, BoxLayout.X_AXIS); isOpaque = false }
 
-        // 左侧文字区
-        val leftPanel = JPanel().apply {
-            layout = BoxLayout(this, BoxLayout.X_AXIS)
-            isOpaque = false
-        }
-
-        // 折叠符号
         leftPanel.add(JLabel("$chevron ").apply {
-            font = ChatTheme.metaFont.deriveFont(Font.BOLD)
-            foreground = ChatTheme.textSecondary
+            font = ChatTheme.metaFont.deriveFont(Font.BOLD); foreground = ChatTheme.textSecondary
         })
-
-        // 计划标题
         leftPanel.add(JLabel(plan.title).apply {
-            font = ChatTheme.metaFont.deriveFont(Font.BOLD)
-            foreground = ChatTheme.textSecondary
+            font = ChatTheme.metaFont.deriveFont(Font.BOLD); foreground = ChatTheme.textSecondary
         })
+        val progLabel = JLabel("  $progress").apply {
+            font = ChatTheme.metaFont.deriveFont(Font.BOLD); foreground = ChatTheme.toolBar
+        }
+        leftPanel.add(progLabel)
+        summaryProgressLabel = progLabel
 
-        // 进度（强调色）
-        leftPanel.add(JLabel("  $progress").apply {
-            font = ChatTheme.metaFont.deriveFont(Font.BOLD)
-            foreground = ChatTheme.toolBar
-        })
-
-        // 当前步骤描述（折叠时显示）
         if (stepDesc.isNotEmpty()) {
-            leftPanel.add(JLabel(stepDesc).apply {
-                font = ChatTheme.metaFont
-                foreground = ChatTheme.textMuted
-            })
+            val descLabel = JLabel(stepDesc).apply { font = ChatTheme.metaFont; foreground = ChatTheme.textMuted }
+            leftPanel.add(descLabel)
+            summaryStepDescLabel = descLabel
         }
-
         leftPanel.add(Box.createHorizontalGlue())
-
-        // 右侧迷你进度条（折叠时显示）
-        if (!expanded) {
-            val snapshot = plan.stepsSnapshot()
-            val total = snapshot.size
-            val done = snapshot.count { it.status == AgentContext.StepStatus.DONE }
-            val miniBar = MiniProgressBar(done, total)
-            row.add(miniBar, BorderLayout.EAST)
-        }
-
         row.add(leftPanel, BorderLayout.CENTER)
 
-        // 点击切换展开/折叠
-        val toggleListener = object : MouseAdapter() {
-            override fun mouseClicked(e: MouseEvent) {
-                expanded = !expanded
-                rebuild()
-            }
+        if (!expanded) {
+            val done = steps.count { it.status == AgentContext.StepStatus.DONE }
+            val miniBar = MiniProgressBar(done, steps.size)
+            row.add(miniBar, BorderLayout.EAST)
+            summaryMiniBar = miniBar
         }
-        row.addMouseListener(toggleListener)
 
+        row.addMouseListener(object : MouseAdapter() {
+            override fun mouseClicked(e: MouseEvent) { expanded = !expanded; rebuild() }
+        })
         return row
     }
 
-    /**
-     * 步骤列表（展开时），最高 168px，超出内部滚动。
-     */
+    // ---- 步骤列表 ----
+
     private fun buildStepList(plan: AgentContext.Plan): JBScrollPane {
         val listPanel = JPanel().apply {
-            layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            isOpaque = false
+            layout = BoxLayout(this, BoxLayout.Y_AXIS); isOpaque = false
             border = JBUI.Borders.empty(2, 10, 6, 10)
         }
-
         for (step in plan.stepsSnapshot()) {
             listPanel.add(buildStepRow(step))
         }
-
-        return JBScrollPane(
-            listPanel,
-            ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
-            ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER
-        ).apply {
-            border = JBUI.Borders.empty()
-            isOpaque = false
-            viewport.isOpaque = false
+        return JBScrollPane(listPanel, ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED, ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER).apply {
+            border = JBUI.Borders.empty(); isOpaque = false; viewport.isOpaque = false
             maximumSize = Dimension(Int.MAX_VALUE, ChatTheme.PLAN_STEP_MAX_H)
             preferredSize = Dimension(preferredSize.width, minOf(listPanel.preferredSize.height + 4, ChatTheme.PLAN_STEP_MAX_H))
         }
     }
 
-    /**
-     * 单行步骤：
-     * - DONE      ☑  描述（删除线效果 — textMuted）
-     * - IN_PROGRESS ◉  描述（加粗 textPrimary，强调色点）
-     * - PENDING   ☐  描述（textSecondary）
-     * - FAILED    ✕  描述（error 色）
-     */
     private fun buildStepRow(step: AgentContext.Step): JPanel {
         val row = JPanel().apply {
-            layout = BoxLayout(this, BoxLayout.X_AXIS)
-            isOpaque = false
+            layout = BoxLayout(this, BoxLayout.X_AXIS); isOpaque = false
             border = JBUI.Borders.empty(2, 4, 2, 4)
             maximumSize = Dimension(Int.MAX_VALUE, ChatTheme.PLAN_STEP_ROW_H)
         }
-
-        // 标记符号
         val (marker, markerColor) = when (step.status) {
             AgentContext.StepStatus.DONE -> "☑" to ChatTheme.doneCheck
             AgentContext.StepStatus.IN_PROGRESS -> "◉" to ChatTheme.toolBar
             AgentContext.StepStatus.PENDING -> "☐" to ChatTheme.textSecondary
             AgentContext.StepStatus.FAILED -> "✕" to ChatTheme.error
         }
+        val markerLabel = JLabel("$marker  ").apply { font = ChatTheme.metaFont; foreground = markerColor }
+        row.add(markerLabel)
+        stepMarkerLabels[step.index] = markerLabel
 
-        row.add(JLabel("$marker  ").apply {
-            font = ChatTheme.metaFont
-            foreground = markerColor
-        })
-
-        // 子任务名称（subject）
         val (nameColor, nameStyle) = when (step.status) {
             AgentContext.StepStatus.DONE -> ChatTheme.textMuted to Font.PLAIN
             AgentContext.StepStatus.IN_PROGRESS -> ChatTheme.textPrimary to Font.BOLD
             AgentContext.StepStatus.PENDING -> ChatTheme.textSecondary to Font.PLAIN
             AgentContext.StepStatus.FAILED -> ChatTheme.error to Font.PLAIN
         }
-
-        row.add(JLabel(step.subject).apply {
-            font = ChatTheme.metaFont.deriveFont(nameStyle.toFloat())
-            foreground = nameColor
+        val nameLabel = JLabel(step.subject).apply {
+            font = ChatTheme.metaFont.deriveFont(nameStyle.toFloat()); foreground = nameColor
             horizontalAlignment = SwingConstants.LEFT
-        })
+        }
+        row.add(nameLabel)
+        stepNameLabels[step.index] = nameLabel
 
-        // 详细描述（可选，灰色小字）
         if (step.description.isNotBlank()) {
             row.add(JLabel("  ${step.description}").apply {
                 font = ChatTheme.metaFont.deriveFont(Font.PLAIN, ChatTheme.metaFont.size2D - ChatTheme.META_FONT_OFFSET)
-                foreground = ChatTheme.textMuted
-                horizontalAlignment = SwingConstants.LEFT
+                foreground = ChatTheme.textMuted; horizontalAlignment = SwingConstants.LEFT
             })
         }
-
         row.add(Box.createHorizontalGlue())
         return row
     }
 
-    /**
-     * 迷你进度条：宽 60px，高 4px，圆角，使用强调色填充。
-     */
-    private inner class MiniProgressBar(private val done: Int, private val total: Int) : JPanel() {
+    // ---- 迷你进度条 ----
+
+    private inner class MiniProgressBar(private var done: Int, private var total: Int) : JPanel() {
         init {
             isOpaque = false
             preferredSize = Dimension(ChatTheme.PLAN_PROGRESS_W, ChatTheme.PLAN_PROGRESS_H)
@@ -303,20 +317,15 @@ class PlanBar : JPanel(BorderLayout()) {
             border = JBUI.Borders.empty(0, 8, 0, 0)
         }
 
+        fun update(d: Int, t: Int) { done = d; total = t }
+
         override fun paintComponent(g: Graphics) {
             super.paintComponent(g)
             val g2 = g.create() as Graphics2D
             g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
-
-            val barX = JBUI.scale(8)  // 左侧 padding
-            val barY = (height - 4) / 2
-            val barW = width - JBUI.scale(8)
-
-            // 背景轨道
+            val barX = JBUI.scale(8); val barY = (height - 4) / 2; val barW = width - JBUI.scale(8)
             g2.color = ChatTheme.divider
             g2.fillRoundRect(barX, barY, barW, 4, ChatTheme.RADIUS_PROGRESS, ChatTheme.RADIUS_PROGRESS)
-
-            // 填充部分
             if (total > 0) {
                 val filledW = (barW * done.toFloat() / total).toInt()
                 if (filledW > 0) {
@@ -324,7 +333,6 @@ class PlanBar : JPanel(BorderLayout()) {
                     g2.fillRoundRect(barX, barY, filledW, 4, ChatTheme.RADIUS_PROGRESS, ChatTheme.RADIUS_PROGRESS)
                 }
             }
-
             g2.dispose()
         }
     }
