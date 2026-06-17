@@ -769,8 +769,11 @@ class ChatToolWindow(private val project: Project) {
     private var streamingToolLeftBar: JPanel? = null
     private var streamingToolChevron: JLabel? = null
     private var streamingToolName: String? = null
-    // 子代理工具行已处理计数（避免重复创建）
-    private var subAgentToolCount = 0
+    // 子代理工具行增量跟踪
+    private var renderedToolNames = mutableSetOf<String>()
+    private var lastStreamingTextArea: JTextArea? = null
+    // 已原地完成的工具名（createToolResultBubble 跳过，避免重复渲染）
+    private var completedStreamingToolName: String? = null
 
     // 自动引用去重
     private var lastAutoInsertedHash: Int = 0
@@ -992,7 +995,7 @@ class ChatToolWindow(private val project: Project) {
             completeStreamingToolRow(name)
         }
         viewModel.onToolStreaming = { name, content ->
-            updateStreamingToolContent(name, content)
+            updateStreamingToolContent(content)
         }
         viewModel.onConfirmTool = { _, _, _, _ ->
             ApplicationManager.getApplication().invokeLater { rebuildConversation() }
@@ -1075,14 +1078,16 @@ class ChatToolWindow(private val project: Project) {
                 val lastVersion = renderedMsgVersions[msg.id]
                 if (lastVersion != null && lastVersion == msg.version) continue
 
-                // 移除旧组件（原地更新场景）
-                msgIdToComponent.remove(msg.id)?.let { oldComp ->
-                    conversationContainer.remove(oldComp)
-                    // 同步清理 bubbleSizeConstraints 中对应的旧条目，防止增量模式下内存泄漏
+                // 原地更新：先记录旧组件的位置
+                val oldComp = msgIdToComponent[msg.id]
+                val insertIdx = if (oldComp != null) {
+                    val idx = conversationContainer.components.indexOf(oldComp)
                     bubbleSizeConstraints.removeAll { (bubble, _) ->
                         !bubble.isDisplayable || bubble.parent == null
                     }
-                }
+                    if (idx >= 0) idx else -1
+                } else -1
+                msgIdToComponent.remove(msg.id)
 
                 renderedMsgVersions[msg.id] = msg.version
                 val component = if (msg.role == "user") {
@@ -1096,7 +1101,16 @@ class ChatToolWindow(private val project: Project) {
                     createMessageBubble(msg)
                 }
                 msgIdToComponent[msg.id] = component
-                conversationContainer.add(component)
+                if (insertIdx >= 0 && insertIdx < conversationContainer.componentCount) {
+                    // 同位置插入新组件，然后移除旧组件，避免 remove+add 闪烁
+                    conversationContainer.add(component, insertIdx)
+                    if (oldComp != null && oldComp.parent != null) {
+                        conversationContainer.remove(oldComp)
+                    }
+                } else {
+                    conversationContainer.add(component)
+                    oldComp?.let { if (it.parent != null) conversationContainer.remove(it) }
+                }
             }
 
             // 流式思考行 / 流式气泡：先移除旧组件再重新创建（增量渲染不会 removeAll，需显式清理避免重复）
@@ -1237,7 +1251,8 @@ class ChatToolWindow(private val project: Project) {
     /** 工具开始执行时创建可折叠运行行（默认折叠），清理上一个未清理的 */
     private fun showStreamingToolRow(toolName: String) {
         cleanupStreamingToolRow()
-        subAgentToolCount = 0
+        renderedToolNames.clear()
+        lastStreamingTextArea = null
         streamingToolName = toolName
         val isTask = toolName == "task"
         val ref = toolRowFactory.streamingToolRow(toolName, isTask)
@@ -1256,118 +1271,102 @@ class ChatToolWindow(private val project: Project) {
     private val TOOL_EXEC = Regex("""\[执行 (\S+)]\n""")
     private val TOOL_RESULT = Regex("""\[结果 (\S+)] (.+?)(?=\n\n|\n\[|$)""", RegexOption.DOT_MATCHES_ALL)
 
-    /** 工具执行期间的实时内容更新 — 解析子代理工具事件，组件化渲染 */
-    private fun updateStreamingToolContent(toolName: String, content: String) {
+    /** 工具执行期间的实时内容更新 — 增量解析子代理工具事件，不重建已有组件 */
+    private fun updateStreamingToolContent(content: String) {
         val panel = streamingToolContentPanel ?: return
 
-        // 检测新的工具事件（计数变化表示有新事件）
-        val execCount = TOOL_EXEC.findAll(content).count()
-        val resultCount = TOOL_RESULT.findAll(content).count()
-        val newToolCount = execCount + resultCount
+        // 收集所有工具事件的位置信息
+        val events = mutableListOf<Pair<IntRange, String>>() // (range, type:name)
+        TOOL_EXEC.findAll(content).forEach { m -> events.add(m.range to "exec:${m.groupValues[1]}") }
+        TOOL_RESULT.findAll(content).forEach { m -> events.add(m.range to "result:${m.groupValues[1]}") }
+        events.sortBy { it.first.first }
 
-        if (newToolCount == subAgentToolCount && panel.componentCount > 0) {
-            // 无新工具事件，仅更新最后一段文本
-            updateLastTextComponent(panel, content)
+        // 找出新事件（尚未渲染的工具名）
+        val newEventNames = events.mapNotNull { e ->
+            val parts = e.second.split(":", limit = 2)
+            val type = parts[0]; val name = parts[1]
+            val key = "$type:$name"
+            if (key !in renderedToolNames) { renderedToolNames.add(key); Pair(type, name) } else null
+        }
+
+        if (newEventNames.isEmpty()) {
+            // 无新工具事件，仅更新最后的文本区域
+            val lastText = content.substringAfterLast("\n").trim()
+            lastStreamingTextArea?.let { area ->
+                area.text = lastText
+                area.revalidate(); area.repaint()
+            }
             return
         }
-        subAgentToolCount = newToolCount
 
-        // 重建内容面板
-        panel.removeAll()
-        var remaining = content
-        while (remaining.isNotEmpty()) {
-            val execMatch = TOOL_EXEC.find(remaining)
-            val resultMatch = TOOL_RESULT.find(remaining)
+        // 仅添加新工具事件对应的组件（插在最后一个文本区域之前或末尾）
+        val insertBaseIdx = if (lastStreamingTextArea != null) {
+            panel.components.indexOf(lastStreamingTextArea).let { if (it >= 0) it else panel.componentCount }
+        } else panel.componentCount
 
-            val nextExec = execMatch?.range?.first ?: Int.MAX_VALUE
-            val nextResult = resultMatch?.range?.first ?: Int.MAX_VALUE
-
-            when {
-                nextExec < nextResult && execMatch != null -> {
-                    // 前面的纯文本
-                    val before = remaining.substring(0, execMatch.range.first).trim()
-                    if (before.isNotEmpty()) {
-                        panel.add(JTextArea(before).apply {
-                            font = ChatTheme.metaFont; foreground = ChatTheme.textSecondary
-                            isEditable = false; lineWrap = true; wrapStyleWord = true
-                            background = ChatTheme.agentBg
-                            border = JBUI.Borders.empty(0, 10, 4, 8)
-                        })
-                    }
-                    // 工具执行中行
-                    panel.add(toolRowFactory.subAgentToolRunningRow(execMatch.groupValues[1]))
-                    remaining = remaining.substring(execMatch.range.last + 1)
-                }
-                nextResult < nextExec && resultMatch != null -> {
-                    val before = remaining.substring(0, resultMatch.range.first).trim()
-                    if (before.isNotEmpty()) {
-                        panel.add(JTextArea(before).apply {
-                            font = ChatTheme.metaFont; foreground = ChatTheme.textSecondary
-                            isEditable = false; lineWrap = true; wrapStyleWord = true
-                            background = ChatTheme.agentBg
-                            border = JBUI.Borders.empty(0, 10, 4, 8)
-                        })
-                    }
-                    // 工具结果行
-                    panel.add(toolRowFactory.subAgentToolResultRow(
-                        resultMatch.groupValues[1], resultMatch.groupValues[2].trim()))
-                    remaining = remaining.substring(resultMatch.range.last + 1)
-                }
-                else -> {
-                    // 剩余纯文本
-                    if (remaining.isNotBlank()) {
-                        panel.add(JTextArea(remaining.trim()).apply {
-                            font = ChatTheme.metaFont; foreground = ChatTheme.textSecondary
-                            isEditable = false; lineWrap = true; wrapStyleWord = true
-                            background = ChatTheme.agentBg
-                            border = JBUI.Borders.empty(0, 10, 4, 8)
-                        })
-                    }
-                    remaining = ""
-                }
+        var offset = 0
+        for ((type, name) in newEventNames) {
+            if (type == "exec") {
+                panel.add(toolRowFactory.subAgentToolRunningRow(name), insertBaseIdx + offset)
+            } else {
+                val resultText = TOOL_RESULT.findAll(content)
+                    .firstOrNull { it.groupValues[1] == name }?.groupValues?.get(2)?.trim() ?: ""
+                panel.add(toolRowFactory.subAgentToolResultRow(name, resultText), insertBaseIdx + offset)
             }
+            offset++
         }
-        panel.revalidate()
-        panel.repaint()
+
+        // 确保有且仅有一个文本区域在末尾（用于后续正文增量更新）
+        if (lastStreamingTextArea == null || lastStreamingTextArea?.parent != panel) {
+            lastStreamingTextArea = JTextArea("").apply {
+                font = ChatTheme.metaFont; foreground = ChatTheme.textSecondary
+                isEditable = false; lineWrap = true; wrapStyleWord = true
+                background = ChatTheme.agentBg
+                border = JBUI.Borders.empty(0, 10, 4, 8)
+            }
+            panel.add(lastStreamingTextArea!!)
+        }
+        val lastText = content.substringAfterLast("\n").trim()
+        lastStreamingTextArea?.text = lastText
+
+        panel.revalidate(); panel.repaint()
     }
 
-    /** 无新工具事件时原地更新最后一个文本组件 */
-    private fun updateLastTextComponent(panel: JPanel, content: String) {
-        val lastText = content.lines().takeLastWhile { !it.startsWith("[执行") && !it.startsWith("[结果") }
-            .joinToString("\n")
-        val comps = panel.components
-        if (comps.isNotEmpty() && comps.last() is JTextArea) {
-            (comps.last() as JTextArea).text = lastText
-            comps.last().revalidate()
-            comps.last().repaint()
-        }
-    }
-
-    /** 工具执行完成，原地更新卡片（不删除） */
+    /** 工具执行完成，用 toolResultRow 替换流式卡片（add-before-remove 无闪烁） */
     private fun completeStreamingToolRow(toolName: String) {
         if (toolName != streamingToolName) return
-        // 找到最终结果消息
+        val existingCard = streamingToolRow ?: return
+        val idx = conversationContainer.components.indexOf(existingCard)
+        if (idx < 0) return
+
+        // 找到最终结果消息，创建 toolResultRow
         val resultMsg = viewModel.messages.lastOrNull {
             it.role == "tool" && it.toolName == toolName
         }
-        val resultContent = resultMsg?.content?.substringAfter("\n---\n")?.trim() ?: resultMsg?.content ?: ""
-        // 更新内容面板为最终结果
-        streamingToolContentPanel?.removeAll()
-        streamingToolContentPanel?.add(JTextArea(resultContent).apply {
-            font = ChatTheme.metaFont; foreground = ChatTheme.textSecondary
-            isEditable = false; lineWrap = true; wrapStyleWord = true
-            background = streamingToolLeftBar?.background ?: ChatTheme.codeBg
-            border = JBUI.Borders.empty(4, 10, 6, 10)
-        })
-        streamingToolContentPanel?.revalidate(); streamingToolContentPanel?.repaint()
-        // 更新标题：spinner 替换为 ✓
-        streamingToolChevron?.text = "▸"
-        streamingToolChevron?.foreground = ChatTheme.doneCheck
-        // 标题文字更新
-        streamingCollapsed = true
-    }
+        val finalCard = if (resultMsg != null) {
+            val isTask = toolName == "task"
+            toolRowFactory.toolResultRow(resultMsg, null,
+                barColor = if (isTask) ChatTheme.agentBar else null,
+                bgColor = if (isTask) ChatTheme.agentBg else null
+            )
+        } else null
 
-    private var streamingCollapsed = true
+        if (finalCard != null) {
+            conversationContainer.add(finalCard, idx)
+            conversationContainer.remove(existingCard)
+            conversationContainer.revalidate()
+            conversationContainer.repaint()
+        }
+        streamingToolRow = null
+        streamingToolContentPanel = null
+        streamingToolCollapsed = null
+        streamingToolLeftBar = null
+        streamingToolChevron = null
+        completedStreamingToolName = toolName
+        streamingToolName = null
+        renderedToolNames.clear()
+        lastStreamingTextArea = null
+    }
 
     /** 清理流式工具行 */
     private fun cleanupStreamingToolRow() {
@@ -1384,8 +1383,8 @@ class ChatToolWindow(private val project: Project) {
         streamingToolLeftBar = null
         streamingToolChevron = null
         streamingToolName = null
-        subAgentToolCount = 0
-        streamingCollapsed = true
+        renderedToolNames.clear()
+        lastStreamingTextArea = null
     }
 
     private fun createMessageBubble(message: AgentMessage): JPanel {
@@ -1434,8 +1433,9 @@ class ChatToolWindow(private val project: Project) {
     /** 工具结果行 — 委托给 ToolRowFactory（默认折叠），待审批时附加审批按钮 */
     private fun createToolResultBubble(message: AgentMessage): JPanel {
         val name = message.toolName ?: "tool"
-        // 已通过 streamingToolRow 原地显示完成态，跳过重复的工具结果行
-        if (name == streamingToolName && streamingToolRow?.parent != null) {
+        // completeStreamingToolRow 已原地渲染结果行，跳过 rebuild 的重复行
+        if (name == completedStreamingToolName) {
+            completedStreamingToolName = null  // 仅跳过一次
             return JPanel().apply { isVisible = false; setSize(0, 0) }
         }
         // 仅当审批尚未完成时才显示按钮（latch 未被 countDown）
