@@ -172,11 +172,22 @@ class TaskTool : AgentTool {
     private fun createWorktree(basePath: String?): String? {
         if (basePath == null) return null
         val worktreeDir = java.io.File(basePath, ".claude/worktrees/subagent-${System.currentTimeMillis()}")
-        return try {
-            val process = ProcessBuilder("git", "-C", basePath, "worktree", "add", worktreeDir.absolutePath)
+        val process = try {
+            ProcessBuilder("git", "-C", basePath, "worktree", "add", worktreeDir.absolutePath)
                 .redirectErrorStream(true).start()
+        } catch (e: Exception) {
+            com.aiassistant.AppLogger.warn("Worktree 创建异常: ${e.message}")
+            return null
+        }
+        return try {
             val output = process.inputStream.bufferedReader().readText()
-            process.waitFor(30, java.util.concurrent.TimeUnit.SECONDS)
+            val finished = process.waitFor(30, java.util.concurrent.TimeUnit.SECONDS)
+            if (!finished) {
+                process.destroyForcibly()
+                process.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)
+                com.aiassistant.AppLogger.warn("Worktree 创建超时: git worktree add 未在 30s 内完成")
+                return null
+            }
             if (process.exitValue() == 0) {
                 com.aiassistant.AppLogger.info("Worktree 创建成功: ${worktreeDir.absolutePath}")
                 worktreeDir.absolutePath
@@ -185,6 +196,7 @@ class TaskTool : AgentTool {
                 null
             }
         } catch (e: Exception) {
+            process.destroyForcibly()
             com.aiassistant.AppLogger.warn("Worktree 创建异常: ${e.message}")
             null
         }
@@ -193,16 +205,27 @@ class TaskTool : AgentTool {
     /** 删除 git worktree */
     private fun removeWorktree(path: String?) {
         if (path == null) return
-        try {
-            // 找就近的 base path（worktree 的父目录）
-            val worktreeDir = java.io.File(path)
-            val basePath = worktreeDir.parentFile?.parentFile?.absolutePath ?: return
-            val process = ProcessBuilder("git", "-C", basePath, "worktree", "remove", path, "--force")
+        val worktreeDir = java.io.File(path)
+        val basePath = worktreeDir.parentFile?.parentFile?.absolutePath ?: return
+        val process = try {
+            ProcessBuilder("git", "-C", basePath, "worktree", "remove", path, "--force")
                 .redirectErrorStream(true).start()
-            process.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)
-            com.aiassistant.AppLogger.info("Worktree 已删除: $path")
         } catch (e: Exception) {
-            com.aiassistant.AppLogger.warn("Worktree 删除失败: ${e.message}")
+            com.aiassistant.AppLogger.warn("Worktree 删除异常: ${e.message}")
+            return
+        }
+        try {
+            val finished = process.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)
+            if (!finished) {
+                process.destroyForcibly()
+                process.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)
+                com.aiassistant.AppLogger.warn("Worktree 删除超时: git worktree remove 未在 10s 内完成")
+            } else {
+                com.aiassistant.AppLogger.info("Worktree 已删除: $path")
+            }
+        } catch (e: Exception) {
+            process.destroyForcibly()
+            com.aiassistant.AppLogger.warn("Worktree 删除异常: ${e.message}")
         }
     }
 }

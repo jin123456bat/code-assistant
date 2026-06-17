@@ -32,8 +32,15 @@ class ToolRegistryV3 {
 
     fun registerMcp(mcp: List<AgentTool>) { mcp.forEach { mcpTools[it.name] = it } }
     fun clearMcp() { mcpTools.clear() }
+    /** 原子替换 MCP 工具，消除 clearMcp/registerMcp 之间的 TOCTOU 窗口 */
+    fun replaceMcp(mcp: List<AgentTool>) {
+        synchronized(mcpTools) {
+            mcpTools.clear()
+            mcp.forEach { mcpTools[it.name] = it }
+        }
+    }
 
-    fun getAll(): List<AgentTool> = (tools.values + mcpTools.values).toList()
+    fun getAll(): List<AgentTool> = synchronized(mcpTools) { (tools.values + mcpTools.values).toList() }
     // 查找优先级：内置工具 > MCP
     fun find(name: String): AgentTool? = tools[name] ?: mcpTools[name]
 

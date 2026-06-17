@@ -46,6 +46,8 @@ class AgentLoop(
     private var maxLoops: Int = MAX_LOOPS  // 可由 AgentType 覆盖
     /** 是否为子 Agent（子 Agent 不注注册元工具，自动批准工具） */
     @Volatile private var isSubAgent = false
+    /** 消息轮次分组计数器，跨 run() 持久递增，防止同 Agent 多次 run() 产生的消息跨轮合并 */
+    private var roundGroupId: Int = 1
     /** 当前 agent 后台线程引用，供 stop() 中断阻塞等待（网络挂起时无需等 2 分钟超时） */
     @Volatile private var agentThread: Thread? = null
     /** 复用的 SDK 客户端（含 OkHttp 连接池），避免每轮 API 调用创建新的连接池导致线程/连接泄漏 */
@@ -146,12 +148,13 @@ class AgentLoop(
                     if (forkHistory != null && forkHistory.isNotEmpty()) {
                         val lastRole = forkHistory.last().role
                         if (lastRole == "user") {
-                            // 末尾是 user → 插入非空占位 assistant 保持交替（空 content 会被 SDK 丢弃）
-                            history.add(AnthropicMessage("assistant", "."))
+                            // 此处不应到达：正常对话历史末尾总是 assistant。
+                            // 若到达则说明 conversationHistory 构建有 bug，抛异常暴露根因而非静默修复。
+                            error("fork 历史末尾为 user 角色，对话消息交替已被破坏，请检查 conversationHistory 构建逻辑")
                         }
                         history.addAll(0, forkHistory)
                     }
-                    history.add(AnthropicMessage("user", userMessage, images = images))
+                    history.add(AnthropicMessage("user", userMessage, images = images, groupId = roundGroupId))
                 }
 
                 // 检查并行子代理结果，注入到对话（主 Agent 下一轮 API 调用可感知）
@@ -168,7 +171,7 @@ class AgentLoop(
                         else -> null
                     }
                     if (resultText != null) {
-                        history.add(AnthropicMessage("user", resultText))
+                        history.add(AnthropicMessage("user", resultText, groupId = roundGroupId))
                     }
                 }
 
@@ -177,6 +180,7 @@ class AgentLoop(
                 var continuationCount = 0
 
                 while (loopCount < maxLoops && !cancelled) {
+                    roundGroupId++
                     // 每轮检查并行子代理结果，注入到 history
                     val newSubResults = SubAgentRegistry.drainCompleted()
                     for (entry in newSubResults) {
@@ -188,7 +192,7 @@ class AgentLoop(
                             else -> null
                         }
                         if (text != null) {
-                            history.add(AnthropicMessage("user", text))
+                            history.add(AnthropicMessage("user", text, groupId = roundGroupId))
                             AppLogger.info("AgentLoop: 注入子代理结果 ${entry.id} status=${entry.status}")
                         }
                     }
@@ -263,7 +267,7 @@ class AgentLoop(
                                         firstToolCallTextAdded = true
                                     }
                                     history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments, thinking = thinking, thinkingSignature = thinkingSignature))
-                                    history.add(AnthropicMessage("user", errMsg, toolCallId = tc.id))
+                                    history.add(AnthropicMessage("user", errMsg, toolCallId = tc.id, groupId = roundGroupId))
                                     edt { onToolResult?.invoke(tc.name, errMsg) }
                                     continue
                                 }
@@ -292,7 +296,7 @@ class AgentLoop(
                                     firstToolCallTextAdded = true
                                 }
                                 history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments, thinking = thinking, thinkingSignature = thinkingSignature))
-                                history.add(AnthropicMessage("user", skillResult, toolCallId = tc.id))
+                                history.add(AnthropicMessage("user", skillResult, toolCallId = tc.id, groupId = roundGroupId))
                                 edt { onToolResult?.invoke(tc.name, skillResult) }
                                 continue
                             }
@@ -313,7 +317,7 @@ class AgentLoop(
                                         firstToolCallTextAdded = true
                                     }
                                     history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments, thinking = thinking, thinkingSignature = thinkingSignature))
-                                    history.add(AnthropicMessage("user", errorResult, toolCallId = tc.id))
+                                    history.add(AnthropicMessage("user", errorResult, toolCallId = tc.id, groupId = roundGroupId))
                                     edt { onToolResult?.invoke(tc.name, errorResult) }
                                     continue
                                 }
@@ -398,7 +402,7 @@ class AgentLoop(
                                     firstToolCallTextAdded = true
                                 }
                                 history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments, thinking = thinking, thinkingSignature = thinkingSignature))
-                                history.add(AnthropicMessage("user", msg, toolCallId = tc.id))
+                                history.add(AnthropicMessage("user", msg, toolCallId = tc.id, groupId = roundGroupId))
                                 edt { onToolResult?.invoke(tc.name, msg) }
                                 continue
                             }

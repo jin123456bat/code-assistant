@@ -22,6 +22,8 @@ object SubAgentRegistry {
     private val entries = ConcurrentHashMap<String, Entry>()
     // 运行中的子 Agent 实例引用（用于 stopAll 停止）
     private val loops = ConcurrentHashMap<String, AgentLoop>()
+    // drainLock 消除 complete/fail 与 drainCompleted 之间的弱一致性窗口
+    private val drainLock = Any()
 
     fun register(id: String, description: String, loop: AgentLoop? = null): Entry {
         val entry = Entry(id, description, Status.RUNNING)
@@ -43,30 +45,36 @@ object SubAgentRegistry {
     }
 
     fun complete(id: String, result: String) {
-        entries[id]?.let {
-            entries[id] = it.copy(status = Status.DONE, result = result)
+        synchronized(drainLock) {
+            entries[id]?.let {
+                entries[id] = it.copy(status = Status.DONE, result = result)
+            }
         }
         loops.remove(id)
     }
 
     fun fail(id: String, error: String) {
-        entries[id]?.let {
-            entries[id] = it.copy(status = Status.FAILED, error = error)
+        synchronized(drainLock) {
+            entries[id]?.let {
+                entries[id] = it.copy(status = Status.FAILED, error = error)
+            }
         }
         loops.remove(id)
     }
 
     fun get(id: String): Entry? = entries[id]
 
-    /** 获取所有已完成但尚未消费的结果，消费后移除。使用迭代器原子化 filter+remove，防止并发重复消费。 */
+    /** 获取所有已完成但尚未消费的结果，消费后移除。与 complete/fail 共享锁消除弱一致性窗口。 */
     fun drainCompleted(): List<Entry> {
         val completed = mutableListOf<Entry>()
-        val iter = entries.entries.iterator()
-        while (iter.hasNext()) {
-            val (_, entry) = iter.next()
-            if (entry.status != Status.RUNNING) {
-                completed.add(entry)
-                iter.remove()
+        synchronized(drainLock) {
+            val iter = entries.entries.iterator()
+            while (iter.hasNext()) {
+                val (_, entry) = iter.next()
+                if (entry.status != Status.RUNNING) {
+                    completed.add(entry)
+                    iter.remove()
+                }
             }
         }
         return completed

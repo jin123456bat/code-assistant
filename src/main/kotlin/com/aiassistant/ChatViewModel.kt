@@ -108,8 +108,7 @@ class ChatViewModel {
         mcpManager.changeListener = object : com.aiassistant.mcp.McpChangeListener {
             override fun onToolsChanged(serverName: String, newTools: List<com.aiassistant.agent.AgentTool>) {
                 val a = agent ?: return
-                a.ctx.toolRegistry.clearMcp()
-                a.ctx.toolRegistry.registerMcp(newTools)
+                a.ctx.toolRegistry.replaceMcp(newTools)
             }
             override fun onPromptsChanged(newPrompts: List<com.aiassistant.mcp.McpPromptDef>) {
                 val ctx = agent?.ctx ?: return

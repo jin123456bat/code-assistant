@@ -24,18 +24,16 @@ class WebSearchTool : AgentTool {
         val query = params["query"]?.takeIf { it.isNotBlank() } ?: return ToolResult.err("query 不能为空")
         val maxResults = params["max_results"]?.toIntOrNull() ?: 10
 
-        return try {
-            val url = "https://lite.duckduckgo.com/lite/?q=${URLEncoder.encode(query, "UTF-8")}"
-            val connection = (URI.create(url).toURL().openConnection() as HttpURLConnection).apply {
+        val url = "https://lite.duckduckgo.com/lite/?q=${URLEncoder.encode(query, "UTF-8")}"
+        val connection = (URI.create(url).toURL().openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
                 connectTimeout = 10_000
                 readTimeout = 15_000
                 setRequestProperty("User-Agent", "CodeAssistant/1.0")
-            }
+        }
 
+        return try {
             val html = connection.inputStream.bufferedReader().use { it.readText() }
-            connection.disconnect()
-
             val results = parseResults(html, maxResults)
             if (results.isEmpty()) {
                 ToolResult.ok("未找到 \"$query\" 的搜索结果")
@@ -48,6 +46,8 @@ class WebSearchTool : AgentTool {
             ToolResult.err("搜索请求超时，请重试")
         } catch (e: Exception) {
             ToolResult.err("搜索失败: ${e.message ?: e.javaClass.simpleName}")
+        } finally {
+            connection.disconnect()
         }
     }
 

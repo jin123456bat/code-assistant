@@ -25,7 +25,7 @@ data class AnthropicMessage(
     val images: List<ImageData>? = null, // 用户消息附带的图片（Claude 原生 image 块）
     val thinking: String = "",          // thinking 内容（DeepSeek 自动处理 <think> 标签，不回传 Anthropic 协议）
     val thinkingSignature: String = "", // thinking 签名（DeepSeek 不返回签名，SDK 层已跳过不回传）
-    val groupId: Int = 0                // 轮次分组：同一 API 响应的消息同组，防止跨轮合并破坏 tool_use 配对
+    val groupId: Int = 0                // 轮次分组：AgentLoop 每轮递增，默认值 0 表示未显式设置（不应出现在正常流程中）
 )
 
 /** SSE 事件解析结果 */
