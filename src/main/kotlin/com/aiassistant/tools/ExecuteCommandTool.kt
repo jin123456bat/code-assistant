@@ -19,7 +19,7 @@ class ExecuteCommandTool : AgentTool {
         ToolParameter("working_dir", "string", "工作目录，相对于项目根目录（可选）")
     )
 
-    override fun execute(params: Map<String, String>, project: Project): ToolResult {
+    override fun execute(params: Map<String, String>, project: Project, onProgress: ((String) -> Unit)?): ToolResult {
         val command = params["command"]?.takeIf { it.isNotBlank() } ?: return ToolResult.err("command 不能为空")
         val basePath = project.basePath ?: return ToolResult.err("项目路径不可用")
         val workingDir = params["working_dir"]?.let { wd ->
@@ -44,16 +44,27 @@ class ExecuteCommandTool : AgentTool {
                 .redirectErrorStream(true)
                 .start()
 
-            // 后台线程读取输出，避免 readText 在进程不退出时永久阻塞导致 waitFor 超时失效
-            val outputFuture = java.util.concurrent.CompletableFuture.supplyAsync {
-                process.inputStream.bufferedReader().use { it.readText() }
-            }
+            // 逐行读取输出，实时推送到 UI
+            val outputBuffer = StringBuilder()
+            val reader = process.inputStream.bufferedReader()
+            val readThread = Thread {
+                try {
+                    reader.useLines { lines ->
+                        lines.forEach { line ->
+                            outputBuffer.appendLine(line)
+                            onProgress?.invoke(outputBuffer.toString())
+                        }
+                    }
+                } catch (_: Exception) {}
+            }.apply { isDaemon = true; start() }
+
             val finished = process.waitFor(30, TimeUnit.SECONDS)
             if (!finished) {
                 process.destroyForcibly()
-                process.waitFor(2, TimeUnit.SECONDS) // 等待强制终止完成
+                process.waitFor(2, TimeUnit.SECONDS)
             }
-            val output = try { outputFuture.get(5, TimeUnit.SECONDS) } catch (_: Exception) { "" }
+            readThread.join(3000)
+            val output = outputBuffer.toString()
             val exitCode = if (finished) process.exitValue() else -1
 
             // 工具结果截断（防止超大规模输出耗尽 token）

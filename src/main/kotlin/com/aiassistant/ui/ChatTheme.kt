@@ -83,6 +83,12 @@ object ChatTheme {
     /** 工具行淡蓝背景 + 审批选项 hover 高亮 — leftBarPanel、buildApprovalOptions */
     val toolBg = JBColor(Color(53, 116, 240, 20), Color(92, 143, 214, 33))
 
+    /** 子 Agent 左栏竖线色 — 紫罗兰，与普通工具蓝色区分 */
+    val agentBar = JBColor(0x7C3AED, 0xA78BFA)
+
+    /** 子 Agent 淡紫背景 — leftBarPanel task 结果 */
+    val agentBg = JBColor(Color(124, 58, 237, 20), Color(167, 139, 250, 33))
+
 
     // ═══════════════════════════════════════════════════════════════
     // 代码/输入区

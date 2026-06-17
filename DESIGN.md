@@ -38,6 +38,8 @@ IntelliJ IDEA 插件 — Swing UI 设计规范。Token 定义与 `ChatTheme.kt` 
 | `toolBar` | `#3574F0` | `#5C8FD6` | 工具行左侧 3px 竖线 + spinner 颜色 |
 | `toolFg` | `#2F6FE0` | `#84ACDF` | 工具名称/标题文字颜色 |
 | `toolBg` | `rgba(53,116,240,0.08)` | `rgba(92,143,214,0.13)` | 工具行/权限卡淡背景 |
+| `agentBar` | `#7C3AED` | `#A78BFA` | 子 Agent 左栏竖线（紫罗兰，区分普通工具蓝） |
+| `agentBg` | `rgba(124,58,237,0.08)` | `rgba(167,139,250,0.13)` | 子 Agent 淡紫背景 |
 
 ### 代码 / 输入
 
@@ -231,6 +233,22 @@ panel (BorderLayout)
 - **代码块内层 JScrollPane**：代码块由外层 JScrollPane 包裹（`HORIZONTAL_SCROLLBAR_AS_NEEDED`），用于长行横向滚动。通过 `setWheelScrollingEnabled(false)` 禁用内层滚轮事件消费，确保鼠标在代码块上时滚轮事件冒泡到 `conversationScrollPane`，对话可正常上下翻阅
 
 ## Components
+
+### 工具执行行 — streamingToolRow
+
+所有工具执行时统一显示可折叠运行行，**默认折叠**：
+- **折叠态**：`▸ ⠋ 执行中 · toolName`（spinner + 工具名），task 用紫色左栏，其他用蓝色
+- **展开态**：`▾ ⠋ 执行中 · toolName` + 内容区。有实时输出的工具（task、execute_command）内容逐行填入，无输出的仅显示 spinner
+- **点击标题行**切换折叠/展开
+- **执行完成**：清理运行行，`rebuildConversation` 渲染最终 `toolResultRow`
+- **错误/拒绝**：`errorCardRow` 红色左栏
+
+### SubAgentCard — 子代理结果卡片
+
+子 Agent 结果复用 `toolResultRow` 组件：
+- **task 工具**：紫色左栏（`agentBar`），与普通工具蓝色（`toolBar`）区分
+- **折叠态**：`▸ 结果 · task` + 内容预览
+- **展开态**：完整输出含工具调用日志
 
 ### PlanBar — 置顶计划条
 

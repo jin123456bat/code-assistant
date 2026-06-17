@@ -42,6 +42,8 @@ class AgentLoop(
     val ctx = AgentContext(project)
     @Volatile private var cancelled = false
     @Volatile private var model: String = AppSettingsService.getInstance().getModel()
+    /** 是否为子 Agent（子 Agent 不注注册元工具，自动批准工具） */
+    @Volatile private var isSubAgent = false
     /** 当前 agent 后台线程引用，供 stop() 中断阻塞等待（网络挂起时无需等 2 分钟超时） */
     @Volatile private var agentThread: Thread? = null
     /** 复用的 SDK 客户端（含 OkHttp 连接池），避免每轮 API 调用创建新的连接池导致线程/连接泄漏 */
@@ -78,14 +80,26 @@ class AgentLoop(
     var onThinkingDelta: ((String) -> Unit)? = null
     /** 工具确认回调 — UI 层实现内联确认，通过 latch 通知结果 */
     var onConfirmTool: ((String, String, CountDownLatch, AtomicBoolean) -> Unit)? = null
+    /** 工具执行期间的中间输出回调（toolName → partialContent），用于子 Agent 实时输出 */
+    var onToolStreaming: ((String, String) -> Unit)? = null
 
-    fun initialize(mcpTools: List<AgentTool> = emptyList()) {
-        ctx.toolRegistry.registerBuiltIn()
+    fun initialize(
+        mcpTools: List<AgentTool> = emptyList(),
+        allowedTools: Set<String>? = null,
+        deniedTools: Set<String> = emptySet(),
+        asSubAgent: Boolean = false
+    ) {
+        isSubAgent = asSubAgent
+        ctx.toolRegistry.registerBuiltIn(allowedTools, deniedTools)
         ctx.toolRegistry.registerMcp(mcpTools)
-        // 加载 skill 定义到 ctx.skillDefs（不再注册为独立工具，对齐 Claude Code 统一 Skill 元工具）
-        val basePath = project.basePath
-        val skillDefs = if (basePath != null) SkillEngine.loadProjectSkills(basePath) else emptyList()
-        skillDefs.forEach { ctx.skillDefs[it.name] = it }
+        // 子 Agent 不加载 skill 和自定义 agent（不需要这些系统）
+        if (!isSubAgent) {
+            val basePath = project.basePath
+            val skillDefs = if (basePath != null) SkillEngine.loadProjectSkills(basePath) else emptyList()
+            skillDefs.forEach { ctx.skillDefs[it.name] = it }
+            // 加载自定义 Agent 定义（兼容 Claude Code .claude/agents/*.md）
+            AgentTypes.loadCustom(basePath)
+        }
         ctx.systemPrompt = buildSystemPrompt()
     }
 
@@ -366,7 +380,9 @@ class AgentLoop(
                                 // MCP 工具：注入原始 JSON 参数，保留 number/boolean/array/object 类型
                                 val mcpAdapter = ctx.toolRegistry.find(tc.name) as? com.aiassistant.mcp.McpToolAdapter
                                 if (mcpAdapter != null) { mcpAdapter.rawArgsJson = tc.arguments }
-                                val r = ctx.toolRegistry.executeTool(tc.name, params, project)
+                                val r = ctx.toolRegistry.executeTool(tc.name, params, project) { partial ->
+                                    onToolStreaming?.invoke(tc.name, partial)
+                                }
                                 if (!r.success) consecutiveFailures++ else consecutiveFailures = 0
                                 r
                             } else {
@@ -738,6 +754,8 @@ class AgentLoop(
                     required = tool.parameters.filter { it.required }.map { it.name }.ifEmpty { null }
                 )
             }
+        // 子 Agent 不需要元工具（Skill/create_plan/update_plan_step）
+        if (isSubAgent) return builtIn
         // 元工具（由 AgentLoop 硬编码处理，不在 ToolRegistryV3 中）
         val metaTools = listOf(
             com.aiassistant.AnthropicToolDef("Skill", "激活一个 skill，获取特定领域的专业指引"),

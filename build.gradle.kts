@@ -12,6 +12,7 @@ repositories {
 }
 
 dependencies {
+    implementation("org.yaml:snakeyaml:2.2")
     implementation("org.jetbrains:markdown:0.7.3")
     implementation("com.anthropic:anthropic-java:2.40.1") {
         // 排除 SDK 自带的 Kotlin stdlib，避免与 IntelliJ Platform 内置版本冲突

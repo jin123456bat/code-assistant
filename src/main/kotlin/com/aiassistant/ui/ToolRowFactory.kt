@@ -166,7 +166,8 @@ class ToolRowFactory(
      * - 失败时（content 以 "错误:" / "错误：" / "Error:" 开头）渲染红色错误卡。
      * - 成功时默认折叠，摘要 "结果 · <toolName>"；展开显示 content（超 2000 chars 截断）。
      */
-    fun toolResultRow(message: AgentMessage, approvalActions: ApprovalActions? = null): JPanel {
+    fun toolResultRow(message: AgentMessage, approvalActions: ApprovalActions? = null,
+                     barColor: java.awt.Color? = null, bgColor: java.awt.Color? = null): JPanel {
         val toolName = message.toolName ?: "tool"
         val rawContent = message.content
 
@@ -194,7 +195,10 @@ class ToolRowFactory(
 
         val outerRow = outerRow()
         val collapsed = AtomicBoolean(true)
-        val bubble = leftBarPanel()
+        val bubble = leftBarPanel(
+            bar = barColor ?: ChatTheme.toolBar,
+            bg = bgColor ?: ChatTheme.toolBg
+        )
 
         fun rebuild(isCollapsed: Boolean) {
             bubble.removeAll()
@@ -334,12 +338,18 @@ class ToolRowFactory(
         return outerRow
     }
 
+    /** 流式工具行引用，供外部原地更新 */
+    data class StreamingToolRow(
+        val outerRow: JPanel,
+        val contentArea: JTextArea,
+        val collapsed: java.util.concurrent.atomic.AtomicBoolean
+    )
+
     /** 执行中行：带动态盲文 spinner，不可折叠 */
     fun runningRow(toolName: String): JPanel {
         val outerRow = outerRow()
         val row = compactRow()
         row.add(hGap(2))
-        // 动画 spinner：addNotify 启动 Timer，removeNotify 停止（无泄漏）
         val spinner = BrailleSpinnerLabel(ChatTheme.toolBar)
         row.add(spinner)
         row.add(hGap(4))
@@ -352,6 +362,80 @@ class ToolRowFactory(
         outerRow.add(row)
         outerRow.add(Box.createHorizontalGlue())
         return outerRow
+    }
+
+    /**
+     * 工具执行期间的流式输出行：可折叠，**默认折叠**。
+     * 有实时输出的工具（task、execute_command）内容动态填入，用户点击展开查看。
+     * @param isTask 是否为子 Agent（task 用紫色，普通工具用蓝色）
+     */
+    fun streamingToolRow(toolName: String, isTask: Boolean = false): StreamingToolRow {
+        val barColor = if (isTask) ChatTheme.agentBar else ChatTheme.toolBar
+        val bgColor = if (isTask) ChatTheme.agentBg else ChatTheme.toolBg
+        val collapsed = java.util.concurrent.atomic.AtomicBoolean(true)  // 默认折叠
+
+        val chevron = JLabel("▸").apply {  // 折叠态箭头
+            font = ChatTheme.metaFont
+            foreground = barColor
+            border = JBUI.Borders.empty(0, 6, 0, 4)
+        }
+        val spinner = BrailleSpinnerLabel(barColor)
+        val label = JLabel("执行中 · $toolName").apply {
+            font = toolFont
+            foreground = ChatTheme.toolFg
+        }
+        val headerRow = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.X_AXIS)
+            isOpaque = false
+            add(chevron)
+            add(spinner)
+            add(hGap(4))
+            add(label)
+            add(Box.createHorizontalGlue())
+        }
+
+        val contentArea = JTextArea().apply {
+            font = ChatTheme.metaFont
+            foreground = ChatTheme.textSecondary
+            background = bgColor
+            isEditable = false
+            lineWrap = true
+            wrapStyleWord = true
+            border = JBUI.Borders.empty(4, 16, 6, 10)
+        }
+
+        val leftBar = JPanel(BorderLayout()).apply {
+            isOpaque = false
+            background = bgColor
+            border = LeftBarBorder(barColor, 3, 7)
+            add(headerRow, BorderLayout.NORTH)
+            add(contentArea, BorderLayout.CENTER)
+            // 点击标题折叠/展开
+            addMouseListener(object : java.awt.event.MouseAdapter() {
+                override fun mouseClicked(e: java.awt.event.MouseEvent) {
+                    collapsed.set(!collapsed.get())
+                    applyStreamingCollapsed(this@apply, collapsed.get(), chevron, contentArea)
+                }
+            })
+            cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
+        }
+
+        val outerRow = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.X_AXIS)
+            isOpaque = false
+            add(leftBar)
+            add(Box.createHorizontalGlue())
+        }
+
+        return StreamingToolRow(outerRow, contentArea, collapsed)
+    }
+
+    /** 切换流式工具行的折叠状态 */
+    fun applyStreamingCollapsed(bar: JPanel, collapsed: Boolean, chevron: JLabel, contentArea: JTextArea) {
+        chevron.text = if (collapsed) "▸" else "▾"
+        contentArea.isVisible = !collapsed
+        bar.revalidate()
+        bar.repaint()
     }
 
     /**
@@ -452,10 +536,11 @@ class ToolRowFactory(
      * - 淡 toolBg 背景
      * - 右侧圆角约 7px
      */
-    private fun leftBarPanel(): JPanel = JPanel(BorderLayout()).apply {
+    private fun leftBarPanel(bar: java.awt.Color = ChatTheme.toolBar,
+                             bg: java.awt.Color = ChatTheme.toolBg): JPanel = JPanel(BorderLayout()).apply {
         isOpaque = false  // 使用半透明背景，必须关闭 opaque 避免覆盖上层组件
-        background = ChatTheme.toolBg
-        border = LeftBarBorder(ChatTheme.toolBar, 3, 7)
+        background = bg
+        border = LeftBarBorder(bar, 3, 7)
     }
 
     /** 紧凑行：X 轴 BoxLayout，可选透明，内边距 4-8 */

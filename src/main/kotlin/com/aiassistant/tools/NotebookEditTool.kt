@@ -25,7 +25,7 @@ class NotebookEditTool : AgentTool {
         ToolParameter("edit_mode", "string", "编辑模式：replace（默认）、insert、delete")
     )
 
-    override fun execute(params: Map<String, String>, project: Project): ToolResult {
+    override fun execute(params: Map<String, String>, project: Project, onProgress: ((String) -> Unit)?): ToolResult {
         val notebookPath = params["notebook_path"] ?: return ToolResult.err("缺少 notebook_path 参数")
         val editMode = params["edit_mode"] ?: "replace"
         val basePath = project.basePath ?: return ToolResult.err("项目路径不可用")

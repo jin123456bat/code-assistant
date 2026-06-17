@@ -13,13 +13,21 @@ class ToolRegistryV3 {
     private val tools = mutableMapOf<String, AgentTool>()
     private val mcpTools = java.util.concurrent.ConcurrentHashMap<String, AgentTool>()
 
-    fun registerBuiltIn() {
-        listOf(
+    /** 注册内置工具。allowedTools 为 null 时注册全部，非 null 时仅注册白名单中的工具。deniedTools 从白名单中排除 */
+    fun registerBuiltIn(allowedTools: Set<String>? = null, deniedTools: Set<String> = emptySet()) {
+        val all = listOf(
             ReadFileTool(), WriteFileTool(), SearchCodeTool(), ListDirectoryTool(),
             ExecuteCommandTool(), GitDiffTool(), GitLogTool(), GitStatusTool(),
             AskUserTool(), WebSearchTool(), WebFetchTool(), NotebookEditTool(), TaskTool(),
             CodeIntelligenceTool(), McpGetPromptTool()
-        ).forEach { tools[it.name] = it }
+        )
+        all.forEach {
+            val allowed = allowedTools == null || it.name in allowedTools
+            val denied = it.name in deniedTools
+            if (allowed && !denied) {
+                tools[it.name] = it
+            }
+        }
     }
 
     fun registerMcp(mcp: List<AgentTool>) { mcp.forEach { mcpTools[it.name] = it } }
@@ -29,6 +37,7 @@ class ToolRegistryV3 {
     // 查找优先级：内置工具 > MCP
     fun find(name: String): AgentTool? = tools[name] ?: mcpTools[name]
 
-    fun executeTool(name: String, params: Map<String, String>, project: Project): ToolResult =
-        find(name)?.execute(params, project) ?: ToolResult.err("未知工具: $name")
+    fun executeTool(name: String, params: Map<String, String>, project: Project,
+                    onProgress: ((String) -> Unit)? = null): ToolResult =
+        find(name)?.execute(params, project, onProgress) ?: ToolResult.err("未知工具: $name")
 }

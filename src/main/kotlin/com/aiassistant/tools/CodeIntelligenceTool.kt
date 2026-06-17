@@ -49,7 +49,7 @@ class CodeIntelligenceTool : AgentTool {
         ToolParameter("max_results", "integer", "最大返回结果数，默认 20")
     )
 
-    override fun execute(params: Map<String, String>, project: Project): ToolResult {
+    override fun execute(params: Map<String, String>, project: Project, onProgress: ((String) -> Unit)?): ToolResult {
         val operation = params["operation"] ?: return ToolResult.err("缺少 operation 参数")
         val basePath = project.basePath ?: return ToolResult.err("项目路径不可用")
         val maxResults = params["max_results"]?.toIntOrNull() ?: 20

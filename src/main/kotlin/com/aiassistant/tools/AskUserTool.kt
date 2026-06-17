@@ -55,7 +55,7 @@ class AskUserTool : AgentTool {
         )
     )
 
-    override fun execute(params: Map<String, String>, project: Project): ToolResult {
+    override fun execute(params: Map<String, String>, project: Project, onProgress: ((String) -> Unit)?): ToolResult {
         val question = params["question"]?.trim()
             ?: return ToolResult.err("缺少 question 参数")
 

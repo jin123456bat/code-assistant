@@ -24,7 +24,7 @@ class ReadFileTool : AgentTool {
         ToolParameter("limit", "integer", "读取行数（可选，默认读取全部）")
     )
 
-    override fun execute(params: Map<String, String>, project: Project): ToolResult {
+    override fun execute(params: Map<String, String>, project: Project, onProgress: ((String) -> Unit)?): ToolResult {
         val path = params["path"]?.takeIf { it.isNotBlank() } ?: return ToolResult.err("path 不能为空")
 
         // MCP resource:// URI 路由（对齐 Claude Code：read_file 支持 resource:// 协议）

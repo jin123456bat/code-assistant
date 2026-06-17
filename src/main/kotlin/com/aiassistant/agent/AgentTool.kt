@@ -36,8 +36,10 @@ interface AgentTool {
     val parameters: List<ToolParameter>
 
     /**
-     * 执行工具，params key 为参数名，value 为 JSON 字符串值
+     * 执行工具，params key 为参数名，value 为 JSON 字符串值。
+     * @param onProgress 可选回调，用于工具执行期间推送中间输出到 UI（如子 Agent 实时输出）
      */
-    fun execute(params: Map<String, String>, project: Project): ToolResult
+    fun execute(params: Map<String, String>, project: Project,
+                onProgress: ((content: String) -> Unit)? = null): ToolResult
 
 }

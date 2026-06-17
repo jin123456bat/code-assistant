@@ -20,7 +20,7 @@ class SearchCodeTool : AgentTool {
         ToolParameter("max_results", "integer", "最大结果数，默认 30")
     )
 
-    override fun execute(params: Map<String, String>, project: Project): ToolResult {
+    override fun execute(params: Map<String, String>, project: Project, onProgress: ((String) -> Unit)?): ToolResult {
         val query = params["query"]?.takeIf { it.isNotBlank() } ?: return ToolResult.err("query 不能为空")
         val basePath = project.basePath ?: return ToolResult.err("项目路径不可用")
         val filePattern = params["file_pattern"]

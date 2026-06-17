@@ -8,7 +8,7 @@ Code Assistant 是 IntelliJ IDEA 的开源 AI 编程 Agent 插件（IntelliJ Pla
 
 - **Agent 模式**：AI 自主规划并执行多步骤任务，使用内置工具（搜索代码、读写文件、执行命令、Git 操作等）
 - **流式聊天**：Markdown 渲染 + 语法高亮，实时流式输出
-- **工具系统**：14 个内置工具 + MCP（Model Context Protocol）扩展 + 统一 Skill 元工具（对齐 Claude Code）
+- **工具系统**：15 个内置工具 + MCP（Model Context Protocol）扩展 + 统一 Skill 元工具（对齐 Claude Code）
 - **计划模式**：LLM 自主决定是否创建执行计划，并跟踪步骤进度
 - **安全机制**：工具审批流、白名单、文件越界防护
 - **输入增强**：文件引用、编辑器选区自动引用、图片粘贴、斜杠命令
@@ -46,11 +46,13 @@ src/main/kotlin/com/aiassistant/
 ├── agent/                     # Agent 核心实现 + 共享类型
 │   ├── AgentLoop.kt           # Agent 主循环 (while 循环 + 工具调用分发)
 │   ├── AgentContext.kt        # 共享上下文 (Plan/Step/ImageData/AgentMessage，含 id/version 用于增量渲染)
+│   ├── AgentType.kt           # Agent 类型定义 (AgentType 数据类 + AgentTypes 预置类型)
+│   ├── AgentLoader.kt         # 自定义 Agent 加载器 (兼容 Claude Code .claude/agents/*.md)
 │   ├── ToolRegistryV3.kt      # 统一工具注册中心 (内置/MCP)
 │   ├── SkillEngine.kt         # Skill 加载引擎（SkillDef → ctx.skillDefs，统一 Skill 元工具激活）
 │   └── AgentTool.kt           # 工具接口定义 (AgentTool/ToolParameter/ToolResult)
 │
-├── tools/                     # 14 个内置工具实现
+├── tools/                     # 15 个内置工具实现
 │   ├── ReadFileTool.kt        # 读取文件（项目内免审，项目外触发审批）
 │   ├── WriteFileTool.kt       # 写入文件 (含越界防护)
 │   ├── SearchCodeTool.kt      # 搜索代码
@@ -122,7 +124,10 @@ AgentLoop 是核心调度器，在后台 `Thread` 上运行 `while` 循环：
 - **连续失败上限**：`MAX_FAILURES=3`，达到后中止
 - **流程**：每轮调用模型 → 若返回 `tool_use` 则执行工具并把结果回填到 `history` → 继续下一轮 → 若返回纯文本则结束
 - **max_tokens 续写**：`max_tokens=32768`（DeepSeek V4 Pro 默认输出上限）。当 API 返回 `stop_reason=max_tokens` 时，AgentLoop 自动将已生成内容加入 history 并继续循环让模型续写，最多续写 `MAX_CONTINUATIONS=5` 次，防止死循环
-- **UI 更新**：所有回调（`onMessage`/`onStreaming`/`onToolExecute`...）通过 `invokeLater`/`invokeAndWait` 切回 EDT
+- **子 Agent 系统**：`TaskTool` 支持创建独立子 Agent 执行任务。预置 3 种 `AgentType` + 自定义定义（兼容 Claude Code `.claude/agents/*.md` SnakeYAML 解析）。支持 `allowedTools` 白名单和 `disallowedTools` 黑名单。子 Agent 自动批准工具（免审批），不污染主对话 history。后台异步执行 + `onProgress` 实时推送
+- **工具实时输出**：`AgentTool.execute()` 新增 `onProgress` 回调，工具执行期间可推送中间内容到 UI。`execute_command` 逐行读取进程输出实时推送，`task` 透传子 Agent 回调。UI 侧通过 `streamingToolRow` 可折叠组件展示（默认折叠，点击展开）
+- **工具执行行颜色**：子 Agent（task）使用紫色左栏（`agentBar`），普通工具使用蓝色（`toolBar`）
+- **UI 更新**：所有回调（`onMessage`/`onStreaming`/`onToolExecute`/`onToolStreaming`...）通过 `invokeLater`/`invokeAndWait` 切回 EDT
 
 ### 工具系统
 

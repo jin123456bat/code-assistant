@@ -17,7 +17,7 @@ class GitDiffTool : AgentTool {
         ToolParameter("staged", "boolean", "是否仅查看已暂存的变更，默认 false 查看所有变更")
     )
 
-    override fun execute(params: Map<String, String>, project: Project): ToolResult {
+    override fun execute(params: Map<String, String>, project: Project, onProgress: ((String) -> Unit)?): ToolResult {
         val staged = params["staged"]?.toBoolean() ?: false
         val args = if (staged) listOf("diff", "--staged") else listOf("diff")
         return runGit(project, *args.toTypedArray())
@@ -31,7 +31,7 @@ class GitLogTool : AgentTool {
         ToolParameter("count", "integer", "显示的提交数量，默认 10")
     )
 
-    override fun execute(params: Map<String, String>, project: Project): ToolResult {
+    override fun execute(params: Map<String, String>, project: Project, onProgress: ((String) -> Unit)?): ToolResult {
         val count = params["count"]?.toIntOrNull() ?: 10
         return runGit(project, "log", "--oneline", "-$count")
     }
@@ -42,7 +42,7 @@ class GitStatusTool : AgentTool {
     override val description = "查看 git 工作区状态（修改、新增、删除的文件）"
     override val parameters = emptyList<ToolParameter>()
 
-    override fun execute(params: Map<String, String>, project: Project): ToolResult {
+    override fun execute(params: Map<String, String>, project: Project, onProgress: ((String) -> Unit)?): ToolResult {
         return runGit(project, "status", "--short")
     }
 }

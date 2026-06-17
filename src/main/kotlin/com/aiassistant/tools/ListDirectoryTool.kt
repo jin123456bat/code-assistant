@@ -18,7 +18,7 @@ class ListDirectoryTool : AgentTool {
         ToolParameter("max_depth", "integer", "最大递归深度，默认 3")
     )
 
-    override fun execute(params: Map<String, String>, project: Project): ToolResult {
+    override fun execute(params: Map<String, String>, project: Project, onProgress: ((String) -> Unit)?): ToolResult {
         val basePath = project.basePath ?: return ToolResult.err("项目路径不可用")
         val relativePath = params["path"] ?: ""
         val maxDepth = params["max_depth"]?.toIntOrNull() ?: 3

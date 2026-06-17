@@ -614,7 +614,7 @@ class McpToolAdapter(
     /** 原始 JSON 参数（由 AgentLoop 在执行前注入），保留原始类型 */
     @Volatile var rawArgsJson: String? = null
 
-    override fun execute(params: Map<String, String>, project: Project): ToolResult {
+    override fun execute(params: Map<String, String>, project: Project, onProgress: ((String) -> Unit)?): ToolResult {
         val raw = rawArgsJson
         return if (raw != null) {
             client.callToolRaw(name, raw, project)

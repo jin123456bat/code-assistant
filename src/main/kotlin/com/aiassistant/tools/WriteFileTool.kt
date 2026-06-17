@@ -17,7 +17,7 @@ class WriteFileTool : AgentTool {
         ToolParameter("content", "string", "要写入的文件内容", required = true)
     )
 
-    override fun execute(params: Map<String, String>, project: Project): ToolResult {
+    override fun execute(params: Map<String, String>, project: Project, onProgress: ((String) -> Unit)?): ToolResult {
         val relativePath = params["path"]?.takeIf { it.isNotBlank() } ?: return ToolResult.err("path 不能为空")
         val content = params["content"]?.takeIf { it.isNotBlank() } ?: return ToolResult.err("content 不能为空")
         val basePath = project.basePath ?: return ToolResult.err("项目路径不可用")

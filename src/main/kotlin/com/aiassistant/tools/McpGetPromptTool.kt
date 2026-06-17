@@ -18,7 +18,7 @@ class McpGetPromptTool : AgentTool {
         ToolParameter("arguments", "string", "可选的 JSON 参数字符串，如 {\"path\":\"/src/main\"}")
     )
 
-    override fun execute(params: Map<String, String>, project: Project): ToolResult {
+    override fun execute(params: Map<String, String>, project: Project, onProgress: ((String) -> Unit)?): ToolResult {
         val name = params["name"]?.takeIf { it.isNotBlank() } ?: return ToolResult.err("name 不能为空")
         val mcpManager = McpManager.getInstance(project.basePath) ?: return ToolResult.err("MCP 管理器未初始化")
 

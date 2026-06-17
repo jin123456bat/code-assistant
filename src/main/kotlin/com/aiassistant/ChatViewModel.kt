@@ -61,6 +61,7 @@ class ChatViewModel {
     var onRateLimitCountdown: ((Int) -> Unit)? = null
     var onToolExecute: ((String, String) -> Unit)? = null
     var onToolResult: ((String, String) -> Unit)? = null
+    var onToolStreaming: ((String, String) -> Unit)? = null  // 工具执行期间的中间输出
     var onPlanUpdate: ((AgentContext.Plan) -> Unit)? = null
     var onModelRouted: ((String) -> Unit)? = null
     var onConfirmTool: ((String, String, CountDownLatch, AtomicBoolean) -> Unit)? = null
@@ -157,6 +158,11 @@ class ChatViewModel {
                 if (generationId != currentGen) return@runOnEdt
                 isThinking = true
                 streamingThinking = text; onStreamingThinkingChanged?.invoke(text)
+            }
+        }
+        a.onToolStreaming = { name, partial ->
+            runOnEdt {
+                onToolStreaming?.invoke(name, partial)
             }
         }
         a.onToolExecute = { name, args ->

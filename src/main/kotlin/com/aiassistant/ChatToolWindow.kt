@@ -762,6 +762,13 @@ class ChatToolWindow(private val project: Project) {
     private var streamingContentPane: JComponent? = null
     private var streamingThinkingRow: JPanel? = null
     private var streamingThinkingTextArea: JTextArea? = null
+    // 工具执行期间的流式输出（子 Agent 实时输出）
+    private var streamingToolRow: JPanel? = null           // outerRow，conversationContainer 的直接子组件
+    private var streamingToolContentArea: JTextArea? = null
+    private var streamingToolCollapsed: AtomicBoolean? = null
+    private var streamingToolLeftBar: JPanel? = null       // 用于 applyStreamingCollapsed
+    private var streamingToolChevron: JLabel? = null
+    private var streamingToolName: String? = null
 
     // 自动引用去重
     private var lastAutoInsertedHash: Int = 0
@@ -974,8 +981,17 @@ class ChatToolWindow(private val project: Project) {
         }
         // onToolExecute / onToolResult 已由 onMessagesChanged 统一驱动 rebuildConversation，
         // 不再单独设置 needFullRebuild（新增消息由版本号增量检测，原地更新由 version 递增触发重新渲染）
-        viewModel.onToolExecute = { _, _ -> }
-        viewModel.onToolResult = { _, _ -> }
+        viewModel.onToolExecute = { name, _ ->
+            // 所有工具执行时创建可折叠运行行（默认折叠，有实时输出则填入内容）
+            showStreamingToolRow(name)
+        }
+        viewModel.onToolResult = { name, _ ->
+            // 工具执行完成，清理流式运行行，最终结果由 rebuildConversation 渲染
+            if (name == streamingToolName) cleanupStreamingToolRow()
+        }
+        viewModel.onToolStreaming = { name, content ->
+            updateStreamingToolContent(name, content)
+        }
         viewModel.onConfirmTool = { _, _, _, _ ->
             ApplicationManager.getApplication().invokeLater { rebuildConversation() }
         }
@@ -1050,6 +1066,7 @@ class ChatToolWindow(private val project: Project) {
             streamingThinkingRow?.let { conversationContainer.remove(it) }
             streamingThinkingRow = null
             streamingThinkingTextArea = null
+            cleanupStreamingToolRow()
 
             // 增量渲染：只渲染版本号变更的消息（新增消息 version=0 不在 map 中，原地更新 version 递增触发重渲染）
             for (msg in displayMessages) {
@@ -1215,6 +1232,47 @@ class ChatToolWindow(private val project: Project) {
         }
     }
 
+    /** 工具开始执行时创建可折叠运行行（默认折叠），清理上一个未清理的 */
+    private fun showStreamingToolRow(toolName: String) {
+        cleanupStreamingToolRow()  // 清理上一个
+        streamingToolName = toolName
+        val isTask = toolName == "task"
+        val ref = toolRowFactory.streamingToolRow(toolName, isTask)
+        streamingToolRow = ref.outerRow
+        streamingToolContentArea = ref.contentArea
+        streamingToolCollapsed = ref.collapsed
+        val leftBar = ref.outerRow.components[0] as? JPanel ?: return
+        streamingToolLeftBar = leftBar
+        val headerRow = leftBar.components[0] as? JPanel ?: return
+        streamingToolChevron = headerRow.components[0] as? JLabel
+        conversationContainer.add(ref.outerRow)
+        conversationContainer.revalidate()
+    }
+
+    /** 工具执行期间的实时内容更新（仅更新文本，不重建组件） */
+    private fun updateStreamingToolContent(toolName: String, content: String) {
+        streamingToolContentArea?.text = content
+        streamingToolContentArea?.revalidate()
+        streamingToolContentArea?.repaint()
+    }
+
+    /** 清理流式工具行 */
+    private fun cleanupStreamingToolRow() {
+        streamingToolRow?.let { row ->
+            if (row.parent != null) {
+                conversationContainer.remove(row)
+                conversationContainer.revalidate()
+                conversationContainer.repaint()
+            }
+        }
+        streamingToolRow = null
+        streamingToolContentArea = null
+        streamingToolCollapsed = null
+        streamingToolLeftBar = null
+        streamingToolChevron = null
+        streamingToolName = null
+    }
+
     private fun createMessageBubble(message: AgentMessage): JPanel {
         return when (message.role) {
             "thinking" -> createCollapsibleThinkingBubble(message.content)
@@ -1273,7 +1331,13 @@ class ChatToolWindow(private val project: Project) {
                 onReject = { state.userChoice.set(false); state.latch.countDown() }
             )
         } else null
-        return toolRowFactory.toolResultRow(message, approvals)
+        // 子 Agent（task）结果用紫色左栏区分普通工具蓝色
+        val isTask = name == "task"
+        return toolRowFactory.toolResultRow(
+            message, approvals,
+            barColor = if (isTask) ChatTheme.agentBar else null,
+            bgColor = if (isTask) ChatTheme.agentBg else null
+        )
     }
 
     /** 可折叠的思考内容行 — 委托给 ToolRowFactory（替代薰衣草色气泡） */

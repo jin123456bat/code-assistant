@@ -20,7 +20,7 @@ class WebSearchTool : AgentTool {
         ToolParameter("max_results", "integer", "最大结果数，默认 10")
     )
 
-    override fun execute(params: Map<String, String>, project: Project): ToolResult {
+    override fun execute(params: Map<String, String>, project: Project, onProgress: ((String) -> Unit)?): ToolResult {
         val query = params["query"]?.takeIf { it.isNotBlank() } ?: return ToolResult.err("query 不能为空")
         val maxResults = params["max_results"]?.toIntOrNull() ?: 10
 

@@ -36,7 +36,7 @@ class WebFetchTool : AgentTool {
         private const val OUTPUT_TRUNCATE_CHARS = 8000
     }
 
-    override fun execute(params: Map<String, String>, project: Project): ToolResult {
+    override fun execute(params: Map<String, String>, project: Project, onProgress: ((String) -> Unit)?): ToolResult {
         val url = params["url"] ?: return ToolResult.err("缺少 url 参数")
         val maxRetries = (params["max_retries"]?.toIntOrNull() ?: DEFAULT_MAX_RETRIES)
             .coerceIn(0, MAX_RETRIES_LIMIT)
