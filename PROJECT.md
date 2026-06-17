@@ -125,7 +125,7 @@ AgentLoop 是核心调度器，在后台 `Thread` 上运行 `while` 循环：
 - **连续失败上限**：`MAX_FAILURES=3`，达到后中止
 - **流程**：每轮调用模型 → 若返回 `tool_use` 则执行工具并把结果回填到 `history` → 继续下一轮 → 若返回纯文本则结束
 - **max_tokens 续写**：`max_tokens=32768`（DeepSeek V4 Pro 默认输出上限）。当 API 返回 `stop_reason=max_tokens` 时，AgentLoop 自动将已生成内容加入 history 并继续循环让模型续写，最多续写 `MAX_CONTINUATIONS=5` 次，防止死循环
-- **子 Agent 系统**：`TaskTool` 支持创建独立子 Agent 执行任务。预置 3 种 `AgentType` + 自定义定义（兼容 Claude Code `.claude/agents/*.md` SnakeYAML 解析）。支持 `allowedTools`/`disallowedTools`、**隔离模式**（`isolation: worktree`）、**Fork 上下文继承**（`fork: true`）、**并行执行**（`background: true` 多子代理并发，`SubAgentRegistry` 管理结果，每轮自动注入完成结果到对话）
+- **子 Agent 系统**：与 Claude Code 对齐——无墙钟超时，靠 `maxTurns`（`maxLoops`）控制。支持 `allowedTools`/`disallowedTools`、`isolation: worktree`、`fork: true`、`background: true` 并行。YAML 字段：`name/description/tools/disallowedTools/model/maxTurns/isolation/fork`
 - **工具实时输出**：`AgentTool.execute()` 新增 `onProgress` 回调。`execute_command` 逐行读取进程输出，`task` 透传子 Agent 回调。UI 侧通过 `streamingToolRow` 可折叠组件展示，子代理工具调用以组件化行（`subAgentToolRunningRow`/`subAgentToolResultRow`）渲染，紫色 `agentBar` 区分主 Agent 蓝色工具行
 - **工具行颜色**：主 Agent 工具蓝（`toolBar`），子 Agent（task）及其内部工具紫（`agentBar`）
 - **UI 更新**：所有回调（`onMessage`/`onStreaming`/`onToolExecute`/`onToolStreaming`...）通过 `invokeLater`/`invokeAndWait` 切回 EDT

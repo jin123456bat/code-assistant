@@ -16,6 +16,9 @@ object AgentLoader {
         val tools: Set<String>?,
         val disallowedTools: Set<String>,
         val model: String?,
+        val maxLoops: Int?,
+        val isolation: String?,
+        val fork: Boolean,
         val systemPrompt: String
     )
 
@@ -63,6 +66,9 @@ object AgentLoader {
         val tools = parseStringSet(fields["tools"])
         val disallowedTools = parseStringSet(fields["disallowedTools"]) ?: emptySet()
         val model = fields["model"]?.toString()?.takeIf { it.isNotBlank() }
+        val maxTurns = (fields["maxTurns"] as? Number)?.toInt()
+        val isolation = fields["isolation"]?.toString()?.takeIf { it.isNotBlank() }
+        val fork = fields["fork"]?.toString()?.toBoolean() ?: false
 
         return CustomAgentDef(
             name = name,
@@ -70,6 +76,9 @@ object AgentLoader {
             tools = tools,
             disallowedTools = disallowedTools,
             model = model,
+            maxLoops = maxTurns,
+            isolation = isolation,
+            fork = fork,
             systemPrompt = body
         )
     }
@@ -94,8 +103,9 @@ object AgentLoader {
         deniedTools = def.disallowedTools,
         autoApprove = true,
         defaultModel = def.model,
-        maxLoops = AgentLoop.MAX_LOOPS,
+        maxLoops = def.maxLoops ?: AgentLoop.MAX_SUB_LOOPS,
         maxFailures = AgentLoop.MAX_FAILURES,
-        timeoutMinutes = 5
+        isolation = def.isolation,
+        fork = def.fork
     )
 }

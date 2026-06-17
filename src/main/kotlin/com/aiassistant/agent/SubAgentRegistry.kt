@@ -20,11 +20,20 @@ object SubAgentRegistry {
     )
 
     private val entries = ConcurrentHashMap<String, Entry>()
+    // 运行中的子 Agent 实例引用（用于 stopAll 停止）
+    private val loops = ConcurrentHashMap<String, AgentLoop>()
 
-    fun register(id: String, description: String): Entry {
+    fun register(id: String, description: String, loop: AgentLoop? = null): Entry {
         val entry = Entry(id, description, Status.RUNNING)
         entries[id] = entry
+        if (loop != null) loops[id] = loop
         return entry
+    }
+
+    /** 停止所有运行中的子 Agent */
+    fun stopAll() {
+        loops.values.forEach { it.stop() }
+        loops.clear()
     }
 
     fun complete(id: String, result: String) {

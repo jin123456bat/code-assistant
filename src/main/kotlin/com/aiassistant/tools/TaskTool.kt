@@ -48,7 +48,8 @@ class TaskTool : AgentTool {
             mcpTools = emptyList(),
             allowedTools = agentType.allowedTools,
             deniedTools = agentType.deniedTools,
-            asSubAgent = true
+            asSubAgent = true,
+            overrideMaxLoops = agentType.maxLoops
         )
 
         // 模型覆盖
@@ -107,14 +108,15 @@ class TaskTool : AgentTool {
         return try {
             if (background) {
                 val subId = "sub-${System.currentTimeMillis()}"
-                com.aiassistant.agent.SubAgentRegistry.register(subId, description)
+                com.aiassistant.agent.SubAgentRegistry.register(subId, description, childLoop)
                 CompletableFuture.runAsync {
                     try {
                         childLoop.run(prompt, apiKey, forkHistory = forkCtx) { finalText, thinking ->
                             resultRef.set(finalText)
                             thinkingRef.set(thinking)
+                            latch.countDown()
                         }
-                        latch.await(agentType.timeoutMinutes, TimeUnit.MINUTES)
+                        latch.await()
                         val result = resultRef.get()?.takeIf { it.isNotBlank() } ?: ""
                         if (result.isNotBlank()) {
                             com.aiassistant.agent.SubAgentRegistry.complete(subId, result)
@@ -128,7 +130,7 @@ class TaskTool : AgentTool {
                         removeWorktree(workTreePath)
                     }
                 }
-                ToolResult.ok("子代理已启动: $description\n\nID: $subId | 类型: ${agentType.name} | 超时: ${agentType.timeoutMinutes}min")
+                ToolResult.ok("子代理已启动: $description\n\nID: $subId | 类型: ${agentType.name} | 最大轮次: ${agentType.maxLoops}")
             } else {
                 childLoop.run(prompt, apiKey, forkHistory = forkCtx) { finalText, thinking ->
                     resultRef.set(finalText)
@@ -136,16 +138,10 @@ class TaskTool : AgentTool {
                     latch.countDown()
                 }
 
-                val finished = try {
-                    latch.await(agentType.timeoutMinutes, TimeUnit.MINUTES)
+                try {
+                    latch.await()
                 } catch (_: InterruptedException) {
                     Thread.currentThread().interrupt()
-                    false
-                }
-
-                if (!finished) {
-                    childLoop.stop()
-                    return ToolResult.err("子代理执行超时（${agentType.timeoutMinutes} 分钟）: $description")
                 }
 
                 val result = resultRef.get().takeIf { it.isNotBlank() } ?: ""

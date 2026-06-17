@@ -13,7 +13,8 @@ class AgentLoop(
     private val project: Project
 ) {
     companion object {
-        const val MAX_LOOPS = 100
+        const val MAX_LOOPS = Int.MAX_VALUE  // 主 Agent 不限制轮次（对齐 Claude Code）
+        const val MAX_SUB_LOOPS = 20         // 子 Agent 默认最大轮次（对齐 Claude Code maxTurns）
         const val MAX_FAILURES = 3
         const val MAX_CONTINUATIONS = 5  // max_tokens 续写上限，防止死循环
 
@@ -42,6 +43,7 @@ class AgentLoop(
     val ctx = AgentContext(project)
     @Volatile private var cancelled = false
     @Volatile private var model: String = AppSettingsService.getInstance().getModel()
+    private var maxLoops: Int = MAX_LOOPS  // 可由 AgentType 覆盖
     /** 是否为子 Agent（子 Agent 不注注册元工具，自动批准工具） */
     @Volatile private var isSubAgent = false
     /** 当前 agent 后台线程引用，供 stop() 中断阻塞等待（网络挂起时无需等 2 分钟超时） */
@@ -87,9 +89,11 @@ class AgentLoop(
         mcpTools: List<AgentTool> = emptyList(),
         allowedTools: Set<String>? = null,
         deniedTools: Set<String> = emptySet(),
-        asSubAgent: Boolean = false
+        asSubAgent: Boolean = false,
+        overrideMaxLoops: Int = MAX_LOOPS
     ) {
         isSubAgent = asSubAgent
+        maxLoops = overrideMaxLoops
         ctx.toolRegistry.registerBuiltIn(allowedTools, deniedTools)
         ctx.toolRegistry.registerMcp(mcpTools)
         // 子 Agent 不加载 skill 和自定义 agent（不需要这些系统）
@@ -161,7 +165,7 @@ class AgentLoop(
                 var consecutiveFailures = 0
                 var continuationCount = 0
 
-                while (loopCount < MAX_LOOPS && !cancelled) {
+                while (loopCount < maxLoops && !cancelled) {
                     // 每轮检查并行子代理结果，注入到 history
                     val newSubResults = SubAgentRegistry.drainCompleted()
                     for (entry in newSubResults) {
@@ -522,6 +526,11 @@ class AgentLoop(
 
                     loopCount++
                 }
+                // maxLoops 到上限但未产生文本回复时，通知调用方结束
+                if (loopCount >= maxLoops) {
+                    AppLogger.warn("AgentLoop: 达到最大轮次 $maxLoops")
+                    callback("", "")
+                }
             } catch (e: InterruptedException) {
                 Thread.currentThread().interrupt()
             } catch (e: Exception) {
@@ -538,12 +547,11 @@ class AgentLoop(
 
     fun stop() {
         cancelled = true
-        // 中断阻塞等待（done.wait / latch.await）：网络挂起时无需等 2 分钟超时
         agentThread?.interrupt()
-        // 通知所有 MCP 服务器取消正在执行的操作（对齐 Claude Code）
         com.aiassistant.mcp.McpManager.getInstance(project.basePath)?.cancelAll()
-        // 解除可能正卡在用户确认上的背景线程，避免挂起到超时
         pendingConfirmLatch?.countDown()
+        // 停止所有后台子 Agent
+        SubAgentRegistry.stopAll()
     }
 
     // ---- Anthropic API ----
