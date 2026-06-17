@@ -141,15 +141,18 @@ class AgentLoop(
 
                 // Fork：注入父对话上下文（复用 prompt cache 省 token）
                 // 确保消息交替——fork 末尾不能和当前 user 消息产生连续同 role
-                if (forkHistory != null && forkHistory.isNotEmpty()) {
-                    val lastRole = forkHistory.last().role
-                    if (lastRole == "user") {
-                        // 末尾是 user → 插入非空占位 assistant 保持交替（空 content 会被 SDK 丢弃）
-                        history.add(AnthropicMessage("assistant", "."))
+                // 复合操作加锁，与 clearConversation() 互斥，防止消息交替被破坏
+                synchronized(ctx.historyLock) {
+                    if (forkHistory != null && forkHistory.isNotEmpty()) {
+                        val lastRole = forkHistory.last().role
+                        if (lastRole == "user") {
+                            // 末尾是 user → 插入非空占位 assistant 保持交替（空 content 会被 SDK 丢弃）
+                            history.add(AnthropicMessage("assistant", "."))
+                        }
+                        history.addAll(0, forkHistory)
                     }
-                    history.addAll(0, forkHistory)
+                    history.add(AnthropicMessage("user", userMessage, images = images))
                 }
-                history.add(AnthropicMessage("user", userMessage, images = images))
 
                 // 检查并行子代理结果，注入到对话（主 Agent 下一轮 API 调用可感知）
                 val subResults = SubAgentRegistry.drainCompleted()

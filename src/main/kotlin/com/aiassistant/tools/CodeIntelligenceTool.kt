@@ -54,12 +54,17 @@ class CodeIntelligenceTool : AgentTool {
         val basePath = project.basePath ?: return ToolResult.err("项目路径不可用")
         val maxResults = params["max_results"]?.toIntOrNull() ?: 20
 
-        // PSI/Index 操作必须在 read action 中执行（AgentLoop 运行在后台线程）
+        // workspace_symbol 仅使用 FilenameIndex（磁盘索引），不需要 readAction，提前处理减少读锁占用
+        if (operation == "workspace_symbol") {
+            return try { workspaceSymbols(params, project, basePath, maxResults) }
+                catch (e: Exception) { ToolResult.err("$operation 执行失败: ${e.message ?: e.javaClass.simpleName}") }
+        }
+
+        // 其余操作需要 PSI 访问，必须在 read action 中执行（AgentLoop 运行在后台线程）
         return try {
             ApplicationManager.getApplication().runReadAction<ToolResult> {
                 when (operation) {
                     "document_symbols" -> documentSymbols(params, project, basePath)
-                    "workspace_symbol" -> workspaceSymbols(params, project, basePath, maxResults)
                     else -> {
                         val filePath = params["file_path"] ?: return@runReadAction ToolResult.err("缺少 file_path 参数")
                         val line = params["line"]?.toIntOrNull() ?: return@runReadAction ToolResult.err("缺少 line 参数")

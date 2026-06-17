@@ -18,7 +18,7 @@ class AgentContext(val project: Project) {
     /** conversationHistory 的复合操作锁（clear+addAll 组合操作需要外部同步） */
     val historyLock = Any()
     /** 最近一次 API 调用的 input tokens（从 API usage 获取），用于判断是否触发自动 Compact */
-    var lastInputTokens: Int = 0
+    @Volatile var lastInputTokens: Int = 0
 
     // Plan mode
     var currentPlan: Plan? = null

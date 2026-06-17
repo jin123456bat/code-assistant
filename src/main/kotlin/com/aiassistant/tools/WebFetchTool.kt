@@ -158,17 +158,18 @@ class WebFetchTool : AgentTool {
 
     /** 限制响应大小，避免 OOM */
     private fun readLimited(connection: HttpURLConnection, maxBytes: Int): ByteArray {
-        val input = connection.inputStream
         val buffer = ByteArray(min(8192, maxBytes))
         val output = java.io.ByteArrayOutputStream(min(maxBytes, 1024 * 1024))
         var totalRead = 0
 
-        while (totalRead < maxBytes) {
-            val toRead = min(buffer.size, maxBytes - totalRead)
-            val bytesRead = input.read(buffer, 0, toRead)
-            if (bytesRead == -1) break
-            output.write(buffer, 0, bytesRead)
-            totalRead += bytesRead
+        connection.inputStream.use { input ->
+            while (totalRead < maxBytes) {
+                val toRead = min(buffer.size, maxBytes - totalRead)
+                val bytesRead = input.read(buffer, 0, toRead)
+                if (bytesRead == -1) break
+                output.write(buffer, 0, bytesRead)
+                totalRead += bytesRead
+            }
         }
         return output.toByteArray()
     }

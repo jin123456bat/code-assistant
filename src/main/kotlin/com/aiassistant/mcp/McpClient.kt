@@ -293,7 +293,11 @@ class McpClient(private val config: McpServerConfig) {
     fun callToolRaw(toolName: String, rawArgsJson: String, project: Project): ToolResult {
         if (!initialized) return ToolResult.err("MCP 服务器未连接: ${config.name}")
         return try {
-            val (id, json) = buildJsonRpc("tools/call", """{"name":"$toolName","arguments":$rawArgsJson}""")
+            val paramsObj = com.google.gson.JsonObject().apply {
+                addProperty("name", toolName)
+                add("arguments", com.google.gson.JsonParser.parseString(rawArgsJson.ifEmpty { "{}" }))
+            }
+            val (id, json) = buildJsonRpc("tools/call", com.google.gson.Gson().toJson(paramsObj))
             val response = if (isHttpTransport) sendHttpRequest(json) else { sendStdioRequest(json); readStdioResponse(id) }
             if (response == null) ToolResult.err("MCP 调用无响应: $toolName")
             else if (response.contains("\"error\"")) ToolResult.err("MCP 错误: ${extractErrorMessage(response)}")
@@ -322,12 +326,14 @@ class McpClient(private val config: McpServerConfig) {
     fun getPrompt(name: String, arguments: Map<String, String>): String {
         if (!initialized) return ""
         return try {
-            val argsJson = if (arguments.isEmpty()) "{}" else {
-                arguments.entries.joinToString(",", "{", "}") { (k, v) ->
-                    "\"$k\":\"${com.aiassistant.shared.JsonUtils.escapeJson(v)}\""
-                }
+            val argsObj = com.google.gson.JsonObject().apply {
+                arguments.forEach { (k, v) -> addProperty(k, v) }
             }
-            val (id, json) = buildJsonRpc("prompts/get", """{"name":"$name","arguments":$argsJson}""")
+            val paramsObj = com.google.gson.JsonObject().apply {
+                addProperty("name", name)
+                add("arguments", argsObj)
+            }
+            val (id, json) = buildJsonRpc("prompts/get", com.google.gson.Gson().toJson(paramsObj))
             val response = if (isHttpTransport) sendHttpRequest(json) else { sendStdioRequest(json); readStdioResponse(id) }
             extractPromptContent(response ?: return "")
         } catch (e: Exception) {
@@ -354,7 +360,10 @@ class McpClient(private val config: McpServerConfig) {
     fun readResource(uri: String): String {
         if (!initialized) return ""
         return try {
-            val (id, json) = buildJsonRpc("resources/read", """{"uri":"${uri.replace("\"", "\\\"")}"}""")
+            val paramsObj = com.google.gson.JsonObject().apply {
+                addProperty("uri", uri)
+            }
+            val (id, json) = buildJsonRpc("resources/read", com.google.gson.Gson().toJson(paramsObj))
             val response = if (isHttpTransport) sendHttpRequest(json) else { sendStdioRequest(json); readStdioResponse(id) }
             extractResourceContent(response ?: return "")
         } catch (e: Exception) {
@@ -411,7 +420,6 @@ class McpClient(private val config: McpServerConfig) {
     private fun readStdioResponse(expectedId: Int, timeoutMs: Long = 10_000): String? {
         val deadline = System.currentTimeMillis() + timeoutMs
         synchronized(responseLock) {
-            pendingResponseBody = null
             try {
                 while (pendingResponseBody == null) {
                     val remaining = deadline - System.currentTimeMillis()

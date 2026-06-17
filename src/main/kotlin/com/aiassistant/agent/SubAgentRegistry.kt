@@ -46,20 +46,29 @@ object SubAgentRegistry {
         entries[id]?.let {
             entries[id] = it.copy(status = Status.DONE, result = result)
         }
+        loops.remove(id)
     }
 
     fun fail(id: String, error: String) {
         entries[id]?.let {
             entries[id] = it.copy(status = Status.FAILED, error = error)
         }
+        loops.remove(id)
     }
 
     fun get(id: String): Entry? = entries[id]
 
-    /** 获取所有已完成但尚未消费的结果，消费后移除 */
+    /** 获取所有已完成但尚未消费的结果，消费后移除。使用迭代器原子化 filter+remove，防止并发重复消费。 */
     fun drainCompleted(): List<Entry> {
-        val completed = entries.values.filter { it.status != Status.RUNNING }.toList()
-        completed.forEach { entries.remove(it.id) }
+        val completed = mutableListOf<Entry>()
+        val iter = entries.entries.iterator()
+        while (iter.hasNext()) {
+            val (_, entry) = iter.next()
+            if (entry.status != Status.RUNNING) {
+                completed.add(entry)
+                iter.remove()
+            }
+        }
         return completed
     }
 

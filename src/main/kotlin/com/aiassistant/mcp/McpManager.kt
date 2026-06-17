@@ -137,8 +137,7 @@ class McpManager(private val project: Project) {
                     if (newClient.connect()) {
                         setupClientCallbacks(newClient, name)
                         clients[name] = newClient
-                        // 重新发现工具并通过 listener 更新注册中心（传入全量工具）
-                        newClient.discoverTools()
+                        // 重新发现全量工具并通过 listener 更新注册中心（collectAllTools 内部已调用 discoverTools）
                         val allTools = collectAllTools()
                         if (allTools.isNotEmpty()) {
                             changeListener?.onToolsChanged(name, allTools)
@@ -176,8 +175,7 @@ class McpManager(private val project: Project) {
             newClient.samplingHandler = oldSampling
             clients[name] = newClient
             restartCount[name] = retries + 1
-            // 重新发现工具并通过 listener 更新注册中心（传入全量工具）
-            newClient.discoverTools()
+            // 重新发现全量工具并通过 listener 更新注册中心（collectAllTools 内部已调用 discoverTools）
             val allTools = collectAllTools()
             if (allTools.isNotEmpty()) {
                 changeListener?.onToolsChanged(name, allTools)

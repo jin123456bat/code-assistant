@@ -23,6 +23,8 @@ class ChatViewModel {
     @Volatile var streamingThinking = ""
     @Volatile var isStreaming = false
     @Volatile var isRateLimited = false
+    /** 防止 compact 重复调用（两次 /compact 创建多个后台压缩线程） */
+    private val isCompacting = java.util.concurrent.atomic.AtomicBoolean(false)
     /** 限流恢复 Timer 引用，供 stopGeneration/clearConversation 取消 */
     private var rateLimitTimer: javax.swing.Timer? = null
     @Volatile var currentToolName: String? = null
@@ -408,10 +410,15 @@ class ChatViewModel {
      * 同步更新跨轮历史（ctx.conversationHistory）和 UI 消息列表（messages）。
      */
     fun compactConversation(apiKey: String) {
-        val a = agent ?: return
-        val ctx = a.ctx
+        // 防止重复调用创建多个压缩线程（compareAndSet 原子化 check-then-set）
+        if (!isCompacting.compareAndSet(false, true)) return
+        val a = agent
+        val ctx = a?.ctx
         val allMessages = messages.toList()
-        if (allMessages.size <= 10) return  // 消息太少不需要压缩
+        if (a == null || ctx == null || allMessages.size <= 10) {
+            isCompacting.set(false)
+            return  // agent 未初始化或消息太少不需要压缩
+        }
 
         // 保留最近 KEEP_COUNT 条消息 + 对应的跨轮历史
         val keepCount = 15
@@ -421,37 +428,41 @@ class ChatViewModel {
         stopGeneration()
         // 后台线程执行压缩，避免阻塞 UI
         Thread {
-            // 用跨轮历史（含完整 thinking/tool_use）生成摘要
-            val history = synchronized(ctx.historyLock) { ctx.conversationHistory.toList() }
-            if (history.size <= keepCount * 3) return@Thread
+            try {
+                // 用跨轮历史（含完整 thinking/tool_use）生成摘要
+                val history = synchronized(ctx.historyLock) { ctx.conversationHistory.toList() }
+                if (history.size <= keepCount * 3) return@Thread
 
-            // 保留最近部分对应的历史记录（估算：每条 UI 消息约对应 2-3 条历史记录）
-            val historyKeep = history.takeLast(keepCount * 3)
-            val historyToSummarize = history.dropLast(keepCount * 3)
+                // 保留最近部分对应的历史记录（估算：每条 UI 消息约对应 2-3 条历史记录）
+                val historyKeep = history.takeLast(keepCount * 3)
+                val historyToSummarize = history.dropLast(keepCount * 3)
 
-            val summary = a.compact(historyToSummarize, apiKey)
-            if (summary != null) {
-                // 重建跨轮历史：摘要作为 system prompt 注入（对齐 Claude Code）
-                // 避免用 user 消息注入摘要导致与后续 user 消息被 mergeConsecutiveSameRole 合并丢失
-                ctx.systemPrompt = buildString {
-                    append(ctx.systemPrompt)
-                    append("\n\n## 对话摘要（由 /compact 生成）\n")
-                    append("以下是之前对话的关键摘要，请基于此继续工作：\n\n")
-                    append(summary)
-                }
-                synchronized(ctx.historyLock) {
-                    ctx.conversationHistory.clear()
-                    ctx.conversationHistory.addAll(historyKeep)
-                }
-                ctx.lastInputTokens = 0  // 重置：compact 后下次 API 调用会返回新的更低 input token 数
+                val summary = a.compact(historyToSummarize, apiKey)
+                if (summary != null) {
+                    // 重建跨轮历史：摘要作为 system prompt 注入（对齐 Claude Code）
+                    // 避免用 user 消息注入摘要导致与后续 user 消息被 mergeConsecutiveSameRole 合并丢失
+                    ctx.systemPrompt = buildString {
+                        append(ctx.systemPrompt)
+                        append("\n\n## 对话摘要（由 /compact 生成）\n")
+                        append("以下是之前对话的关键摘要，请基于此继续工作：\n\n")
+                        append(summary)
+                    }
+                    synchronized(ctx.historyLock) {
+                        ctx.conversationHistory.clear()
+                        ctx.conversationHistory.addAll(historyKeep)
+                    }
+                    ctx.lastInputTokens = 0  // 重置：compact 后下次 API 调用会返回新的更低 input token 数
 
-                // 更新 UI 消息列表
-                runOnEdt {
-                    messages.clear()
-                    messages.add(AgentMessage("system", "📋 对话摘要：$summary"))
-                    messages.addAll(recentMessages)
-                    onMessagesChanged?.invoke()
+                    // 更新 UI 消息列表
+                    runOnEdt {
+                        messages.clear()
+                        messages.add(AgentMessage("system", "📋 对话摘要：$summary"))
+                        messages.addAll(recentMessages)
+                        onMessagesChanged?.invoke()
+                    }
                 }
+            } finally {
+                isCompacting.set(false)  // 无论成功失败，完成后重置标志
             }
         }.start()
     }

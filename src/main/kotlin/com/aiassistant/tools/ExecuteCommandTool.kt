@@ -10,6 +10,12 @@ import java.util.concurrent.TimeUnit
 /**
  * 执行终端命令的工具。
  * 安全策略：所有命令执行前均触发审批卡，由用户确认。不做黑名单拦截。
+ *
+ * 已知风险：使用 `/bin/bash -c` 执行，shell 会解释元字符（`;`, `|`, `&&`, `$()` 等）。
+ * 若用户将 execute_command 加入白名单或盲批审批卡，LLM 可能被诱导执行恶意命令。
+ * 暂不修复原因：审批机制已提供有效防护（不在 SAFE_TOOLS 中，每次弹卡确认），
+ * 且 Claude Code 行为一致（同样依赖用户审批而非命令过滤）。
+ * 如需加强：可在 execute() 入口增加换行符/命令分隔符检测，拒绝多命令拼接。
  */
 class ExecuteCommandTool : AgentTool {
     override val name = "execute_command"

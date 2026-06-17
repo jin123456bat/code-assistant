@@ -14,6 +14,7 @@ import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.vcs.VcsDataKeys
 import com.intellij.openapi.vcs.changes.ChangeListManager
 import com.intellij.ui.EditorTextField
+import com.google.gson.Gson
 import java.awt.Component
 import java.awt.Container
 import java.net.HttpURLConnection
@@ -229,11 +230,12 @@ class GenerateCommitAction : AnAction() {
     }
 
     private fun callDeepSeek(apiKey: String, prompt: String): String? {
-        val requestBody = buildString {
-            append("""{"model":"deepseek-chat","messages":[{""")
-            append(""""role":"user","content":"${escapeJson(prompt)}""")
-            append(""""}],"stream":false}""")
-        }
+        val model = try { AppSettingsService.getInstance().getModel() } catch (_: Exception) { null } ?: "deepseek-chat"
+        val requestBody = Gson().toJson(mapOf(
+            "model" to model,
+            "messages" to listOf(mapOf("role" to "user", "content" to prompt)),
+            "stream" to false
+        ))
 
         val uri = URI.create("https://api.deepseek.com/v1/chat/completions")
         val conn = (uri.toURL().openConnection() as HttpURLConnection).apply {
@@ -266,33 +268,13 @@ class GenerateCommitAction : AnAction() {
     }
 
     private fun parseResponse(json: String): String? {
-        val contentKey = "\"content\":\""
-        val idx = json.indexOf(contentKey)
-        if (idx == -1) return null
-
-        val start = idx + contentKey.length
-        var i = start
-        while (i < json.length) {
-            when (json[i]) {
-                '\\' -> i += 2
-                '"' -> {
-                    return json.substring(start, i)
-                        .replace("\\n", "\n")
-                        .replace("\\r", "\r")
-                        .replace("\\\"", "\"")
-                        .replace("\\\\", "\\")
-                }
-                else -> i++
-            }
-        }
-        return null
-    }
-
-    private fun escapeJson(s: String): String {
-        return s.replace("\\", "\\\\")
-            .replace("\"", "\\\"")
-            .replace("\n", "\\n")
-            .replace("\r", "\\r")
+        return try {
+            val responseObj = Gson().fromJson(json, Map::class.java) as? Map<*, *> ?: return null
+            val choices = responseObj["choices"] as? List<*> ?: return null
+            val choice = choices.firstOrNull() as? Map<*, *> ?: return null
+            val message = choice["message"] as? Map<*, *> ?: return null
+            message["content"] as? String
+        } catch (_: Exception) { null }
     }
 
     private fun findEditorField(component: Component): EditorTextField? {

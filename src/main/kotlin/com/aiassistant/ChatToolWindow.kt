@@ -414,7 +414,7 @@ class ChatToolWindow(private val project: Project) {
                 toolTipText = "移除图片"
                 addMouseListener(object : MouseAdapter() {
                     override fun mouseClicked(e: MouseEvent) {
-                        pastedImages.removeAt(idx)
+                        if (idx < pastedImages.size) pastedImages.removeAt(idx)  // 按索引删除避免重复图片混淆，加边界检查防 OOB
                         rebuildChips()
                     }
                 })
@@ -1263,9 +1263,13 @@ class ChatToolWindow(private val project: Project) {
         streamingToolRow = ref.outerRow
         streamingToolContentPanel = ref.contentArea
         streamingToolCollapsed = ref.collapsed
-        val leftBar = ref.outerRow.components[0] as? JPanel ?: return
+        val leftBar = ref.outerRow.components[0] as? JPanel ?: run {
+            streamingToolRow = null; streamingToolLeftBar = null; streamingToolChevron = null; return
+        }
         streamingToolLeftBar = leftBar
-        val headerRow = leftBar.components[0] as? JPanel ?: return
+        val headerRow = leftBar.components[0] as? JPanel ?: run {
+            streamingToolRow = null; streamingToolLeftBar = null; streamingToolChevron = null; return
+        }
         streamingToolChevron = headerRow.components[0] as? JLabel
         conversationContainer.add(ref.outerRow)
         conversationContainer.revalidate()

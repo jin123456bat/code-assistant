@@ -38,9 +38,6 @@ class SettingsConfigurable : Configurable {
     private val statusLabel = JBLabel().apply {
         foreground = JBColor(0x666666, 0x8C8C8C)
     }
-    private val thinkingCheckbox = JBCheckBox(AiAssistantBundle.message("settings.thinking")).apply {
-        isSelected = true
-    }
     private val compactRatioSpinner = JSpinner(SpinnerNumberModel(90, 10, 100, 5))
     // ---- whitelist ----
     private val toolWhitelistPanel = JPanel()
@@ -142,14 +139,8 @@ class SettingsConfigurable : Configurable {
         gbc.gridx = 1; gbc.weightx = 1.0
         contentPanel.add(modelCombo, gbc)
 
-        // Thinking mode (checkbox)
-        gbc.gridy = 5; gbc.gridx = 0; gbc.weightx = 0.0
-        contentPanel.add(JLabel(AiAssistantBundle.message("settings.thinking.label")), gbc)
-        gbc.gridx = 1; gbc.weightx = 1.0
-        contentPanel.add(thinkingCheckbox, gbc)
-
         // Auto-compact ratio
-        gbc.gridy = 6; gbc.gridx = 0; gbc.weightx = 0.0; gbc.gridwidth = 1
+        gbc.gridy = 5; gbc.gridx = 0; gbc.weightx = 0.0; gbc.gridwidth = 1
         contentPanel.add(JLabel("自动 Compact 触发比例"), gbc)
         gbc.gridx = 1; gbc.weightx = 1.0
         contentPanel.add(compactRatioSpinner, gbc)
@@ -157,48 +148,49 @@ class SettingsConfigurable : Configurable {
         contentPanel.add(JLabel("% 上下文窗口"), gbc)
 
         // Prompt label
-        gbc.gridy = 7; gbc.gridx = 0; gbc.gridwidth = 2
+        gbc.gridy = 6; gbc.gridx = 0; gbc.gridwidth = 2
         gbc.insets = JBUI.insets(12, 8, 4, 8)
         contentPanel.add(JLabel(AiAssistantBundle.message("settings.prompt.label")), gbc)
         gbc.insets = JBUI.insets(6, 8)
 
         // Prompt editor
-        gbc.gridy = 8; gbc.weightx = 1.0; gbc.fill = GridBagConstraints.BOTH
+        gbc.gridy = 7; gbc.weightx = 1.0; gbc.fill = GridBagConstraints.BOTH
         contentPanel.add(promptScrollPane, gbc)
 
         // Reset button
-        gbc.gridy = 9; gbc.weightx = 0.0; gbc.fill = GridBagConstraints.NONE
+        gbc.gridy = 8; gbc.weightx = 0.0; gbc.fill = GridBagConstraints.NONE
         gbc.anchor = GridBagConstraints.EAST
         val resetBtn = JButton(AiAssistantBundle.message("settings.prompt.reset"))
         resetBtn.addActionListener { promptArea.text = AppSettingsService.DEFAULT_COMMIT_PROMPT_ZH }
         contentPanel.add(resetBtn, gbc)
 
-        // Status
-        gbc.gridy = 10; gbc.gridx = 0; gbc.gridwidth = 2; gbc.anchor = GridBagConstraints.NORTHWEST
-        gbc.fill = GridBagConstraints.HORIZONTAL
-        contentPanel.add(statusLabel, gbc)
-
         // ---- Whitelist section ----
-        gbc.gridy = 10; gbc.gridx = 0; gbc.gridwidth = 2; gbc.weighty = 0.0; gbc.fill = GridBagConstraints.HORIZONTAL
+        gbc.gridy = 9; gbc.gridx = 0; gbc.gridwidth = 2; gbc.weighty = 0.0; gbc.fill = GridBagConstraints.HORIZONTAL
         gbc.insets = JBUI.insets(16, 8, 4, 8)
         contentPanel.add(JLabel("<html><b>${AiAssistantBundle.message("settings.whitelist.header")}</b></html>"), gbc)
-        gbc.insets = JBUI.insets(2, 8, 2, 8)
+        gbc.gridy = 10; gbc.insets = JBUI.insets(2, 8, 2, 8)
         contentPanel.add(JLabel(AiAssistantBundle.message("settings.whitelist.desc")).apply {
             foreground = JBColor(0x666666, 0x8C8C8C)
         }, gbc)
 
-        gbc.gridy = 10; gbc.insets = JBUI.insets(4, 16, 2, 8)
+        gbc.gridy = 11; gbc.insets = JBUI.insets(4, 16, 2, 8)
         contentPanel.add(JLabel(AiAssistantBundle.message("settings.whitelist.tool")), gbc)
-        gbc.gridy = 11; gbc.insets = JBUI.insets(0, 24, 4, 8)
+        gbc.gridy = 12; gbc.insets = JBUI.insets(0, 24, 4, 8)
         contentPanel.add(toolWhitelistPanel, gbc)
 
-        gbc.gridy = 12; gbc.insets = JBUI.insets(4, 16, 2, 8)
+        gbc.gridy = 13; gbc.insets = JBUI.insets(4, 16, 2, 8)
         contentPanel.add(JLabel(AiAssistantBundle.message("settings.whitelist.command")), gbc)
-        gbc.gridy = 13; gbc.insets = JBUI.insets(0, 24, 4, 8)
+        gbc.gridy = 14; gbc.insets = JBUI.insets(0, 24, 4, 8)
         contentPanel.add(commandWhitelistPanel, gbc)
 
+        // Status（放在 whitelist 之后，避免被覆盖）
+        gbc.gridy = 15; gbc.gridx = 0; gbc.gridwidth = 2; gbc.anchor = GridBagConstraints.NORTHWEST
+        gbc.fill = GridBagConstraints.HORIZONTAL
+        gbc.insets = JBUI.insets(8, 8, 2, 8)
+        contentPanel.add(statusLabel, gbc)
+
         // Filler
-        gbc.gridy = 14; gbc.weighty = 1.0; gbc.fill = GridBagConstraints.BOTH
+        gbc.gridy = 16; gbc.weighty = 1.0; gbc.fill = GridBagConstraints.BOTH
         contentPanel.add(JPanel(), gbc)
 
         mainPanel.add(contentPanel, BorderLayout.NORTH)
@@ -222,8 +214,6 @@ class SettingsConfigurable : Configurable {
         val idx = modelCombo.selectedIndex
         val selectedModel = if (idx >= 0) AppSettingsService.AVAILABLE_MODELS[idx].first else ""
         if (savedModel != selectedModel) return true
-
-        if (service.isThinkingEnabled() != thinkingCheckbox.isSelected) return true
 
         val savedRatio = (service.getCompactRatio() * 100).toInt()
         if (savedRatio != (compactRatioSpinner.value as Int)) return true
@@ -258,7 +248,6 @@ class SettingsConfigurable : Configurable {
             service.setModel(model)
         }
 
-        service.setThinkingEnabled(thinkingCheckbox.isSelected)
         service.setCompactRatio((compactRatioSpinner.value as Int) / 100.0)
 
         statusLabel.text = AiAssistantBundle.message("settings.key.saved")
@@ -274,7 +263,6 @@ class SettingsConfigurable : Configurable {
         val savedModel = service.getModel()
         val idx = AppSettingsService.AVAILABLE_MODELS.indexOfFirst { it.first == savedModel }
         if (idx >= 0) modelCombo.selectedIndex = idx
-        thinkingCheckbox.isSelected = service.isThinkingEnabled()
         compactRatioSpinner.value = (service.getCompactRatio() * 100).toInt()
         statusLabel.text = ""
         refreshWhitelistUI()

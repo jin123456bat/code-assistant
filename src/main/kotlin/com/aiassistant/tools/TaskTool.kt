@@ -93,6 +93,10 @@ class TaskTool : AgentTool {
 
         val resultRef = AtomicReference<String>()
         val thinkingRef = AtomicReference<String>()
+        // latch 等待子 Agent 完成回调，无需超时：
+        // 1. 主 Agent 循环每轮 drainCompleted() 收结果，未完成前持续轮询
+        // 2. 用户点停止 → AgentLoop.stop() → SubAgentRegistry.stopAll() 强制终止所有子 Agent
+        // 3. Claude Code 同样不对子代理设超时（见 github.com/anthropics/claude-code/issues/61405）
         val latch = CountDownLatch(1)
 
         // Fork：从 params 读取父对话上下文（AgentLoop 注入的 JSON）

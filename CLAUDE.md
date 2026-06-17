@@ -157,7 +157,7 @@ inputPanel (border: Empty(8,12,12,12), bg: winBg)
 
 ## 关键约定与坑
 
-- **DeepSeek V4 thinking 模式已禁用**：DeepSeek V4 的 Anthropic 兼容 API 不完全支持 thinking 协议。API 返回的 thinking 签名始终为空（sigLen=0），回传无签名 thinking block 触发 400 错误。`AnthropicSdkClient` 中 `enabledThinking(8192)` 已注释，DeepSeek 内部通过 `<think>` 标签自动处理推理内容。如需重新启用，需先解决 DeepSeek 签名完全兼容问题。
+- **DeepSeek V4 thinking 模式已禁用**：DeepSeek V4 的 Anthropic 兼容 API 不完全支持 thinking 协议。API 返回的 thinking 签名始终为空（sigLen=0），回传无签名 thinking block 触发 400 错误。`AnthropicSdkClient` 中 `enabledThinking(8192)` 已注释，设置面板中 thinking 复选框已移除（避免用户误以为开关有效）。DeepSeek 内部通过 `<think>` 标签自动处理推理内容。如需重新启用，需先解决 DeepSeek 签名完全兼容问题。
 - **Anthropic Java SDK**：HTTP/SSE 层使用官方 `com.anthropic:anthropic-java:2.40.1`，替代手写 `SseClient` + `AnthropicAdapter.buildRequest/parseSseEvent`。`AnthropicSdkClient` 封装 SDK 并提供类型安全的 streaming 回调。
 - **工具参数解析使用 Gson**：`AgentLoop.parseParams()` 使用 `Gson.fromJson(json, Map::class.java)` 完整解析 JSON，嵌套对象/数组序列化为 JSON 字符串存入 `Map<String, String>`。
 - **JSON 转义统一走 `shared/JsonUtils`**：`escapeJson` / `unescapeJson` 在适配器和工具 schema 里复用，不要再就地手写转义。

@@ -266,7 +266,9 @@ class AnthropicSdkClient(
             if (msg.toolUseId != null) {
                 val inputBuilder = ToolUseBlockParam.Input.builder()
                 try {
-                    val gson = com.google.gson.Gson()
+                    val gson = com.google.gson.GsonBuilder()
+                        .setObjectToNumberStrategy(com.google.gson.ToNumberPolicy.LONG_OR_DOUBLE)
+                        .create()
                     val inputMap = gson.fromJson(msg.toolInput.ifEmpty { "{}" }, Map::class.java) as? Map<*, *>
                     inputMap?.forEach { (k, v) ->
                         if (k != null) {
@@ -290,11 +292,24 @@ class AnthropicSdkClient(
                 .build()
         }
 
-        // user 消息：纯文本
+        // user 消息：文本 + 图片
         if (msg.role == "user") {
             if (msg.content.isNotBlank()) {
                 blocks.add(ContentBlockParam.ofText(
                     TextBlockParam.builder().text(msg.content).build()
+                ))
+            }
+            // 图片块（用户粘贴的图片）
+            msg.images?.forEach { img ->
+                blocks.add(ContentBlockParam.ofImage(
+                    ImageBlockParam.builder()
+                        .source(ImageBlockParam.Source.ofBase64(
+                            Base64ImageSource.builder()
+                                .mediaType(Base64ImageSource.MediaType.of(img.mediaType))
+                                .data(img.data)
+                                .build()
+                        ))
+                        .build()
                 ))
             }
             if (blocks.isEmpty()) return null
