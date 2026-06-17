@@ -62,11 +62,13 @@
     --user-bg: #2f5e8f; --user-fg: #ffffff; --user-border: #2f5e8f;
     --ai-bg: #313338; --ai-fg: var(--text-primary); --ai-border: #3c3f44;
     --tool-bar: #5c8fd6; --tool-bg: rgba(92,143,214,0.13); --tool-fg: #84acdf;
+    --agent-bar: #a78bfa; --agent-bg: rgba(167,139,250,0.13); --agent-fg: #c4b5fd;
   }
   body[data-variant="A"][data-theme="light"] {
     --user-bg: #3574f0; --user-fg: #ffffff; --user-border: #3574f0;
     --ai-bg: #f2f3f5; --ai-fg: var(--text-primary); --ai-border: #e3e5e9;
     --tool-bar: #3574f0; --tool-bg: rgba(53,116,240,0.08); --tool-fg: #2f6fe0;
+    --agent-bar: #7c3aed; --agent-bg: rgba(124,58,237,0.08); --agent-fg: #6d28d9;
   }
   /* B · 微信式：用户绿右 / AI 白左 */
   body[data-variant="B"][data-theme="dark"] {
@@ -370,6 +372,39 @@
   @keyframes spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { .running .sp { animation: none; } }
 
+  /* —— 子代理工具行（agentBar 紫色，与普通工具蓝色区分，嵌套在 streamingToolRow 内）—— */
+  .sub-tool-step {
+    width: 100%; background: var(--agent-bg); border-radius: 5px;
+  }
+  .sub-tool-step > summary {
+    list-style: none; cursor: pointer; display: flex; align-items: center; gap: 6px;
+    padding: 4px 8px 4px 16px; font-size: var(--font-meta); color: var(--agent-fg);
+    border-left: 2px solid var(--agent-bar); border-radius: 0 5px 5px 0; user-select: none;
+  }
+  .sub-tool-step > summary::-webkit-details-marker { display: none; }
+  .sub-tool-step .sname { font-weight: 600; color: var(--agent-fg); flex: 0 0 auto; white-space: nowrap; }
+  .sub-tool-step .tout {
+    margin: 0 0 2px 16px; padding: 6px 10px;
+    background: var(--code-bg); border: 1px solid var(--code-border); border-radius: 5px;
+    font-family: "SF Mono", Consolas, monospace; font-size: 10.5px; line-height: 1.45;
+    color: var(--text-secondary); white-space: pre-wrap;
+  }
+  .sub-tool-step .tout.collapsed { display: none; }
+  /* 子代理运行中行 */
+  .sub-running { display: flex; align-items: center; gap: 6px; width: 100%;
+                 font-size: var(--font-meta); color: var(--agent-fg); padding: 4px 8px 4px 16px;
+                 border-left: 2px solid var(--agent-bar); border-radius: 0 5px 5px 0; background: var(--agent-bg); }
+  .sub-running .sp { width: 10px; height: 10px; border: 2px solid var(--agent-bar); border-top-color: transparent;
+                     border-radius: 50%; animation: spin .7s linear infinite; flex: 0 0 auto; }
+  /* 子代理完成通知 */
+  .sub-status { display: flex; align-items: center; gap: 8px; width: fit-content;
+                font-size: var(--font-meta); padding: 4px 10px 4px 8px; border-radius: 7px; }
+  .sub-status.ok { border-left: 3px solid #5aa86a; background: rgba(90,168,106,.08); color: var(--text-secondary); }
+  .sub-status.err { border-left: 3px solid #b5503e; background: rgba(181,80,62,.08); color: var(--text-secondary); }
+  .sub-status .icon { flex: 0 0 auto; font-weight: 700; }
+  .sub-status.ok .icon { color: #5aa86a; }
+  .sub-status.err .icon { color: #e08a72; }
+
   /* —— 错误卡 —— */
   .errcard { width: fit-content; max-width: 100%; border: 1px solid #b5503e; border-radius: 8px;
              background: rgba(181,80,62,.10); padding: 7px 11px; font-size: var(--font-meta); }
@@ -649,6 +684,72 @@
             <div class="eh"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 6 6 18M6 6l12 12"/></svg>execute_command 失败</div>
             <div class="ebody">SQLSTATE[42S01]: Base table 'users' already exists</div>
           </div>
+        </div>
+
+        <!-- ⑫ 子代理执行中（streamingToolRow + 内部工具展开）：默认折叠，展开看实时输出 -->
+        <div class="row full">
+          <div class="anno">子代理 · task（紫色左栏，与普通工具蓝色区分）</div>
+        </div>
+        <div class="row tool">
+          <details class="tool-step" open style="--tool-bar:var(--agent-bar); --tool-bg:var(--agent-bg); --tool-fg:var(--agent-fg)">
+            <summary>
+              <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg>
+              <span class="tname" style="color:var(--agent-fg)">task</span>
+              <span class="targs">搜索 AgentLoop 引用</span>
+              <span class="tstatus">执行中…</span>
+            </summary>
+            <div class="tout" style="padding:0;background:transparent;border:none;display:flex;flex-direction:column;gap:4px">
+              <div style="font-size:var(--font-meta);color:var(--text-secondary);padding:4px 10px">我将搜索所有 .kt 文件中包含 AgentLoop 的文件…</div>
+              <div class="sub-running"><span class="sp"></span><span class="sname">search_code</span></div>
+              <details class="sub-tool-step">
+                <summary><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:9px;height:9px;flex:0 0 auto;margin-right:2px"><path d="M9 6l6 6-6 6"/></svg><span class="sname">search_code</span><span style="font-size:10px;color:var(--text-muted);margin-left:auto">✓ 5 处</span></summary>
+                <div class="tout">ChatToolWindow.kt:1234 · AgentLoop.kt:56 · TaskTool.kt:34…</div>
+              </details>
+              <div style="font-size:var(--font-meta);color:var(--text-secondary);padding:4px 10px">找到 5 个文件。将继续读取关键文件分析引用关系。</div>
+            </div>
+          </details>
+        </div>
+
+        <!-- ⑬ 子代理原地完成：卡片不消失，spinner→✓，标题变为"结果 · task" -->
+        <div class="row full">
+          <div class="anno">子代理 · 完成（原地更新，不跳位置）</div>
+        </div>
+        <div class="row tool">
+          <details class="tool-step" style="--tool-bar:var(--agent-bar); --tool-bg:var(--agent-bg); --tool-fg:var(--agent-fg)">
+            <summary>
+              <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg>
+              <span class="tname" style="color:var(--agent-fg)">task</span>
+              <span class="targs">搜索 AgentLoop 引用</span>
+              <span class="tstatus" style="color:#5aa86a">✓ 完成</span>
+            </summary>
+            <div class="tout">子任务完成：搜索 AgentLoop 引用
+
+找到 5 个文件：
+- ChatToolWindow.kt 第 1234 行
+- AgentLoop.kt 第 56 行
+- TaskTool.kt 第 34 行
+
+---
+### 工具调用
+[执行 search_code]
+[结果 search_code] 5 matches</div>
+          </details>
+        </div>
+
+        <!-- ⑭ 子代理失败：原地更新，spinner→✕，红色错误提示 -->
+        <div class="row full">
+          <div class="anno">子代理 · 失败（原地更新，spinner→✕）</div>
+        </div>
+        <div class="row tool">
+          <details class="tool-step" style="--tool-bar:var(--agent-bar); --tool-bg:rgba(181,80,62,.08); --tool-fg:#e08a72">
+            <summary>
+              <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 6l6 6-6 6"/></svg>
+              <span class="tname" style="color:#e08a72">task</span>
+              <span class="targs">检查服务器配置</span>
+              <span class="tstatus" style="color:#e08a72">✕ 失败</span>
+            </summary>
+            <div class="tout">错误: 子代理执行失败: 连接超时</div>
+          </details>
         </div>
 
       </div>

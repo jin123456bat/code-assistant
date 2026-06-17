@@ -988,8 +988,8 @@ class ChatToolWindow(private val project: Project) {
             showStreamingToolRow(name)
         }
         viewModel.onToolResult = { name, _ ->
-            // 工具执行完成，清理流式运行行，最终结果由 rebuildConversation 渲染
-            if (name == streamingToolName) cleanupStreamingToolRow()
+            // 前台工具完成：运行行原地更新为完成态（spinner→✓，内容填入结果），不删除
+            completeStreamingToolRow(name)
         }
         viewModel.onToolStreaming = { name, content ->
             updateStreamingToolContent(name, content)
@@ -1343,6 +1343,32 @@ class ChatToolWindow(private val project: Project) {
         }
     }
 
+    /** 工具执行完成，原地更新卡片（不删除） */
+    private fun completeStreamingToolRow(toolName: String) {
+        if (toolName != streamingToolName) return
+        // 找到最终结果消息
+        val resultMsg = viewModel.messages.lastOrNull {
+            it.role == "tool" && it.toolName == toolName
+        }
+        val resultContent = resultMsg?.content?.substringAfter("\n---\n")?.trim() ?: resultMsg?.content ?: ""
+        // 更新内容面板为最终结果
+        streamingToolContentPanel?.removeAll()
+        streamingToolContentPanel?.add(JTextArea(resultContent).apply {
+            font = ChatTheme.metaFont; foreground = ChatTheme.textSecondary
+            isEditable = false; lineWrap = true; wrapStyleWord = true
+            background = streamingToolLeftBar?.background ?: ChatTheme.codeBg
+            border = JBUI.Borders.empty(4, 10, 6, 10)
+        })
+        streamingToolContentPanel?.revalidate(); streamingToolContentPanel?.repaint()
+        // 更新标题：spinner 替换为 ✓
+        streamingToolChevron?.text = "▸"
+        streamingToolChevron?.foreground = ChatTheme.doneCheck
+        // 标题文字更新
+        streamingCollapsed = true
+    }
+
+    private var streamingCollapsed = true
+
     /** 清理流式工具行 */
     private fun cleanupStreamingToolRow() {
         streamingToolRow?.let { row ->
@@ -1359,13 +1385,13 @@ class ChatToolWindow(private val project: Project) {
         streamingToolChevron = null
         streamingToolName = null
         subAgentToolCount = 0
+        streamingCollapsed = true
     }
 
     private fun createMessageBubble(message: AgentMessage): JPanel {
         return when (message.role) {
             "thinking" -> createCollapsibleThinkingBubble(message.content)
             "tool" -> createToolResultBubble(message)    // 工具调用+结果，可折叠
-            "sub_agent" -> createSubAgentStatusBubble(message)
             "user" -> createUserBubble(message)
             "assistant" -> createAssistantBubble(message)
             else -> createAssistantBubble(message)
@@ -1399,41 +1425,6 @@ class ChatToolWindow(private val project: Project) {
         return row
     }
 
-    /** 并行子代理状态消息 — agentBar 左栏，根据内容前缀显示 ✓ 或 ✕ */
-    private fun createSubAgentStatusBubble(message: AgentMessage): JPanel {
-        val content = message.content
-        val isError = content.contains("失败")
-        val outer = JPanel().apply {
-            layout = BoxLayout(this, BoxLayout.X_AXIS)
-            isOpaque = false
-        }
-        val leftBar = JPanel(BorderLayout()).apply {
-            isOpaque = false
-            background = ChatTheme.agentBg
-            border = javax.swing.border.CompoundBorder(
-                javax.swing.border.MatteBorder(0, 3, 0, 0, if (isError) ChatTheme.error else ChatTheme.doneCheck),
-                javax.swing.border.EmptyBorder(0, 7, 0, 0)
-            )
-        }
-        val icon = JLabel(if (isError) "✕" else "✓").apply {
-            font = ChatTheme.metaFont
-            foreground = if (isError) ChatTheme.error else ChatTheme.doneCheck
-            border = JBUI.Borders.empty(4, 10, 4, 4)
-        }
-        val text = JTextArea(content.replace('\n', ' ').take(120)).apply {
-            font = ChatTheme.metaFont
-            foreground = ChatTheme.textSecondary
-            background = ChatTheme.agentBg
-            isEditable = false; lineWrap = true; wrapStyleWord = true
-            border = JBUI.Borders.empty(4, 4, 4, 6)
-        }
-        leftBar.add(icon, BorderLayout.WEST)
-        leftBar.add(text, BorderLayout.CENTER)
-        outer.add(leftBar)
-        outer.add(Box.createHorizontalGlue())
-        return outer
-    }
-
     private fun createAssistantBubble(message: AgentMessage): JPanel {
         val (row, bubble, content) = bubbleFactory.assistantBubble(message)
         bubbleSizeConstraints.add(Pair(bubble, content))
@@ -1443,6 +1434,10 @@ class ChatToolWindow(private val project: Project) {
     /** 工具结果行 — 委托给 ToolRowFactory（默认折叠），待审批时附加审批按钮 */
     private fun createToolResultBubble(message: AgentMessage): JPanel {
         val name = message.toolName ?: "tool"
+        // 已通过 streamingToolRow 原地显示完成态，跳过重复的工具结果行
+        if (name == streamingToolName && streamingToolRow?.parent != null) {
+            return JPanel().apply { isVisible = false; setSize(0, 0) }
+        }
         // 仅当审批尚未完成时才显示按钮（latch 未被 countDown）
         val state = if (message.approvalPending) viewModel.pendingApprovals[name] else null
         val approvals: ApprovalActions? = if (state != null && state.latch.getCount() > 0) {

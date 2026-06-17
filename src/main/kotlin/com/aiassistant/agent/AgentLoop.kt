@@ -154,7 +154,6 @@ class AgentLoop(
                     }
                     if (resultText != null) {
                         history.add(AnthropicMessage("user", resultText))
-                        edt { onMessage?.invoke(AgentMessage("sub_agent", resultText)) }
                     }
                 }
 
@@ -175,7 +174,6 @@ class AgentLoop(
                         }
                         if (text != null) {
                             history.add(AnthropicMessage("user", text))
-                            edt { onMessage?.invoke(AgentMessage("sub_agent", text)) }
                             AppLogger.info("AgentLoop: 注入子代理结果 ${entry.id} status=${entry.status}")
                         }
                     }
