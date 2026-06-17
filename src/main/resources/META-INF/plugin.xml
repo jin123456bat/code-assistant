@@ -40,6 +40,10 @@
 
         <postStartupActivity
             implementation="com.aiassistant.actions.OpenAiToolWindowOnStartup"/>
+
+        <inline.completion.provider
+            id="ai-assistant"
+            implementation="com.aiassistant.completion.AiCompletionProvider"/>
     </extensions>
 
     <actions resource-bundle="messages.AiAssistantBundle">
