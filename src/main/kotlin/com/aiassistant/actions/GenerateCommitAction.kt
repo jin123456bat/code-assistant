@@ -14,6 +14,9 @@ import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.vcs.VcsDataKeys
 import com.intellij.openapi.vcs.changes.ChangeListManager
 import com.intellij.ui.EditorTextField
+import com.aiassistant.ui.DiffKind
+import com.aiassistant.ui.DiffLine
+import com.aiassistant.ui.SimpleDiff
 import com.google.gson.Gson
 import java.awt.Component
 import java.awt.Container
@@ -68,8 +71,8 @@ class GenerateCommitAction : AnAction() {
                         showNotification(project, AiAssistantBundle.message("action.generate.nochanges"))
                         return
                     }
-                    val prompt = buildPrompt(diffText)
-                    val message = callDeepSeek(apiKey, prompt)
+                    val (systemPrompt, userPrompt) = buildPrompt(diffText)
+                    val message = callDeepSeek(apiKey, systemPrompt, userPrompt)
                     if (message == null) {
                         showNotification(project, AiAssistantBundle.message("action.generate.failed"))
                         return
@@ -106,8 +109,16 @@ class GenerateCommitAction : AnAction() {
             }
             if (diffContent.isBlank()) return ""
 
-            val fileList = runGitCommand(basePath, "diff", "--staged", "--name-only")
-            val stat = runGitCommand(basePath, "diff", "--staged", "--stat")
+            val fileList = if (stagedDiff.isNotBlank()) {
+                runGitCommand(basePath, "diff", "--staged", "--name-only")
+            } else {
+                runGitCommand(basePath, "diff", "--name-only")
+            }
+            val stat = if (stagedDiff.isNotBlank()) {
+                runGitCommand(basePath, "diff", "--staged", "--stat")
+            } else {
+                runGitCommand(basePath, "diff", "--stat")
+            }
             val recentCommits = runGitCommand(basePath, "log", "--oneline", "-5")
 
             return buildString {
@@ -123,7 +134,7 @@ class GenerateCommitAction : AnAction() {
                 if (recentCommits.isNotBlank()) {
                     append("\n\nRecent commits for style reference:\n$recentCommits")
                 }
-            }.take(15000)
+            }.take(50000)
         }
 
         return buildSimpleDiff(project)
@@ -138,7 +149,7 @@ class GenerateCommitAction : AnAction() {
         return try {
             val output = process.inputStream.bufferedReader().use { it.readText() }
             process.waitFor(10, TimeUnit.SECONDS)
-            output.take(5000)
+            output
         } catch (_: Exception) {
             ""
         } finally {
@@ -146,6 +157,10 @@ class GenerateCommitAction : AnAction() {
         }
     }
 
+    /**
+     * 使用 [SimpleDiff]（Myers LCS 算法）生成真正的 unified diff，
+     * 替代原来只显示文件首尾行、LLM 无法判断实际变更的伪 diff。
+     */
     private fun buildSimpleDiff(project: Project): String {
         val changes = ChangeListManager.getInstance(project).defaultChangeList.changes
         if (changes.isEmpty()) return ""
@@ -163,44 +178,107 @@ class GenerateCommitAction : AnAction() {
                 val afterRev = change.afterRevision
                 val path = (afterRev?.file?.path ?: beforeRev?.file?.path) ?: continue
 
-                append("--- a/$path\n")
-                append("+++ b/$path\n")
-
                 val before = readContent(beforeRev)
                 val after = readContent(afterRev)
 
                 when {
                     before == null && after != null -> {
-                        append("@@ -0,0 +1,${after.lines().size} @@\n")
-                        after.lines().take(50).forEach { append("+$it\n") }
+                        // 新文件
+                        val lines = after.lines()
+                        append("--- /dev/null\n")
+                        append("+++ b/$path\n")
+                        append("@@ -0,0 +1,${lines.size} @@\n")
+                        lines.take(100).forEach { append("+$it\n") }
+                        if (lines.size > 100) {
+                            append("... (${lines.size - 100} more lines omitted)\n")
+                        }
                     }
                     after == null && before != null -> {
-                        append("@@ -1,${before.lines().size} +0,0 @@\n")
-                        before.lines().take(30).forEach { append("-$it\n") }
+                        // 删除文件
+                        val lines = before.lines()
+                        append("--- a/$path\n")
+                        append("+++ /dev/null\n")
+                        append("@@ -1,${lines.size} +0,0 @@\n")
+                        lines.take(100).forEach { append("-$it\n") }
+                        if (lines.size > 100) {
+                            append("... (${lines.size - 100} more lines omitted)\n")
+                        }
                     }
                     before != null && after != null -> {
-                        // 生成简化版逐行 diff，让 LLM 看到具体改动
-                        val beforeLines = before.lines()
-                        val afterLines = after.lines()
-                        val maxShow = 80
-                        if (beforeLines.size + afterLines.size < maxShow) {
-                            for (line in beforeLines) append("-$line\n")
-                            for (line in afterLines) append("+$line\n")
-                        } else {
-                            append("@@ ... @@\n")
-                            // 只显示开头和结尾的变化，标注中间省略
-                            beforeLines.take(20).forEach { append("-$it\n") }
-                            if (beforeLines.size > 40) append("... (${beforeLines.size - 40} lines omitted)\n")
-                            beforeLines.takeLast(20).forEach { append("-$it\n") }
-                            afterLines.take(20).forEach { append("+$it\n") }
-                            if (afterLines.size > 40) append("... (${afterLines.size - 40} lines omitted)\n")
-                            afterLines.takeLast(20).forEach { append("+$it\n") }
+                        // 修改文件：使用 SimpleDiff 生成真正的行级 unified diff
+                        val diffLines = SimpleDiff.diff(before, after)
+                        val hunks = buildHunks(diffLines)
+
+                        if (hunks.isEmpty()) continue
+
+                        append("--- a/$path\n")
+                        append("+++ b/$path\n")
+                        for (hunk in hunks) {
+                            append("@@ -${hunk.oldStart},${hunk.oldCount} +${hunk.newStart},${hunk.newCount} @@\n")
+                            for (line in hunk.lines) {
+                                when (line.kind) {
+                                    DiffKind.CTX -> append(" ${line.text}\n")
+                                    DiffKind.DEL -> append("-${line.text}\n")
+                                    DiffKind.ADD -> append("+${line.text}\n")
+                                }
+                            }
                         }
                     }
                 }
                 append("\n")
             }
-        }.take(15000)
+        }.take(50000)
+    }
+
+    /** unified diff hunk 数据 */
+    private data class Hunk(
+        val oldStart: Int,
+        val oldCount: Int,
+        val newStart: Int,
+        val newCount: Int,
+        val lines: List<DiffLine>
+    )
+
+    /**
+     * 将 [SimpleDiff] 输出的平面 diff 行列表，按 unified diff 规范
+     * 分组为带上下文（默认 3 行）的 hunk。
+     */
+    private fun buildHunks(diffLines: List<DiffLine>, contextSize: Int = 3): List<Hunk> {
+        if (diffLines.isEmpty()) return emptyList()
+
+        val changedIndices = diffLines.indices.filter { diffLines[it].kind != DiffKind.CTX }.toSet()
+        if (changedIndices.isEmpty()) return emptyList()
+
+        // 标记所有需要包含的行：变更行 + 上下文
+        val included = BooleanArray(diffLines.size)
+        for (idx in changedIndices) {
+            val start = maxOf(0, idx - contextSize)
+            val end = minOf(diffLines.size - 1, idx + contextSize)
+            for (k in start..end) included[k] = true
+        }
+
+        // 将连续 included 行分组成 hunk
+        val hunks = mutableListOf<Hunk>()
+        var i = 0
+        while (i < diffLines.size) {
+            if (!included[i]) { i++; continue }
+
+            val hunkStart = i
+            while (i < diffLines.size && included[i]) i++
+            val hunkEnd = i
+
+            val hunkLines = diffLines.subList(hunkStart, hunkEnd)
+            val prefixLines = diffLines.subList(0, hunkStart)
+
+            val oldStart = prefixLines.count { it.kind != DiffKind.ADD } + 1
+            val oldCount = hunkLines.count { it.kind != DiffKind.ADD }
+            val newStart = prefixLines.count { it.kind != DiffKind.DEL } + 1
+            val newCount = hunkLines.count { it.kind != DiffKind.DEL }
+
+            hunks.add(Hunk(oldStart, oldCount, newStart, newCount, hunkLines))
+        }
+
+        return hunks
     }
 
     private fun readContent(revision: com.intellij.openapi.vcs.changes.ContentRevision?): String? {
@@ -211,29 +289,49 @@ class GenerateCommitAction : AnAction() {
         } catch (_: Exception) { null }
     }
 
-    private fun buildPrompt(diffText: String): String {
+    /**
+     * 构建 prompt，返回 (systemPrompt, userPrompt)。
+     * systemPrompt 包含角色指令和行为约束，userPrompt 仅包含 diff 数据，
+     * 分别放入 API 的 system/user role，提高模型指令遵循度。
+     */
+    private fun buildPrompt(diffText: String): Pair<String, String> {
         val customPrompt = try {
             AppSettingsService.getInstance().getPrompt()
         } catch (_: Exception) { null }
 
-        if (!customPrompt.isNullOrBlank()) {
-            return customPrompt.replace("{diff}", diffText)
+        val template = if (!customPrompt.isNullOrBlank()) {
+            customPrompt
+        } else {
+            val isChinese = Locale.getDefault().language.startsWith("zh")
+            if (isChinese) {
+                AppSettingsService.DEFAULT_COMMIT_PROMPT_ZH
+            } else {
+                AppSettingsService.DEFAULT_COMMIT_PROMPT
+            }
         }
 
-        val isChinese = Locale.getDefault().language.startsWith("zh")
-        val defaultPrompt = if (isChinese) {
-            AppSettingsService.DEFAULT_COMMIT_PROMPT_ZH
-        } else {
-            AppSettingsService.DEFAULT_COMMIT_PROMPT
+        // 分离系统指令（{diff} 之前的内容）和用户数据（diff 本身）
+        val systemPrompt = template.replace("{diff}", "").trim()
+        // 防御：如果分离后 systemPrompt 为空（如用户仅输入 "{diff}"），回退到默认系统指令
+        val effectiveSystemPrompt = systemPrompt.ifBlank {
+            val isChinese = Locale.getDefault().language.startsWith("zh")
+            if (isChinese) {
+                AppSettingsService.DEFAULT_COMMIT_PROMPT_ZH.replace("{diff}", "").trim()
+            } else {
+                AppSettingsService.DEFAULT_COMMIT_PROMPT.replace("{diff}", "").trim()
+            }
         }
-        return defaultPrompt.replace("{diff}", diffText)
+        return Pair(effectiveSystemPrompt, diffText)
     }
 
-    private fun callDeepSeek(apiKey: String, prompt: String): String? {
+    private fun callDeepSeek(apiKey: String, systemPrompt: String, userPrompt: String): String? {
         val model = try { AppSettingsService.getInstance().getModel() } catch (_: Exception) { null } ?: "deepseek-chat"
         val requestBody = Gson().toJson(mapOf(
             "model" to model,
-            "messages" to listOf(mapOf("role" to "user", "content" to prompt)),
+            "messages" to listOf(
+                mapOf("role" to "system", "content" to systemPrompt),
+                mapOf("role" to "user", "content" to userPrompt)
+            ),
             "stream" to false
         ))
 
@@ -248,7 +346,7 @@ class GenerateCommitAction : AnAction() {
         }
 
         try {
-            conn.outputStream.use { it.write(requestBody.toByteArray()) }
+            conn.outputStream.use { it.write(requestBody.toByteArray(Charsets.UTF_8)) }
             val statusCode = conn.responseCode
 
             if (statusCode != HttpURLConnection.HTTP_OK) {

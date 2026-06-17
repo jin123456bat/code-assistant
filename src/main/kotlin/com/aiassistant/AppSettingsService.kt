@@ -29,7 +29,7 @@ class AppSettingsService {
         fun getInstance(): AppSettingsService = service()
 
         val DEFAULT_COMMIT_PROMPT = """
-You are an expert Git commit message generator. Analyze the git diff below (including changed files list, stat summary, and recent commit history) and create an ACCURATE, SPECIFIC commit message following conventional commit standards.
+You are an expert Git commit message generator. Analyze the git diff provided in the user message (including changed files list, stat summary, and recent commit history) and create an ACCURATE, SPECIFIC commit message following conventional commit standards.
 
 ## CRITICAL — Accuracy Rules
 - ONLY describe changes that actually appear in the diff. Never invent or guess.
@@ -74,7 +74,7 @@ Output ONLY the commit message. No markdown fences, no explanations.
         """.trimIndent()
 
         val DEFAULT_COMMIT_PROMPT_ZH = """
-你是一位 Git 提交信息生成专家。请分析以下 git diff（包含修改文件列表、变更统计、最近提交记录），生成一条准确、具体的 commit message，遵循 conventional commit 规范。
+你是一位 Git 提交信息生成专家。请分析用户消息中提供的 git diff（包含修改文件列表、变更统计、最近提交记录），生成一条准确、具体的 commit message，遵循 conventional commit 规范。
 
 ## 关键 — 准确度规则
 - 只描述 diff 中实际出现的改动，绝不编造或猜测
