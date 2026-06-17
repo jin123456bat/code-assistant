@@ -73,5 +73,15 @@
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
             <keyboard-shortcut keymap="$default" first-keystroke="control shift SEMICOLON"/>
         </action>
+
+        <action
+            id="AiAssistant.ManualCompletion"
+            class="com.aiassistant.completion.ManualCompletionAction"
+            text="手动触发 AI 补全"
+            description="手动触发 AI 代码补全，跳过缓存">
+            <keyboard-shortcut keymap="Mac OS X" first-keystroke="meta P"/>
+            <keyboard-shortcut keymap="Mac OS X 10.5+" first-keystroke="meta P"/>
+            <keyboard-shortcut keymap="$default" first-keystroke="alt P"/>
+        </action>
     </actions>
 </idea-plugin>
