@@ -152,7 +152,7 @@ class AiCompletionProvider : InlineCompletionProvider {
 
         if (cachedCandidates != null) {
             candidates = cachedCandidates
-            CompletionStats.recordShown(0)
+            CompletionStats.recordShown(context.language, 0)
         } else {
             // 构建 FIM prompt：文件路径 + 语言 + smartContext（PSI 增强） + prefix
             val prompt = buildString {
@@ -188,7 +188,7 @@ class AiCompletionProvider : InlineCompletionProvider {
 
             val latency = System.currentTimeMillis() - startTime
             if (candidates.isNotEmpty()) {
-                CompletionStats.recordShown(latency)
+                CompletionStats.recordShown(context.language, latency)
             }
         }
 

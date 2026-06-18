@@ -350,10 +350,21 @@ class SettingsConfigurable : Configurable {
 
     private fun refreshCompletionStatsUI() {
         val stats = CompletionStats
+        val snap = stats.getSnapshot()
         val acceptRate = "%.1f".format(stats.getAcceptRate())
-        completionStatsLabel.text = """
-            显示: ${stats.getShownCount()}   接受: ${stats.getAcceptedCount()}   接受率: ${acceptRate}%
-            平均延迟: ${stats.getAverageLatencyMs()}ms
-        """.trimIndent()
+
+        val sb = StringBuilder()
+        sb.appendLine("显示: ${snap.shown}   接受: ${snap.accepted}   接受率: ${acceptRate}%")
+        sb.appendLine("平均延迟: ${stats.getAverageLatencyMs()}ms")
+
+        if (snap.byLanguage.isNotEmpty()) {
+            sb.appendLine()
+            for ((lang, ls) in snap.byLanguage.entries.sortedBy { it.key }) {
+                val langRate = if (ls.shown > 0) "%.1f".format(ls.accepted.toDouble() / ls.shown * 100.0) else "0.0"
+                sb.appendLine("$lang: ${ls.accepted}/${ls.shown} ($langRate%)  ${ls.avgLatencyMs}ms")
+            }
+        }
+
+        completionStatsLabel.text = sb.toString()
     }
 }
