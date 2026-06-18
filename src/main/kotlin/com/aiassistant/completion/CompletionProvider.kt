@@ -10,6 +10,9 @@ import com.intellij.codeInsight.inline.completion.InlineCompletionRequest
 import com.intellij.codeInsight.inline.completion.InlineCompletionSuggestion
 import com.intellij.codeInsight.inline.completion.elements.InlineCompletionElement
 import com.intellij.codeInsight.inline.completion.elements.InlineCompletionGrayTextElement
+import com.intellij.openapi.project.Project
+import com.intellij.openapi.project.ProjectManager
+import com.intellij.openapi.project.ProjectManagerListener
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 
@@ -112,6 +115,21 @@ class AiCompletionProvider : InlineCompletionProvider {
     private val fimClient = DeepSeekFimClient(settings)
     private val cache = CompletionCache()
 
+    init {
+        // 注册 project 关闭监听，自动持久化统计数据到 .claude/completion-stats.json
+        @Suppress("DEPRECATION")
+        ProjectManager.getInstance().addProjectManagerListener(object : ProjectManagerListener {
+            override fun projectClosing(project: Project) {
+                val projectPath = project.basePath ?: return
+                CompletionStats.persist(projectPath)
+            }
+        })
+    }
+
+    /** 缓存当前补全请求的语言标识，供 afterInsertion 回调使用 */
+    @Volatile
+    private var currentLanguage: String = "unknown"
+
     /** Provider 唯一标识（Kotlin inline class，JVM 层面 getter 名为 getId-S2YkoFA） */
     override val id: InlineCompletionProviderID = InlineCompletionProviderID("ai-assistant")
 
@@ -135,6 +153,9 @@ class AiCompletionProvider : InlineCompletionProvider {
         // 上下文采集
         val collector = CompletionContextCollector()
         val context = collector.collect(editor, project)
+
+        // 缓存当前语言，供 afterInsertion 回调传递正确的语言标识
+        currentLanguage = context.language
 
         // 判断是否为手动触发（通过 DirectCall 事件类型）
         // IntelliJ 2023.3: InlineCompletionEvent.DirectCall 表示手动触发（如快捷键）
@@ -221,7 +242,7 @@ class AiCompletionProvider : InlineCompletionProvider {
                 environment: InlineCompletionInsertEnvironment,
                 elements: List<InlineCompletionElement>
             ) {
-                CompletionStats.recordAccepted()
+                CompletionStats.recordAccepted(currentLanguage)
             }
         }
 
