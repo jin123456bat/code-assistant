@@ -282,7 +282,9 @@ class AnthropicSdkClient(
                                 com.anthropic.core.JsonValue.from(v ?: ""))
                         }
                     }
-                } catch (_: Exception) {}
+                } catch (e: Exception) {
+                    com.aiassistant.AppLogger.warn("SDK tool_use input JSON 解析失败 toolName=${msg.toolName} toolInput=${msg.toolInput.take(200)}: ${e.message}")
+                }
                 blocks.add(ContentBlockParam.ofToolUse(
                     ToolUseBlockParam.builder()
                         .id(msg.toolUseId!!)

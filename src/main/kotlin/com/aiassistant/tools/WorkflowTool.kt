@@ -59,30 +59,34 @@ class WorkflowTool : AgentTool {
 
         onProgress?.invoke("🚀 启动 ${tasks.size} 个${if (mode == "parallel") "并行" else "串行"}子任务\n\n")
 
+        val toolCallId = params["_toolCallId"]  // AgentLoop 注入，对齐 Claude Code
+
         return if (mode == "sequential") {
-            executeSequential(tasks, project, apiKey, onProgress)
+            executeSequential(tasks, project, apiKey, toolCallId, onProgress)
         } else {
-            executeParallel(tasks, project, apiKey, onProgress)
+            executeParallel(tasks, project, apiKey, toolCallId, onProgress)
         }
     }
 
     private fun executeParallel(
         tasks: List<TaskDef>, project: Project, apiKey: String,
+        toolCallId: String?,
         onProgress: ((String) -> Unit)?
     ): ToolResult {
         val doneCount = AtomicInteger(0)
         val total = tasks.size
         val results = mutableListOf<String>()
+        val futures = mutableListOf<java.util.concurrent.CompletableFuture<*>>()
 
         for (task in tasks) {
             val subId = "wf-${System.currentTimeMillis()}-${task.description.take(10)}"
             val childLoop = createChildLoop(project, task.agentType)
-            SubAgentRegistry.register(subId, task.description, childLoop)
+            SubAgentRegistry.register(subId, task.description, childLoop, toolCallId)
 
             val resultRef = AtomicReference<String>()
             val latch = CountDownLatch(1)
 
-            java.util.concurrent.CompletableFuture.runAsync {
+            val future = java.util.concurrent.CompletableFuture.runAsync {
                 try {
                     childLoop.run(task.prompt, apiKey) { finalText, _ ->
                         resultRef.set(finalText)
@@ -97,6 +101,7 @@ class WorkflowTool : AgentTool {
                     childLoop.stop()
                 }
             }
+            futures.add(future)
 
             val count = doneCount.incrementAndGet()
             onProgress?.invoke("  📤 ${task.description} — 已启动 ($count/$total)\n")
@@ -119,6 +124,9 @@ class WorkflowTool : AgentTool {
             }
             if (results.size >= total) break
             if (System.currentTimeMillis() > deadline) {
+                // 超时：取消所有未完成的 future，停止所有子 Agent，防止线程泄漏
+                futures.forEach { it.cancel(true) }
+                SubAgentRegistry.stopAll()
                 results.add("⚠ 超时：${total - results.size} 个子任务未完成")
                 break
             }
@@ -130,6 +138,7 @@ class WorkflowTool : AgentTool {
 
     private fun executeSequential(
         tasks: List<TaskDef>, project: Project, apiKey: String,
+        toolCallId: String?,  // 串行模式走 ToolResult 返回，不使用 SubAgentRegistry，此参数保留供后续扩展
         onProgress: ((String) -> Unit)?
     ): ToolResult {
         val results = mutableListOf<String>()

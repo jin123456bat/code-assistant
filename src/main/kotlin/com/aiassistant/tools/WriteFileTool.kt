@@ -19,7 +19,8 @@ class WriteFileTool : AgentTool {
 
     override fun execute(params: Map<String, String>, project: Project, onProgress: ((String) -> Unit)?): ToolResult {
         val relativePath = params["path"]?.takeIf { it.isNotBlank() } ?: return ToolResult.err("path 不能为空")
-        val content = params["content"]?.takeIf { it.isNotBlank() } ?: return ToolResult.err("content 不能为空")
+        // 允许空字符串（清空文件或创建空文件），但拒绝 null（参数缺失）
+        val content = params["content"] ?: return ToolResult.err("content 不能为空")
         val basePath = params["_worktree"] ?: project.basePath ?: return ToolResult.err("项目路径不可用")
 
         // 安全检查：使用 PathUtils 统一检查，防止路径穿越（含 separator 边界）

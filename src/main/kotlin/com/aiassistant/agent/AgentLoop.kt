@@ -178,7 +178,9 @@ class AgentLoop(
                         else -> null
                     }
                     if (resultText != null) {
-                        history.add(AnthropicMessage("user", resultText, groupId = roundGroupId))
+                        // 对齐 Claude Code：子 Agent 结果通过 toolCallId 关联到 task/workflow 工具调用。
+                        // LLM 将其视为 tool_result 而非用户指令，消除信任边界混淆。
+                        history.add(AnthropicMessage("user", resultText, toolCallId = entry.toolCallId, groupId = roundGroupId))
                     }
                 }
 
@@ -198,8 +200,9 @@ class AgentLoop(
                             else -> null
                         }
                         if (text != null) {
-                            history.add(AnthropicMessage("user", text, groupId = roundGroupId))
-                            AppLogger.info("AgentLoop: 注入子代理结果 ${entry.id} status=${entry.status}")
+                            // 对齐 Claude Code：子 Agent 结果通过 toolCallId 关联到 task/workflow 工具调用
+                            history.add(AnthropicMessage("user", text, toolCallId = entry.toolCallId, groupId = roundGroupId))
+                            AppLogger.info("AgentLoop: 注入子代理结果 ${entry.id} status=${entry.status} toolCallId=${entry.toolCallId}")
                         }
                     }
 
@@ -220,6 +223,9 @@ class AgentLoop(
                         if (continuationCount >= MAX_CONTINUATIONS) {
                             AppLogger.warn("AgentLoop: 续写次数已达上限 $MAX_CONTINUATIONS，返回已有内容")
                         }
+                    } else {
+                        // 正常完整回复：重置续写计数
+                        continuationCount = 0
                     }
                     edt { onThinking?.invoke(null) }
 
@@ -244,13 +250,10 @@ class AgentLoop(
                         for (tc in toolCalls) {
                             if (cancelled) break
 
-                            try {
-                                SwingUtilities.invokeAndWait {
-                                    onToolExecute?.invoke(tc.name, tc.arguments)
-                                    onThinking?.invoke("执行 ${tc.name}...")
-                                }
-                            } catch (_: Exception) {
-                                edt { onToolExecute?.invoke(tc.name, tc.arguments) }
+                            // 使用 invokeLater 避免 Agent 线程阻塞等待 EDT，减少工具密集场景的累积延迟
+                            edt {
+                                onToolExecute?.invoke(tc.name, tc.arguments)
+                                onThinking?.invoke("执行 ${tc.name}...")
                             }
 
                             // ---- Plan Mode: 写工具拦截 ----
@@ -498,14 +501,26 @@ class AgentLoop(
 
                             // ---- 常规工具执行 ----
                             val params = parseParams(tc.arguments).toMutableMap()
+                            // 将 tool_use_id 注入参数，供 task/workflow 工具传给 SubAgentRegistry。
+                            // 子 Agent 结果通过此 ID 关联到工具调用，对齐 Claude Code 的 tool_result 模式。
+                            params["_toolCallId"] = tc.id
                             workTreePath?.let { params["_worktree"] = it }
                             if (tc.name == "task") {
                                 params["_forkHistory"] = com.google.gson.Gson().toJson(history.toList())
                             }
                             val readFileOutside = tc.name == "read_file" && params["path"] != null &&
                                 !com.aiassistant.shared.PathUtils.isInsideProject(params["path"]!!, project.basePath)
+                            // 安全设计（纵深防御）：skill 声明的 allowed-tools 仅对 SAFE_TOOLS 中的只读工具生效。
+                            // 写操作（write_file/execute_command/edit_file 等）即使被 skill 声明也必须经用户审批。
+                            // 原因：skill 定义来自项目文件（.claude/skills/**/SKILL.md），不可完全信任。
+                            // 恶意仓库可通过 skill 声明 allowed-tools: [write_file, execute_command] 绕过审批。
                             val skillAllowed = ctx.skillDefs[ctx.activatedSkill]?.allowedTools?.contains(tc.name) == true
-                            val approved = if (!readFileOutside && (tc.name in SAFE_TOOLS || tc.name in AppSettingsService.getInstance().getToolWhitelist() || skillAllowed)) {
+                            // 仅当工具在 SAFE_TOOLS 中时，skill 声明才可免审批；写工具强制走审批流程
+                            val skillSafeAllowed = skillAllowed && tc.name in SAFE_TOOLS
+                            if (skillAllowed && !skillSafeAllowed) {
+                                AppLogger.warn("安全拦截：skill「${ctx.activatedSkill}」尝试在 allowed-tools 中放行危险工具「${tc.name}」，已强制要求用户审批")
+                            }
+                            val approved = if (!readFileOutside && (tc.name in SAFE_TOOLS || tc.name in AppSettingsService.getInstance().getToolWhitelist() || skillSafeAllowed)) {
                                 true
                             } else {
                                 val latch = CountDownLatch(1)
@@ -553,16 +568,16 @@ class AgentLoop(
                                 history.add(AnthropicMessage("assistant", textContent))
                                 firstToolCallTextAdded = true
                             }
-                            history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments, thinking = thinking, thinkingSignature = thinkingSignature))
-                            history.add(AnthropicMessage("user", resultText, toolCallId = tc.id))
+                            // 原子化 tool_use + tool_result 对，防止与 clearConversation/compactHistory 的 clear()+addAll() 交叠
+                            synchronized(ctx.historyLock) {
+                                history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments, thinking = thinking, thinkingSignature = thinkingSignature))
+                                history.add(AnthropicMessage("user", resultText, toolCallId = tc.id, groupId = roundGroupId))
+                            }
 
-                            try {
-                                SwingUtilities.invokeAndWait {
-                                    onToolResult?.invoke(tc.name, resultText)
-                                    onThinking?.invoke(null)
-                                }
-                            } catch (_: Exception) {
-                                edt { onToolResult?.invoke(tc.name, resultText) }
+                            // 使用 invokeLater 避免 Agent 线程阻塞等待 EDT
+                            edt {
+                                onToolResult?.invoke(tc.name, resultText)
+                                onThinking?.invoke(null)
                             }
                         }
 
@@ -618,7 +633,8 @@ class AgentLoop(
                         break
                     }
 
-                    loopCount++
+                    // 防止溢出：loopCount 达到 Int.MAX_VALUE 后不再递增（2^31-1 轮已远超实际可能）
+                    if (loopCount < Int.MAX_VALUE) loopCount++
                 }
                 if (loopCount >= maxLoops) {
                     AppLogger.warn("AgentLoop: 达到最大轮次 $maxLoops")
@@ -745,8 +761,12 @@ class AgentLoop(
             }
         )
 
-        try { doneLatch.await(120, java.util.concurrent.TimeUnit.SECONDS) } catch (_: InterruptedException) {}
+        try { doneLatch.await(120, java.util.concurrent.TimeUnit.SECONDS) } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()  // 恢复中断标志
+        }
         if (!hasResponse) {
+            // 超时或中断：关闭 SDK 客户端以中断底层 HTTP/SSE 连接，防止资源泄漏
+            sdkClient.close()
             val detail = errorDetail ?: "无响应 — 请检查 API Key 和网络连接"
             AppLogger.requestFailed(-1, detail)
             edt { onError?.invoke("API 调用失败: $detail") }
@@ -780,6 +800,12 @@ class AgentLoop(
 
         val summary = compact(historyToSummarize, apiKey) ?: return null
 
+        // 设计决策：Compact 摘要注入 system prompt 而非 user 消息。
+        // 原因：system prompt 优先级高于 user 消息，摘要作为持久上下文指导 LLM 行为。
+        // 这对齐 Claude Code 的 /compact 行为——摘要以系统级指令形式存在。
+        // 已知权衡：如果 LLM 在摘要中生成污染内容，可能持久影响后续对话。
+        // 缓解措施：摘要由独立 API 调用生成（非用户消息直接触发），且 compact prompt
+        // 明确指示"保留关键信息和约定"，降低了恶意摘要生成概率。
         ctx.systemPrompt = buildString {
             append(ctx.systemPrompt)
             append("\n\n## 对话摘要\n以下是之前对话的关键摘要，请基于此继续工作：\n\n")
@@ -796,12 +822,8 @@ class AgentLoop(
 
     private fun compact(messages: List<AnthropicMessage>, apiKey: String): String? {
         if (messages.isEmpty()) return null
-        if (sdkClient == null || lastApiKey != apiKey) {
-            sdkClient?.close()
-            sdkClient = com.aiassistant.AnthropicSdkClient(apiKey)
-            lastApiKey = apiKey
-        }
-        val sdkClient = sdkClient!!
+        // 使用独立的 SDK 客户端，避免与 callAnthropic() 共享 sdkClient 导致 stop()/close() 竞态
+        val compactClient = com.aiassistant.AnthropicSdkClient(apiKey)
 
         val compactPrompt = buildString {
             append("你是一个对话摘要助手。请将以下对话历史压缩为一段简洁的中文摘要，")
@@ -833,7 +855,7 @@ class AgentLoop(
             val compactLatch = java.util.concurrent.CountDownLatch(1)
             var summaryText = ""
             var hasError = false
-            sdkClient.createStreaming(
+            compactClient.createStreaming(
                 model = model,
                 systemPrompt = "你是一个简洁的对话摘要助手，用中文输出。",
                 messages = summaryHistory,
@@ -861,6 +883,8 @@ class AgentLoop(
         } catch (e: Exception) {
             AppLogger.warn("对话压缩失败: ${e.message}")
             null
+        } finally {
+            compactClient.close()
         }
 
         return result
@@ -885,35 +909,45 @@ class AgentLoop(
         edt { onCompact?.invoke(summary) }
     }
 
+    private var cachedToolDefs: List<com.aiassistant.AnthropicToolDef>? = null
+    private var toolDefsHash: Int = 0
+
     private fun buildSdkToolDefs(): List<com.aiassistant.AnthropicToolDef> {
-        val builtIn = ctx.toolRegistry.getAll()
-            .map { tool ->
-                com.aiassistant.AnthropicToolDef(
-                    name = tool.name,
-                    description = tool.description,
-                    properties = tool.parameters.associate { p ->
-                        p.name to com.aiassistant.PropertyDef(p.type, p.description, p.enum)
-                    }.ifEmpty { null },
-                    required = tool.parameters.filter { it.required }.map { it.name }.ifEmpty { null }
-                )
-            }
-        if (isSubAgent) return builtIn
-        // 元工具（对齐 Claude Code）
-        val metaTools = listOf(
-            com.aiassistant.AnthropicToolDef("Skill", "激活一个 skill，获取特定领域的专业指引"),
-            com.aiassistant.AnthropicToolDef("EnterPlanMode", "进入规划模式，只允许只读工具"),
-            com.aiassistant.AnthropicToolDef("ExitPlanMode", "提交规划方案并请求用户审批"),
-            com.aiassistant.AnthropicToolDef("TaskCreate", "创建一个执行任务"),
-            com.aiassistant.AnthropicToolDef("TaskUpdate", "更新任务状态"),
-            com.aiassistant.AnthropicToolDef("TaskList", "列出所有任务"),
-            com.aiassistant.AnthropicToolDef("TaskGet", "查询任务详情")
-        )
-        return builtIn + metaTools
+        val allTools = ctx.toolRegistry.getAll()
+        // 用工具列表的 hashCode 判断是否需要重建缓存
+        val currentHash = allTools.hashCode()
+        if (cachedToolDefs != null && toolDefsHash == currentHash) return cachedToolDefs!!
+        toolDefsHash = currentHash
+
+        val builtIn = allTools.map { tool ->
+            com.aiassistant.AnthropicToolDef(
+                name = tool.name,
+                description = tool.description,
+                properties = tool.parameters.associate { p ->
+                    p.name to com.aiassistant.PropertyDef(p.type, p.description, p.enum)
+                }.ifEmpty { null },
+                required = tool.parameters.filter { it.required }.map { it.name }.ifEmpty { null }
+            )
+        }
+        cachedToolDefs = if (isSubAgent) builtIn else {
+            val metaTools = listOf(
+                com.aiassistant.AnthropicToolDef("Skill", "激活一个 skill，获取特定领域的专业指引"),
+                com.aiassistant.AnthropicToolDef("EnterPlanMode", "进入规划模式，只允许只读工具"),
+                com.aiassistant.AnthropicToolDef("ExitPlanMode", "提交规划方案并请求用户审批"),
+                com.aiassistant.AnthropicToolDef("TaskCreate", "创建一个执行任务"),
+                com.aiassistant.AnthropicToolDef("TaskUpdate", "更新任务状态"),
+                com.aiassistant.AnthropicToolDef("TaskList", "列出所有任务"),
+                com.aiassistant.AnthropicToolDef("TaskGet", "查询任务详情")
+            )
+            builtIn + metaTools
+        }
+        return cachedToolDefs!!
     }
+
+    private val gson = com.google.gson.Gson()  // 复用实例，避免每次 parseParams 重建
 
     private fun parseParams(json: String): Map<String, String> {
         return try {
-            val gson = com.google.gson.Gson()
             val raw = gson.fromJson(json, Map::class.java) as? Map<*, *> ?: return emptyMap()
             raw.mapNotNull { (k, v) ->
                 if (k == null) return@mapNotNull null

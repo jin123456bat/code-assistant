@@ -27,8 +27,9 @@ import java.util.concurrent.TimeUnit
 
 class GenerateCommitAction : AnAction() {
 
-    private var isGenerating = false
-    private var lastClickTime = 0L
+    // @Volatile：update() 在 EDT 读，finally 在后台线程写，需要可见性保证
+    @Volatile private var isGenerating = false
+    @Volatile private var lastClickTime = 0L
 
     override fun update(e: AnActionEvent) {
         val project = e.project

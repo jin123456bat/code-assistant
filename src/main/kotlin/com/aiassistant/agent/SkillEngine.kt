@@ -92,6 +92,9 @@ object SkillEngine {
         val skillName = fields["name"]?.toString()?.trim() ?: name.replace('-', ' ')
         val description = fields["description"]?.toString()?.trim() ?: "Skill: $skillName"
         val preferredModel = fields["model"]?.toString()?.trim()
+        // 注意：allowed-tools 在 AgentLoop 审批层受 SAFE_TOOLS 约束——
+        // 写工具（write_file/execute_command 等）即使被 skill 声明也必须经用户审批。
+        // 详见 AgentLoop.kt 中 skillSafeAllowed 的安全设计。
         val allowedTools = (fields["allowed-tools"] as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
         val invokeFor = fields["invoke-for"]?.toString()?.trim()?.takeIf { it == "user" || it == "agent" }
         return SkillDef(skillName, description, body, preferredModel, allowedTools, invokeFor)

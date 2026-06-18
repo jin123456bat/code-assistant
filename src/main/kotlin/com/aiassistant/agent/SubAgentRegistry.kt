@@ -16,7 +16,10 @@ object SubAgentRegistry {
         val status: Status,
         val result: String? = null,
         val error: String? = null,
-        val startTime: Long = System.currentTimeMillis()
+        val startTime: Long = System.currentTimeMillis(),
+        // 关联创建此子 Agent 的 task/workflow 工具调用的 tool_use_id。
+        // 用于将子 Agent 结果正确地以 tool_result 角色注入对话（对齐 Claude Code）。
+        val toolCallId: String? = null
     )
 
     private val entries = ConcurrentHashMap<String, Entry>()
@@ -25,10 +28,13 @@ object SubAgentRegistry {
     // drainLock 消除 complete/fail 与 drainCompleted 之间的弱一致性窗口
     private val drainLock = Any()
 
-    fun register(id: String, description: String, loop: AgentLoop? = null): Entry {
-        val entry = Entry(id, description, Status.RUNNING)
-        entries[id] = entry
-        if (loop != null) loops[id] = loop
+    fun register(id: String, description: String, loop: AgentLoop? = null, toolCallId: String? = null): Entry {
+        val entry = Entry(id, description, Status.RUNNING, toolCallId = toolCallId)
+        // 原子写入 entries+loops，防止 stopAll() 在写入间隙漏掉子 Agent
+        synchronized(drainLock) {
+            entries[id] = entry
+            if (loop != null) loops[id] = loop
+        }
         return entry
     }
 

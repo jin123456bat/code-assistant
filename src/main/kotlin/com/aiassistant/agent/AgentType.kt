@@ -2,6 +2,18 @@ package com.aiassistant.agent
 
 // Agent 类型定义，预置类型对齐 Claude Code。
 // 每种类型预设了工具白名单/黑名单、权限策略、模型、循环限制。
+//
+// 【设计决策】autoApprove 默认 true：
+// 子 Agent 在隔离上下文中执行，其操作由主 Agent 通过 task/workflow 工具的 prompt 控制。
+// autoApprove=true 让子 Agent 可以自主执行工具而无需用户逐次点击审批，
+// 这与 Claude Code 的子代理行为一致。安全边界由以下机制保障：
+// 1. 子 Agent 不暴露元工具（Skill/EnterPlanMode/ExitPlanMode/TaskCreate 等），
+//    防止子 Agent 创建孙 Agent 或进入 Plan Mode
+// 2. 子 Agent 的 maxLoops 受限（MAX_SUB_LOOPS=20），防止无限循环
+// 3. 子 Agent 结果以 tool_result 返回给主 Agent，不直接呈现给用户
+// 4. 主 Agent 的审批机制和 SAFE_TOOLS 约束仍适用于主 Agent 自身的操作
+// 5. 自定义 Agent 类型（.claude/agents/）可通过 autoApprove=false 覆盖此行为
+// 若需更严格的子 Agent 管控，使用 EXPLORE（只读）或 PLAN（不执行工具）类型。
 data class AgentType(
     val name: String,
     val description: String,

@@ -256,7 +256,10 @@ class ChatViewModel {
                 // 不触发 onMessagesChanged，否则当前轮 streamingContent 还未清空时就 rebuild，
                 // 导致同一份 AI 回复先作为流式气泡渲染一次，又被 callback 的 messages 渲染一次（重复显示）。
                 // 使用 isThinking 标记而非 text.contains("思考")，避免中文语言依赖。
-                if (text != null && isThinking) {
+                // 保护 RunningTool 状态不被 onThinking 覆盖：
+                // AgentLoop 会在工具执行前调用 onToolExecute(RunningTool) 然后立即 onThinking("执行...")。
+                // 此时 isThinking 仍为 true（上一轮的 thinking 标记），但 UI 应显示工具 spinner 而非思考指示器。
+                if (text != null && isThinking && activity !is Activity.RunningTool) {
                     activity = Activity.Thinking
                 }
             }
@@ -322,11 +325,13 @@ class ChatViewModel {
             }
             // 对齐 Claude Code：skill prompt 注入 system prompt
             a.ctx.activatedSkillPrompt = resolved.skillPrompt
+            val currentGen = generationId  // 捕获当前轮次的 generationId，防止过期回调污染
             a.run(llmContent, apiKey, images, resolved.skillName) { finalText, thinking ->
                 // thinking 与 assistant 消息在同一个 EDT 块中原子性地落地，
                 // 同时清空 streamingThinking/streamingContent，避免分两次 rebuild
                 // 导致 streamingContent 作为临时气泡重复渲染。
                 runOnEdt {
+                    if (generationId != currentGen) return@runOnEdt  // 过期回调，丢弃
                     // 先清空流式状态并标记流式结束——防止 SDK 延迟到达的 onTextDelta
                     // EDT 回调在 rebuild 之后重新设置 streamingContent，导致
                     // updateStreamingBubble 又创建一个流式气泡与正式消息重复。
@@ -421,14 +426,17 @@ class ChatViewModel {
 
     fun clearConversation() {
         stopGeneration()  // 内部已调用 rateLimitTimer?.stop()
+        generationId++  // 废弃所有 pending EDT 回调，防止 clear 后追加孤立消息
         // 等待 agent 线程退出（最多 2 秒），防止 finally 块中的回调在 clear 后修改状态
         agent?.join(2000)
         agent?.ctx?.let { ctx ->
             synchronized(ctx.historyLock) { ctx.conversationHistory.clear() }
             ctx.lastInputTokens = 0
             ctx.goal = null  // 清空目标
+            ctx.tokenStats.perRound.clear()  // 清除 token 统计历史，防止长时间对话内存无限增长
         }
         messages.clear()
+        messageRefChips.clear()  // 清理引用芯片映射，防止跨会话污染
         streamingContent = ""
         streamingThinking = ""
         tasks = emptyList()
@@ -478,6 +486,7 @@ class ChatViewModel {
                         messages.clear()
                         messages.add(AgentMessage("system", "📋 对话摘要：$summary"))
                         messages.addAll(recentMessages)
+                        lastSavedCount = messages.size  // 压缩后同步计数，防止重复保存
                         onMessagesChanged?.invoke()
                     }
                 }
@@ -487,6 +496,10 @@ class ChatViewModel {
 
     // ---- 会话持久化（增量追加）----
 
+    // 会话保存专用单线程 executor，避免每次 autoSave 创建新 Thread
+    private val saveExecutor = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+        Thread(r, "session-saver").apply { isDaemon = true }
+    }
     private var autoSaveSessionId: String = java.util.UUID.randomUUID().toString().take(8)
     @Volatile private var lastSavedCount: Int = 0  // EDT 读 + 后台 Thread 写，需 @Volatile
 
@@ -507,21 +520,32 @@ class ChatViewModel {
                 }
             )
         }
-        Thread {
+        saveExecutor.submit {
             val name = snapshot.firstOrNull { it.role == "user" }?.content?.take(50) ?: "空会话"
             com.aiassistant.session.SessionStore.save(path, sessionId, name, snapshot, statsDTO)
             lastSavedCount = savedCount
-        }.start()
+        }
     }
 
     fun loadSession(id: String) {
         val data = project?.basePath?.let { com.aiassistant.session.SessionStore.load(it, id) } ?: return
         clearConversation()
-        messages.addAll(data.messages.mapNotNull { dto ->
+        messages.addAll(data.messages.map { dto ->
             when (dto.role) {
                 "user" -> AgentMessage("user", dto.content)
                 "assistant" -> AgentMessage("assistant", dto.content)
-                else -> null
+                "tool_call" -> AgentMessage(
+                    "tool_call", dto.content,
+                    toolCallId = dto.toolCallId,
+                    toolName = dto.toolName,
+                    toolCalls = dto.toolCalls?.map { com.aiassistant.agent.ToolCallRequest(it.id, it.name, it.arguments) }
+                )
+                "tool" -> AgentMessage(
+                    "tool", dto.content,
+                    toolCallId = dto.toolCallId,
+                    toolName = dto.toolName
+                )
+                else -> AgentMessage(dto.role, dto.content)
             }
         })
         // 恢复 token 统计数据

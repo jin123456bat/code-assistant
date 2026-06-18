@@ -173,10 +173,21 @@ inputPanel (border: Empty(8,12,12,12), bg: winBg)
 - **API Key**：存于 IntelliJ PasswordSafe（CredentialStore），通过 `AppSettingsService` 读写，不落明文。
 - **i18n**：用户可见文案走 `messages/AiAssistantBundle*.properties`（含 `_zh`），通过 `AiAssistantBundle` 读取。
 - **全局键盘拦截必须聚焦守卫**：`ChatToolWindow.popupKeyDispatcher` 通过 `KeyboardFocusManager.addKeyEventDispatcher()` 注册全局钩子。必须在入口检查 `focusOwner` 是否属于聊天面板（`SwingUtilities.isDescendingFrom(focusOwner, panel)`），否则焦点在编辑器时也会触发拦截器，可能干扰 IDE 快捷键（如 `Ctrl+C`）。
-- **Skill 不注册为独立工具**：对齐 Claude Code，每个 skill 不注册为独立 `AgentTool`，统一通过 `Skill` 元工具激活。`ctx.skillDefs` 存储已加载的 `SkillDef`，`buildSystemPrompt()` 生成 Skills 段落（渐进披露）。`allowed-tools` 中的工具在 skill 激活时自动放行。
+- **Skill 不注册为独立工具**：对齐 Claude Code，每个 skill 不注册为独立 `AgentTool`，统一通过 `Skill` 元工具激活。`ctx.skillDefs` 存储已加载的 `SkillDef`，`buildSystemPrompt()` 生成 Skills 段落（渐进披露）。**安全限制**：`allowed-tools` 仅对 `SAFE_TOOLS` 中的只读工具放行；写操作（write_file/execute_command/edit_file 等）即使被 skill 声明也强制弹出审批卡。原因：skill 定义来自项目文件不可完全信任，纵深防御原则。
+- **子 Agent 结果注入对齐 Claude Code**：后台子 Agent（`task` 后台模式、`workflow` 并行模式）的结果通过 `toolCallId` 关联到创建它的 task/workflow 工具调用。AgentLoop 将 `_toolCallId` 注入工具参数，`SubAgentRegistry.register()` 存储关联，`drainCompleted()` 回填时携带 `toolCallId`。这样 LLM 将子 Agent 结果识别为 `tool_result` 而非用户指令，消除信任边界混淆。前台子 Agent 结果直接通过 `ToolResult` 返回，无需额外处理。
 - **Edit 工具**：`edit_file` 精确替换文件中唯一匹配的文本，多次匹配报错并列出位置。
 - **Workflow 工具**：`workflow` 一次声明多个子任务并行/串行执行，自动收割合并结果。
 - **Token 追踪**：`AgentMessage.inputTokens/outputTokens` 携带每条消息的 token 消耗。气泡悬停显示。`ctx.tokenStats` 累计全会话 token 数据。
+
+### 已知设计决策（审查确认的设计意图，非 bug）
+
+以下行为在对抗审查中被标记为潜在风险，但经过确认属于设计意图，对齐 Claude Code 行为：
+
+1. **子 Agent `autoApprove=true`（`AgentType.kt`、`TaskTool.kt`）**：子 Agent 在隔离上下文中执行，免审批避免用户被大量确认弹窗打扰。安全边界由以下机制保障：子 Agent 不暴露元工具、maxLoops 受限、用户可选用 EXPLORE（只读）或 PLAN（纯规划）类型、自定义 Agent 可通过 `autoApprove=false` 覆盖。
+
+2. **Compact 摘要注入 system prompt（`AgentLoop.kt:compactHistory`）**：摘要以系统级指令形式持久存在，对齐 Claude Code `/compact` 行为。摘要由独立 API 调用生成且 prompt 明确指示保留约定，降低了污染概率。
+
+3. **`execute_command` 使用 `/bin/bash -c` 不做命令过滤（`ExecuteCommandTool.kt`）**：安全依赖审批机制（工具不在 SAFE_TOOLS 中，每次弹卡）。黑名单过滤会产生误报且无法覆盖新攻击模式，对齐 Claude Code 依赖用户审批的设计。用户可将信任工具加入白名单来权衡安全与便利。
 
 ## 设计规范
 

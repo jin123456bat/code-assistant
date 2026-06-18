@@ -1143,6 +1143,11 @@ class ChatToolWindow(private val project: Project) {
             streamingThinkingTextArea = null
             cleanupStreamingToolRow()
 
+            // 清理不可见气泡的尺寸约束（一次性清理，避免在循环中重复遍历）
+            bubbleSizeConstraints.removeAll { (bubble, _) ->
+                !bubble.isDisplayable || bubble.parent == null
+            }
+
             // 增量渲染：只渲染版本号变更的消息（新增消息 version=0 不在 map 中，原地更新 version 递增触发重渲染）
             for (msg in displayMessages) {
                 val lastVersion = renderedMsgVersions[msg.id]
@@ -1151,11 +1156,7 @@ class ChatToolWindow(private val project: Project) {
                 // 原地更新：先记录旧组件的位置
                 val oldComp = msgIdToComponent[msg.id]
                 val insertIdx = if (oldComp != null) {
-                    val idx = conversationContainer.components.indexOf(oldComp)
-                    bubbleSizeConstraints.removeAll { (bubble, _) ->
-                        !bubble.isDisplayable || bubble.parent == null
-                    }
-                    if (idx >= 0) idx else -1
+                    conversationContainer.components.indexOf(oldComp).let { if (it >= 0) it else -1 }
                 } else -1
                 msgIdToComponent.remove(msg.id)
 
@@ -1208,6 +1209,7 @@ class ChatToolWindow(private val project: Project) {
             }
         } else {
             conversationContainer.removeAll()
+            bubbleSizeConstraints.clear()  // 与 removeAll 同步清理，防止已移除气泡的约束残留
             renderedMsgVersions.clear()
             msgIdToComponent.clear()
             val hintPanel = JPanel(GridBagLayout())

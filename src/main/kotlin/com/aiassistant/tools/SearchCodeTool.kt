@@ -22,7 +22,7 @@ class SearchCodeTool : AgentTool {
 
     override fun execute(params: Map<String, String>, project: Project, onProgress: ((String) -> Unit)?): ToolResult {
         val query = params["query"]?.takeIf { it.isNotBlank() } ?: return ToolResult.err("query 不能为空")
-        val basePath = project.basePath ?: return ToolResult.err("项目路径不可用")
+        val basePath = params["_worktree"] ?: project.basePath ?: return ToolResult.err("项目路径不可用")
         val filePattern = params["file_pattern"]
         val caseSensitive = params["case_sensitive"]?.toBoolean() ?: false
         val maxResults = params["max_results"]?.toIntOrNull() ?: 30
@@ -38,15 +38,26 @@ class SearchCodeTool : AgentTool {
             val args = mutableListOf("grep", "-rn")
             if (filePattern != null) args.add("--include=$filePattern")
             if (!caseSensitive) args.add("-i")
-            args.addAll(listOf("-m", maxResults.toString(), query, "."))
+            // -- 之后 query 不会被 grep 解释为选项（防止 query="-v" 等意外行为）
+            args.addAll(listOf("-m", maxResults.toString(), "--", query, "."))
 
             val process = ProcessBuilder(args)
                 .directory(File(basePath))
                 .redirectErrorStream(true)
                 .start()
 
-            val output = process.inputStream.bufferedReader().use { it.readText() }
-            val finished = process.waitFor(10, TimeUnit.SECONDS); if (!finished) { process.destroyForcibly(); process.waitFor(2, TimeUnit.SECONDS) }
+            // 后台线程读取输出，避免 readText() 阻塞导致 waitFor 超时无法生效
+            val outputRef = java.util.concurrent.atomic.AtomicReference<String>()
+            val readThread = Thread {
+                try {
+                    outputRef.set(process.inputStream.bufferedReader().use { it.readText() })
+                } catch (_: Exception) {}
+            }.apply { isDaemon = true; start() }
+
+            val finished = process.waitFor(10, TimeUnit.SECONDS)
+            if (!finished) { process.destroyForcibly(); process.waitFor(2, TimeUnit.SECONDS) }
+            readThread.join(3000)
+            val output = outputRef.get() ?: ""
 
             formatResults(output, query, maxResults)
         } catch (e: Exception) {
@@ -59,7 +70,11 @@ class SearchCodeTool : AgentTool {
         return try {
             val target = if (caseSensitive) query else query.lowercase()
             val patternRegex = filePattern?.let {
-                Regex(it.replace(".", "\\.").replace("*", ".*"))
+                // 安全的 glob→regex：先转义所有正则特殊字符，再还原 * 和 ?
+                val escaped = java.util.regex.Pattern.quote(it)
+                    .replace("\\*", ".*")   // * → 任意字符
+                    .replace("\\?", ".")    // ? → 单个字符
+                Regex(escaped)
             }
             val results = mutableListOf<String>()
             val dir = File(basePath); if (!dir.exists()) return ToolResult.err("项目路径不可用")

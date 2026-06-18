@@ -65,7 +65,9 @@ class TaskTool : AgentTool {
             childLoop.workTreePath = workTreePath
         }
 
-        // 子 Agent 自动批准工具（免审批），非 autoApprove 时拒绝非 SAFE_TOOLS
+        // 子 Agent 的审批策略：autoApprove=true → 所有工具免审批执行。
+        // 设计意图：子 Agent 在隔离任务上下文中工作，由主 Agent 的 prompt 指令控制，
+        // 免审批可避免用户被大量确认弹窗打扰。安全边界见 AgentType.kt 中的设计决策文档。
         childLoop.onConfirmTool = { toolName, _, latch, choice ->
             if (agentType.autoApprove) {
                 choice.set(true)
@@ -112,7 +114,8 @@ class TaskTool : AgentTool {
         return try {
             if (background) {
                 val subId = "sub-${System.currentTimeMillis()}"
-                com.aiassistant.agent.SubAgentRegistry.register(subId, description, childLoop)
+                val toolCallId = params["_toolCallId"]  // AgentLoop 注入，对齐 Claude Code
+                com.aiassistant.agent.SubAgentRegistry.register(subId, description, childLoop, toolCallId)
                 CompletableFuture.runAsync {
                     try {
                         childLoop.run(prompt, apiKey, forkHistory = forkCtx) { finalText, thinking ->

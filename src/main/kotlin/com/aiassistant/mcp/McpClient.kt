@@ -56,6 +56,7 @@ class McpClient(private val config: McpServerConfig) {
 
     private var process: Process? = null
     @Volatile private var initialized: Boolean = false
+    @Volatile private var disconnecting: Boolean = false  // 防止 disconnect 期间 reader 线程写入孤条目
     private val discoveredTools = mutableListOf<McpToolAdapter>()
     private var isHttpTransport: Boolean = false
 
@@ -69,6 +70,7 @@ class McpClient(private val config: McpServerConfig) {
      * 启动 MCP 服务器并完成初始化握手。根据 config.transport 路由到 stdio 或 HTTP。
      */
     fun connect(): Boolean {
+        disconnecting = false  // 重置断开标志，允许重新连接
         if (config.transport == "http" || config.url.isNotBlank()) {
             isHttpTransport = true
             return connectHttp()
@@ -120,9 +122,11 @@ class McpClient(private val config: McpServerConfig) {
                 return false
             }
 
+            // 提前标记已初始化，确保 reader 线程不会因 !initialized 丢弃消息
+            // MCP 协议要求 initialized 通知发送后才能发送其他请求，本实现在 discoverTools 前已发送
+            initialized = true
             sendStdioRequest(buildJsonRpcNotification("initialized", "{}"))
             parseServerCapabilities(initResponse)
-            initialized = true
             true
         } catch (e: Exception) {
             disconnect()
@@ -217,7 +221,7 @@ class McpClient(private val config: McpServerConfig) {
         } else if (id != null) {
             // HTTP+SSE 模式下，异步工具结果可能通过 SSE 推送到达
             val responseId = (id as? Number)?.toInt() ?: return
-            if (!initialized) return  // disconnect 已调用，跳过写入防止孤条目
+            if (disconnecting) return  // disconnect 正在进行，跳过写入防止孤条目
             pendingResponses[responseId] = json
             synchronized(responseLock) {
                 responseLock.notifyAll()
@@ -242,7 +246,8 @@ class McpClient(private val config: McpServerConfig) {
                     val paramsJson = if (params != null) com.google.gson.Gson().toJson(params) else "{}"
                     val result = handler.handleCreateMessage(paramsJson)
                     val response = if (result != null) {
-                        """{"jsonrpc":"2.0","id":$id,"result":{"role":"assistant","content":{"type":"text","text":${com.google.gson.Gson().toJson(result)}}}}"""
+                        // model 和 stopReason 字段补齐 MCP CreateMessageResult 规范，默认值对齐 Claude Code 行为
+                        """{"jsonrpc":"2.0","id":$id,"result":{"model":"claude-fable-5","role":"assistant","content":{"type":"text","text":${com.google.gson.Gson().toJson(result)}},"stopReason":"endTurn"}}"""
                     } else {
                         """{"jsonrpc":"2.0","id":$id,"error":{"code":-1,"message":"Sampling not available"}}"""
                     }
@@ -387,9 +392,9 @@ class McpClient(private val config: McpServerConfig) {
     }
 
     fun disconnect() {
+        disconnecting = true  // 最先设置，防止 reader 线程在清理期间写入孤条目
         initialized = false
         sseRunning = false
-        // 先杀进程再清 pendingResponses，防止 reader 线程在清理后写入孤条目（TOCTOU）
         try { process?.destroyForcibly()?.waitFor(10, TimeUnit.SECONDS) } catch (_: Exception) {}
         process = null
         pendingResponses.clear()
@@ -508,8 +513,9 @@ class McpClient(private val config: McpServerConfig) {
             val root = gson.fromJson(response, Map::class.java) as Map<*, *>
             val result = root["result"] as? Map<*, *>
             val content = result?.get("content") as? List<*>
-            val first = content?.firstOrNull() as? Map<*, *>
-            first?.get("text") as? String ?: response.take(1000)
+            // 提取所有 text 类型的 content block（MCP 规范允许 content 数组包含多个块）
+            val textBlocks = content?.mapNotNull { (it as? Map<*, *>)?.get("text") as? String } ?: emptyList()
+            if (textBlocks.isNotEmpty()) textBlocks.joinToString("\n") else response.take(1000)
         } catch (_: Exception) {
             response.take(1000)
         }

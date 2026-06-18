@@ -39,7 +39,8 @@ object CompletionStats {
      */
     fun recordAccepted(language: String) {
         totalAccepted.incrementAndGet()
-        languageStats[language]?.accepted?.incrementAndGet()
+        // computeIfAbsent 确保无论 recordShown/recordAccepted 调用顺序如何都不会丢统计
+        languageStats.computeIfAbsent(language) { LangCounter() }.accepted.incrementAndGet()
     }
 
     // 兼容旧调用（无 language）

@@ -256,8 +256,23 @@ class PlanBar : JPanel(BorderLayout()) {
             isEditable = false
             isOpaque = false
             // 简单 markdown → html 转换
+            // 用交替替换处理反引号对：奇数次 → <code>，偶数次 → </code>
+            val formatted = planText?.replace("\n", "<br>")?.let { text ->
+                val sb = StringBuilder()
+                var inCode = false
+                for (i in text.indices) {
+                    if (text[i] == '`') {
+                        sb.append(if (!inCode) "<code>" else "</code>")
+                        inCode = !inCode
+                    } else {
+                        sb.append(text[i])
+                    }
+                }
+                if (inCode) sb.append("</code>")  // 未闭合的补上
+                sb.toString()
+            } ?: ""
             text = "<html><body style='font-family:sans-serif;padding:8px;color:#${Integer.toHexString(ChatTheme.textPrimary.rgb and 0xFFFFFF)}'>" +
-                planText?.replace("\n", "<br>")?.replace("`", "<code>")?.replace("`", "</code>") ?: "" +
+                formatted +
                 "</body></html>"
         }
         return JBScrollPane(textPane, ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED, ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER).apply {

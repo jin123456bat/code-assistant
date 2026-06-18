@@ -84,9 +84,7 @@ class McpManager(private val project: Project) {
 
     /** 处理 tools/list_changed 推送：重新发现所有服务器的工具并通过 listener 更新注册中心 */
     private fun handleToolsChanged(serverName: String) {
-        val client = clients[serverName] ?: return
-        client.discoverTools()  // 刷新变更服务器的工具
-        // 传入全量工具（对齐 prompts/resources 模式，避免 clearMcp 只恢复单服务器）
+        // collectAllTools() 内部会调用所有客户端的 discoverTools()，无需单独刷新
         val allTools = collectAllTools()
         changeListener?.onToolsChanged(serverName, allTools)
         com.aiassistant.AppLogger.info("MCP 工具变更: $serverName, 全量 ${allTools.size} 个")
@@ -116,7 +114,12 @@ class McpManager(private val project: Project) {
      * 对齐 Claude Code：定期探测 + 自动恢复。
      * @return 成功恢复的服务器名称列表
      */
+    @Volatile private var healthChecking = false  // 防重入
+
     fun healthCheck(): List<String> {
+        if (healthChecking) return emptyList()
+        healthChecking = true
+        try {
         val recovered = mutableListOf<String>()
 
         // 1. 检查已知客户端（崩溃恢复）
@@ -158,6 +161,9 @@ class McpManager(private val project: Project) {
         }
 
         return recovered
+        } finally {
+            healthChecking = false
+        }
     }
 
     /** 恢复单个已崩溃的服务器 */

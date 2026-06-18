@@ -34,7 +34,9 @@ object SimpleDiff {
         val lcs = buildLcsTable(oldLines, newLines)
 
         // 回溯 LCS 矩阵生成 diff 序列
-        return buildDiffLines(oldLines, newLines, lcs)
+        val result = buildDiffLines(oldLines, newLines, lcs)
+        // 稳定化：确保连续 ADD/DEL 块中 DEL 先于 ADD（标准 diff -u 约定）
+        return stabilizeDiff(result)
     }
 
     /**

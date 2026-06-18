@@ -1,7 +1,5 @@
 package com.aiassistant.mcp
 
-import com.aiassistant.shared.JsonUtils
-
 /**
  * MCP 服务器配置数据类
  */
@@ -88,35 +86,23 @@ data class McpServerConfig(
          * 序列化为 JSON 字符串
          */
         fun toJson(configs: List<McpServerConfig>): String {
-            val serversJson = configs.joinToString(",\n") { config ->
-                buildString {
-                    append("    \"${JsonUtils.escapeJson(config.name)}\": {\n")
-                    append("      \"type\": \"${config.transport}\",\n")
-                    if (config.transport == "http") {
-                        append("      \"url\": \"${JsonUtils.escapeJson(config.url)}\"")
-                        if (config.sseUrl.isNotBlank()) {
-                            append(",\n      \"sseUrl\": \"${JsonUtils.escapeJson(config.sseUrl)}\"")
-                        }
-                        append("\n")
-                    } else {
-                        append("      \"command\": \"${JsonUtils.escapeJson(config.command)}\",\n")
-                        if (config.args.isNotEmpty()) {
-                            val argsStr = config.args.joinToString(", ") { "\"${JsonUtils.escapeJson(it)}\"" }
-                            append("      \"args\": [$argsStr],\n")
-                        }
-                        if (config.env.isNotEmpty()) {
-                            val envStr = config.env.entries.joinToString(", ") {
-                                "\"${it.key}\": \"${JsonUtils.escapeJson(it.value)}\""
-                            }
-                            append("      \"env\": {$envStr}\n")
-                        } else {
-                            append("      \"env\": {}\n")
-                        }
-                    }
-                    append("    }")
+            val gson = com.google.gson.GsonBuilder().setPrettyPrinting().create()
+            val serversMap = linkedMapOf<String, Map<String, Any>>()
+            for (config in configs) {
+                val serverObj = linkedMapOf<String, Any>()
+                serverObj["type"] = config.transport
+                if (config.transport == "http") {
+                    serverObj["url"] = config.url
+                    if (config.sseUrl.isNotBlank()) serverObj["sseUrl"] = config.sseUrl
+                } else {
+                    serverObj["command"] = config.command
+                    if (config.args.isNotEmpty()) serverObj["args"] = config.args
+                    if (config.env.isNotEmpty()) serverObj["env"] = config.env
                 }
+                serversMap[config.name] = serverObj
             }
-            return "{\n  \"mcpServers\": {\n$serversJson\n  }\n}"
+            val root = mapOf("mcpServers" to serversMap)
+            return gson.toJson(root)
         }
 
     }

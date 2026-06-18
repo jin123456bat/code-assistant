@@ -4,6 +4,9 @@ package com.aiassistant.shared
  * 公共 JSON 工具函数 — 避免在多个模块中重复定义。
  */
 object JsonUtils {
+    /** 共享 Gson 实例，避免全项目重复创建（线程安全，无状态） */
+    val GSON = com.google.gson.Gson()
+
     fun escapeJson(s: String): String {
         return s
             .replace("\\", "\\\\")

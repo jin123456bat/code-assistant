@@ -113,9 +113,9 @@ class EditTool : AgentTool {
                 .mapIndexed { i, l -> "${ctxStart + i + 1}\t$l" }.joinToString("\n")
             val oldLines = oldString.lines().size
             val newLines = newString.lines().size
+            // oldString 在 execute() 入口已通过 isNotBlank() 校验，不会为空
             val changeDesc = when {
                 newString.isEmpty() -> "删除了第 $line 行的 ${oldLines} 行内容"
-                oldString.isEmpty() -> "在第 $line 行插入了 ${newLines} 行内容"
                 oldLines == 1 && newLines == 1 -> "第 $line 行已更新"
                 else -> "第 $line 行: ${oldLines} 行 → ${newLines} 行"
             }

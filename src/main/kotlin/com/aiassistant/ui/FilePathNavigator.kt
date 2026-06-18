@@ -75,10 +75,21 @@ object FilePathNavigator {
                 val link = findLinkAt(component, e.point) ?: return
                 when {
                     link.startsWith("http://", ignoreCase = true) || link.startsWith("https://", ignoreCase = true) || link.startsWith("ftp://", ignoreCase = true) -> {
-                        com.intellij.ide.BrowserUtil.browse(link)
+                        if (com.intellij.openapi.ui.Messages.showYesNoDialog(project,
+                                "将在浏览器中打开外部链接：\n$link", "打开外部链接",
+                                com.intellij.openapi.ui.Messages.getQuestionIcon()
+                            ) == com.intellij.openapi.ui.Messages.YES) {
+                            com.intellij.ide.BrowserUtil.browse(link)
+                        }
                     }
                     link.startsWith("www.", ignoreCase = true) -> {
-                        com.intellij.ide.BrowserUtil.browse("https://$link")
+                        val url = "https://$link"
+                        if (com.intellij.openapi.ui.Messages.showYesNoDialog(project,
+                                "将在浏览器中打开外部链接：\n$url", "打开外部链接",
+                                com.intellij.openapi.ui.Messages.getQuestionIcon()
+                            ) == com.intellij.openapi.ui.Messages.YES) {
+                            com.intellij.ide.BrowserUtil.browse(url)
+                        }
                     }
                     else -> navigate(link, basePath, project)
                 }
