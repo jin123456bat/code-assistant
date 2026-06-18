@@ -120,7 +120,7 @@ class TaskTool : AgentTool {
                             thinkingRef.set(thinking)
                             latch.countDown()
                         }
-                        latch.await()
+                        latch.await(30, java.util.concurrent.TimeUnit.MINUTES)
                         val result = resultRef.get()?.takeIf { it.isNotBlank() } ?: ""
                         if (result.isNotBlank()) {
                             com.aiassistant.agent.SubAgentRegistry.complete(subId, result)

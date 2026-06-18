@@ -350,7 +350,7 @@ class AgentLoop(
                                 if (cancelled) latch.countDown()
                                 try {
                                     onConfirmPlan?.invoke(planText, latch, userChoice)
-                                    val confirmed = latch.await(10, java.util.concurrent.TimeUnit.MINUTES)
+                                    val confirmed = latch.await(5, java.util.concurrent.TimeUnit.MINUTES)
                                     if (confirmed) approved = userChoice.get()
                                     else consecutiveFailures = MAX_FAILURES
                                 } catch (e: Exception) {
@@ -514,7 +514,7 @@ class AgentLoop(
                                 if (cancelled) latch.countDown()
                                 try {
                                     onConfirmTool?.invoke(tc.name, tc.arguments, latch, userChoice)
-                                    val confirmed = latch.await(10, java.util.concurrent.TimeUnit.MINUTES)
+                                    val confirmed = latch.await(5, java.util.concurrent.TimeUnit.MINUTES)
                                     if (!confirmed) {
                                         consecutiveFailures = MAX_FAILURES
                                         break
@@ -626,6 +626,7 @@ class AgentLoop(
                 }
             } catch (e: InterruptedException) {
                 Thread.currentThread().interrupt()
+                callback("", "")  // 通知调用方（TaskTool 等）执行已被中断
             } catch (e: Exception) {
                 AppLogger.error("AgentLoop 异常: ${e.message}\n${e.stackTraceToString()}")
                 edt { onError?.invoke("Agent 错误: ${e.message}") }
@@ -644,8 +645,14 @@ class AgentLoop(
         agentThread?.interrupt()
         com.aiassistant.mcp.McpManager.getInstance(project.basePath)?.cancelAll()
         pendingConfirmLatch?.countDown()
+        sdkClient?.close()
         SubAgentRegistry.stopAll()
         SkillEngine.stopWatching(project.basePath ?: "")
+    }
+
+    /** 等待 agent 线程结束（最多 timeoutMs 毫秒） */
+    fun join(timeoutMs: Long) {
+        agentThread?.join(timeoutMs)
     }
 
     // ---- Anthropic API ----

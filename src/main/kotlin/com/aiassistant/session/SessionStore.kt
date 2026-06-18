@@ -48,8 +48,8 @@ object SessionStore {
             try {
                 java.nio.file.Files.move(tmp.toPath(), target.toPath(),
                     java.nio.file.StandardCopyOption.REPLACE_EXISTING)
-            } catch (_: Exception) { tmp.delete() }
-        } catch (_: Exception) { tmp.delete() }
+            } catch (_: Exception) { if (!tmp.delete()) tmp.deleteOnExit() }
+        } catch (_: Exception) { if (!tmp.delete()) tmp.deleteOnExit() }
     }
 
     fun load(projectBasePath: String, id: String): SessionData? {

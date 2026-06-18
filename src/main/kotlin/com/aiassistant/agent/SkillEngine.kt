@@ -119,9 +119,9 @@ object SkillEngine {
         val watcher = SkillWatcher(onChange)
         val globalDir = File(globalHome, SKILLS_DIR)
         val projectDir = File(projectBasePath, SKILLS_DIR)
+        watcher.start()  // 先启动 WatchService，再注册目录
         if (globalDir.exists()) watcher.register(globalDir.toPath())
         if (projectDir.exists()) watcher.register(projectDir.toPath())
-        watcher.start()
         watchers[key] = watcher
     }
 

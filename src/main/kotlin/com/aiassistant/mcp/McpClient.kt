@@ -166,7 +166,7 @@ class McpClient(private val config: McpServerConfig) {
                     val sseRequest = HttpRequest.newBuilder()
                         .uri(URI.create(sseEndpoint))
                         .header("Accept", "text/event-stream")
-                        .timeout(Duration.ofSeconds(60))
+                        .timeout(Duration.ofSeconds(15))
                         .GET()
                         .build()
                     val sseResponse = httpClient.send(sseRequest, HttpResponse.BodyHandlers.ofLines())
@@ -215,9 +215,9 @@ class McpClient(private val config: McpServerConfig) {
         if (id != null && method != null) {
             handleServerRequest(method, json)
         } else if (id != null) {
-            // HTTP 模式下响应由 sendHttpRequest 同步返回，SSE 仅推送通知；跳过写入防止泄漏
-            if (isHttpTransport) return
+            // HTTP+SSE 模式下，异步工具结果可能通过 SSE 推送到达
             val responseId = (id as? Number)?.toInt() ?: return
+            if (!initialized) return  // disconnect 已调用，跳过写入防止孤条目
             pendingResponses[responseId] = json
             synchronized(responseLock) {
                 responseLock.notifyAll()

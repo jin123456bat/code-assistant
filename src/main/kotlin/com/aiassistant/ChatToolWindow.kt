@@ -126,6 +126,7 @@ class ChatToolWindow(private val project: Project) {
     }
 
     private val checkEmptyListener: () -> Unit = { checkEmptyState() }
+    private val rebuildOnSettingsChange: () -> Unit = { needFullRebuild = true; rebuildConversation() }
     private val viewModel = ChatViewModel()
 
     /** 本窗口注册到 AskUserBridge 的 handler 引用，dispose 时据此安全解绑。 */
@@ -152,6 +153,7 @@ class ChatToolWindow(private val project: Project) {
     fun dispose() {
         KeyboardFocusManager.getCurrentKeyboardFocusManager().removeKeyEventDispatcher(popupKeyDispatcher)
         removeRefreshListener(checkEmptyListener)
+        removeRefreshListener(rebuildOnSettingsChange)
         // 清理所有 editor selection listeners
         editorListeners.forEach { (editor, listener) ->
             editor.selectionModel.removeSelectionListener(listener)
@@ -919,7 +921,7 @@ class ChatToolWindow(private val project: Project) {
         }
         bindViewModel()
         addRefreshListener(checkEmptyListener)
-        addRefreshListener { needFullRebuild = true; rebuildConversation() }  // 设置变更时重建气泡，同步 token 显示状态
+        addRefreshListener(rebuildOnSettingsChange)  // 设置变更时重建气泡，同步 token 显示状态
         ApplicationManager.getApplication().invokeLater { checkEmptyState() }
 
         // viewport 宽度变化时重算气泡：仅在宽度真正改变时触发。这样首次 viewport
@@ -2149,14 +2151,10 @@ class ChatToolWindow(private val project: Project) {
         if (atBottom) bar.value = bar.maximum
     }
 
-    /** 强制立即滚动到底部，用于 rebuildConversation、首次创建流式组件、showSelectionCard 等场景。EDT 上直接执行避免单帧延迟。 */
+    /** 滚动到底部。统一使用 invokeLater 确保 revalidate 后的布局计算完成再读 maximum。 */
     private fun scrollToBottom() {
-        if (SwingUtilities.isEventDispatchThread()) {
+        SwingUtilities.invokeLater {
             conversationScrollPane.verticalScrollBar.value = conversationScrollPane.verticalScrollBar.maximum
-        } else {
-            SwingUtilities.invokeLater {
-                conversationScrollPane.verticalScrollBar.value = conversationScrollPane.verticalScrollBar.maximum
-            }
         }
     }
 }

@@ -32,15 +32,22 @@ object SubAgentRegistry {
         return entry
     }
 
-    /** 停止所有运行中的子 Agent */
+    /** 停止所有运行中的子 Agent。防重入：AgentLoop.stop() 会回调此方法。 */
+    @Volatile private var stopping = false
+
     fun stopAll() {
-        loops.values.forEach { it.stop() }
-        loops.clear()
-        // 标记所有 RUNNING 条目为 FAILED，防止内存泄漏
-        entries.forEach { (id, entry) ->
-            if (entry.status == Status.RUNNING) {
-                entries[id] = entry.copy(status = Status.FAILED, error = "主对话停止")
+        if (stopping) return
+        stopping = true
+        try {
+            loops.values.forEach { it.stop() }
+            loops.clear()
+            entries.forEach { (id, entry) ->
+                if (entry.status == Status.RUNNING) {
+                    entries[id] = entry.copy(status = Status.FAILED, error = "主对话停止")
+                }
             }
+        } finally {
+            stopping = false
         }
     }
 

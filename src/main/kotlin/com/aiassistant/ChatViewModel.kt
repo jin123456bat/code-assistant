@@ -421,6 +421,8 @@ class ChatViewModel {
 
     fun clearConversation() {
         stopGeneration()  // 内部已调用 rateLimitTimer?.stop()
+        // 等待 agent 线程退出（最多 2 秒），防止 finally 块中的回调在 clear 后修改状态
+        agent?.join(2000)
         agent?.ctx?.let { ctx ->
             synchronized(ctx.historyLock) { ctx.conversationHistory.clear() }
             ctx.lastInputTokens = 0

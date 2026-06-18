@@ -102,7 +102,7 @@ object SimpleDiff {
         // 标准 diff 要求同一"块"中 DEL 先于 ADD。
         // 反转后的序列中，对于相邻的 ADD/DEL 混排块，需要将 DEL 提前。
         result.addAll(reversed.reversed())
-        return stabilizeDiff(result)
+        return result
     }
 
     /**
