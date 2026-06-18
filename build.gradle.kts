@@ -18,6 +18,10 @@ dependencies {
         // 排除 SDK 自带的 Kotlin stdlib，避免与 IntelliJ Platform 内置版本冲突
         exclude("org.jetbrains.kotlin", "kotlin-stdlib")
     }
+    // OkHttp 作为 Anthropic SDK 的传递依赖在 runtimeClasspath 中存在，
+    // 但 IntelliJ Platform Plugin 的依赖隔离会将其从 compileClasspath 中排除。
+    // 显式声明以支持 DeepSeekFimClient 等直接在编译时引用 OkHttp API 的代码。
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlin:kotlin-test:1.9.22")
 }

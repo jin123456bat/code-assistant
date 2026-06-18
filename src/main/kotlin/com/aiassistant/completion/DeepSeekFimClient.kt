@@ -3,11 +3,13 @@ package com.aiassistant.completion
 import com.aiassistant.AppSettingsService
 import com.google.gson.Gson
 import com.google.gson.annotations.SerializedName
+import okhttp3.ConnectionPool
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
-import java.io.OutputStreamWriter
-import java.net.HttpURLConnection
-import java.net.URI
-import java.nio.charset.StandardCharsets
+import java.util.concurrent.TimeUnit
 
 /**
  * FIM API 异常，携带 HTTP 状态码用于重试判断。
@@ -16,21 +18,40 @@ class FimApiException(val statusCode: Int, message: String) : IOException(messag
 
 /**
  * DeepSeek FIM API 客户端。封装 `/beta/completions` 调用，非流式，带超时和重试。
+ *
+ * v2.0: 网络层迁移到 OkHttp，获得连接池复用、HTTP/2、指数退避重试等能力。
  */
 class DeepSeekFimClient(
     private val settings: AppSettingsService = AppSettingsService.getInstance()
 ) {
     companion object {
         private const val FIM_ENDPOINT = "https://api.deepseek.com/beta/completions"
-        private const val CONNECT_TIMEOUT_MS = 2_000
-        private const val READ_TIMEOUT_MS = 3_000
-        private const val MAX_RETRIES = 1
+        private const val CONNECT_TIMEOUT_S = 5L
+        private const val READ_TIMEOUT_S = 10L
+        private const val MAX_RETRIES = 2
+        private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
     }
 
     private val gson = Gson()
 
+    /**
+     * OkHttpClient 单例：连接池 5 个空闲连接保持 5 分钟，连接/读取超时，支持 HTTP/2。
+     */
+    private val httpClient: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectionPool(ConnectionPool(
+                maxIdleConnections = 5,
+                keepAliveDuration = 5,
+                timeUnit = TimeUnit.MINUTES
+            ))
+            .connectTimeout(CONNECT_TIMEOUT_S, TimeUnit.SECONDS)
+            .readTimeout(READ_TIMEOUT_S, TimeUnit.SECONDS)
+            .retryOnConnectionFailure(false)  // 关闭 SDK 内置重试，由 executeWithRetry 自行控制指数退避
+            .build()
+    }
+
     @Volatile
-    private var activeConnection: HttpURLConnection? = null
+    private var activeCall: okhttp3.Call? = null
 
     // ---- Request/Response data classes ----
 
@@ -84,11 +105,16 @@ class DeepSeekFimClient(
 
     /** 取消进行中的请求 */
     fun cancel() {
-        activeConnection?.disconnect()
+        activeCall?.cancel()
     }
 
     // ---- Internal ----
 
+    /**
+     * 带指数退避的重试循环。
+     * 退避策略：200ms → 400ms → 800ms（第 1-3 次尝试，即 0/1/2 次重试）。
+     * 4xx 错误不重试（客户端错误），其余 IOException 重试。
+     */
     private fun executeWithRetry(request: FimRequest, apiKey: String): FimResponse? {
         var lastError: IOException? = null
         for (attempt in 0..MAX_RETRIES) {
@@ -101,43 +127,45 @@ class DeepSeekFimClient(
                 lastError = e
                 // 网络错误继续重试
             }
+
+            // 指数退避：200ms * 2^attempt
+            if (attempt < MAX_RETRIES) {
+                val delayMs = 200L * (1L shl attempt)
+                try {
+                    Thread.sleep(delayMs)
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    throw lastError ?: IOException("Retry interrupted")
+                }
+            }
         }
         throw lastError ?: IOException("Unknown error")
     }
 
+    /**
+     * 单次 HTTP 调用，使用 OkHttp [call.execute()] 替代 HttpURLConnection。
+     */
     private fun execute(request: FimRequest, apiKey: String): FimResponse {
         val jsonBody = gson.toJson(request)
-        val url = URI.create(FIM_ENDPOINT).toURL()
-        val connection = (url.openConnection() as HttpURLConnection).apply {
-            requestMethod = "POST"
-            connectTimeout = CONNECT_TIMEOUT_MS
-            readTimeout = READ_TIMEOUT_MS
-            doOutput = true
-            setRequestProperty("Authorization", "Bearer $apiKey")
-            setRequestProperty("Content-Type", "application/json; charset=utf-8")
-        }
+        val httpRequest = Request.Builder()
+            .url(FIM_ENDPOINT)
+            .post(jsonBody.toRequestBody(JSON_MEDIA_TYPE))
+            .header("Authorization", "Bearer $apiKey")
+            .build()
 
-        activeConnection = connection
+        val call = httpClient.newCall(httpRequest)
+        activeCall = call
         try {
-            // 写入请求体
-            OutputStreamWriter(connection.outputStream, StandardCharsets.UTF_8).use { writer ->
-                writer.write(jsonBody)
-                writer.flush()
+            val response = call.execute()
+            if (!response.isSuccessful) {
+                val errorBody = response.body?.string() ?: ""
+                throw FimApiException(response.code, "FIM API error ${response.code}: $errorBody")
             }
-
-            val responseCode = connection.responseCode
-            if (responseCode !in 200..299) {
-                val errorBody = connection.errorStream?.bufferedReader(StandardCharsets.UTF_8)?.readText() ?: ""
-                throw FimApiException(responseCode, "FIM API error $responseCode: $errorBody")
-            }
-
-            val responseBody = connection.inputStream.bufferedReader(StandardCharsets.UTF_8).readText()
-            // 使用 TypeToken 方式避免 Kotlin 中 fromJson(String, Class) 的重载歧义
+            val responseBody = response.body?.string() ?: ""
             val responseType = object : com.google.gson.reflect.TypeToken<FimResponse>() {}.type
             return gson.fromJson(responseBody, responseType)
         } finally {
-            activeConnection = null
-            connection.disconnect()
+            activeCall = null
         }
     }
 }
