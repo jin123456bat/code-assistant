@@ -83,5 +83,21 @@
             <keyboard-shortcut keymap="Mac OS X 10.5+" first-keystroke="meta P"/>
             <keyboard-shortcut keymap="$default" first-keystroke="alt P"/>
         </action>
+
+        <action
+            id="AiAssistant.NextCandidate"
+            class="com.aiassistant.completion.NextCandidateAction"
+            text="下一个补全候选"
+            description="切换到下一个 AI 补全候选">
+            <keyboard-shortcut keymap="$default" first-keystroke="DOWN"/>
+        </action>
+
+        <action
+            id="AiAssistant.PrevCandidate"
+            class="com.aiassistant.completion.PrevCandidateAction"
+            text="上一个补全候选"
+            description="切换到上一个 AI 补全候选">
+            <keyboard-shortcut keymap="$default" first-keystroke="UP"/>
+        </action>
     </actions>
 </idea-plugin>
