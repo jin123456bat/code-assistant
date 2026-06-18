@@ -143,12 +143,20 @@ class CssPsiStrategy : PsiCompletionStrategy {
     }
 }
 
+// ---- 策略单例 ----
+
+private val phpStrategy = PhpPsiStrategy()
+private val jsStrategy = JsPsiStrategy()
+private val htmlStrategy = HtmlPsiStrategy()
+private val cssStrategy = CssPsiStrategy()
+private val fallbackStrategy = FallbackStrategy()
+
 // ---- 策略选择函数 ----
 
 fun selectPsiStrategy(language: String): PsiCompletionStrategy = when (language.lowercase()) {
-    "php" -> PhpPsiStrategy()
-    "javascript", "typescript" -> JsPsiStrategy()
-    "html", "xml" -> HtmlPsiStrategy()
-    "css", "scss", "less" -> CssPsiStrategy()
-    else -> FallbackStrategy()
+    "php" -> phpStrategy
+    "javascript", "typescript" -> jsStrategy
+    "html", "xml" -> htmlStrategy
+    "css", "scss", "less" -> cssStrategy
+    else -> fallbackStrategy
 }

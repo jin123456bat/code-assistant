@@ -132,11 +132,8 @@ class AiCompletionProvider : InlineCompletionProvider {
             return InlineCompletionSuggestion.Companion.empty()
         }
 
-        // Token 预算
-        val budget = TokenBudgetManager(settings.getCompletionMaxTokens())
-
         // 上下文采集
-        val collector = CompletionContextCollector(budget)
+        val collector = CompletionContextCollector()
         val context = collector.collect(editor, project)
 
         // 判断是否为手动触发（通过 DirectCall 事件类型）

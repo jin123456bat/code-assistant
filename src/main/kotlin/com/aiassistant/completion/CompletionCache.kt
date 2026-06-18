@@ -15,6 +15,9 @@ class CompletionCache(
         val createdAt: Long = System.currentTimeMillis()
     )
 
+    /** 复用的 SHA-256 MessageDigest 实例，synchronized 保护 */
+    private val digest = java.security.MessageDigest.getInstance("SHA-256")
+
     /** LRU map (access-order)，线程安全由 @Synchronized 保证 */
     private val cache = object : LinkedHashMap<String, CacheEntry>(maxSize, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, CacheEntry>?): Boolean {
@@ -48,7 +51,9 @@ class CompletionCache(
         val prefixPart = if (prefix.length > 200) prefix.substring(prefix.length - 200) else prefix
         val suffixPart = if (suffix.length > 200) suffix.substring(0, 200) else suffix
         val raw = "$prefixPart|$suffixPart"
-        val digest = MessageDigest.getInstance("SHA-256")
-        return digest.digest(raw.toByteArray()).joinToString("") { "%02x".format(it) }
+        synchronized(digest) {
+            val hash = digest.digest(raw.toByteArray())
+            return hash.joinToString("") { "%02x".format(it) }
+        }
     }
 }
