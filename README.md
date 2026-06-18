@@ -21,7 +21,7 @@
 - **Skills 引擎**：从 `.claude/skills/**/SKILL.md` 加载自定义技能，支持 `allowed-tools`/`invoke-for`
 - **Rules 系统**：`.claude/rules/*.md` 按文件路径条件注入规则
 - **目标驱动**：`/goal` 命令让 Agent 持续工作直到目标达成
-- **执行计划**：LLM 自主创建计划 + PlanBar 可视化步骤进度
+- **Plan Mode + Task**：EnterPlanMode 只读规划 → ExitPlanMode 用户审批 → TaskCreate/TaskUpdate 追踪执行进度
 - **会话持久化**：自动保存对话，`/resume` 恢复，`/export` 导出
 - **Token 追踪**：气泡悬停显示 token 消耗，📊 Dashboard 天/周统计
 - **安全审批**：写入/命令执行需用户确认，Skill 级 allowed-tools 预批准
@@ -57,7 +57,7 @@
 | 命令 | 说明 |
 |------|------|
 | `/new` | 清空对话，开始新会话 |
-| `/plan` | 创建执行计划 |
+| `/plan` | 进入规划模式（只读探索 → 方案审批） |
 | `/goal` | 设置目标，Agent 持续工作直到达标 |
 | `/init` | 初始化项目文档（CLAUDE.md） |
 | `/review` | 审查当前分支代码改动 |

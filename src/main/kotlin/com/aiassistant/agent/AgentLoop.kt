@@ -18,48 +18,56 @@ class AgentLoop(
         const val MAX_FAILURES = 3
         const val MAX_CONTINUATIONS = 5  // max_tokens 续写上限，防止死循环
 
-        /** 安全工具白名单 — 无需用户确认直接执行 */
+        /** 安全工具白名单 — 无需用户确认直接执行 + Plan Mode 只读工具集 */
         val SAFE_TOOLS = setOf(
             "search_code", "read_file", "list_directory",
             "git_diff", "git_log", "git_status", "web_search",
             "web_fetch", "task", "ask_user", "code_intelligence"
         )
 
-        /** create_plan 元工具的 input_schema（含嵌套 items，ToolParameter 无法表达） */
-        private const val CREATE_PLAN_SCHEMA = """{"type":"object","properties":{"title":{"type":"string","description":"计划标题"},"steps":{"type":"array","items":{"type":"object","properties":{"subject":{"type":"string","description":"子任务简短名称（显示在任务列表）"},"description":{"type":"string","description":"子任务详细描述（可选）"}},"required":["subject"]}}},"required":["title","steps"],"additionalProperties":false}"""
+        // ---- Meta-tool JSON schemas（对齐 Claude Code） ----
 
-        private const val CREATE_PLAN_TOOL_JSON = """{"name":"create_plan","description":"为复杂任务创建执行计划。简单任务不要调用。","input_schema":$CREATE_PLAN_SCHEMA}"""
-
-        private const val UPDATE_PLAN_STEP_SCHEMA = """{"type":"object","properties":{"index":{"type":"integer","description":"步骤序号（从1开始）"},"status":{"type":"string","enum":["in_progress","done","failed"],"description":"新状态"},"result":{"type":"string","description":"可选的结果摘要（done/failed 时使用）"}},"required":["index","status"]}"""
-
-        private const val UPDATE_PLAN_STEP_TOOL_JSON = """{"name":"update_plan_step","description":"更新执行计划中的步骤状态。在开始、完成或失败时调用。","input_schema":$UPDATE_PLAN_STEP_SCHEMA}"""
-
-        /** 统一 Skill 元工具 input_schema（对齐 Claude Code：单一 Skill 工具，参数 skill + args） */
-        private const val SKILL_TOOL_SCHEMA = """{"type":"object","properties":{"skill":{"type":"string","description":"要激活的 skill 名称（如 frontend-design、code-review）"},"args":{"type":"string","description":"传递给 skill 的用户输入内容"}},"required":["skill"]}"""
-
+        /** 统一 Skill 元工具 */
+        private const val SKILL_TOOL_SCHEMA = """{"type":"object","properties":{"skill":{"type":"string","description":"要激活的 skill 名称"},"args":{"type":"string","description":"传递给 skill 的用户输入内容"}},"required":["skill"]}"""
         private const val SKILL_TOOL_JSON = """{"name":"Skill","description":"激活一个 skill，获取特定领域的专业指引。可选参数 args 传递用户输入。","input_schema":$SKILL_TOOL_SCHEMA}"""
+
+        /** EnterPlanMode — 进入规划模式（只读，禁止写操作） */
+        private const val ENTER_PLAN_MODE_SCHEMA = """{"type":"object","properties":{},"additionalProperties":false}"""
+        private const val ENTER_PLAN_MODE_JSON = """{"name":"EnterPlanMode","description":"进入规划模式，只允许只读工具。在此模式下探索代码库、设计方案，完成规划后调用 ExitPlanMode。","input_schema":$ENTER_PLAN_MODE_SCHEMA}"""
+
+        /** ExitPlanMode — 提交规划方案，触发用户审批 */
+        private const val EXIT_PLAN_MODE_SCHEMA = """{"type":"object","properties":{"plan":{"type":"string","description":"规划方案（markdown 格式），包含技术方案、实施步骤、风险点等"}},"required":["plan"],"additionalProperties":false}"""
+        private const val EXIT_PLAN_MODE_JSON = """{"name":"ExitPlanMode","description":"提交规划方案并请求用户审批。用户批准后方可执行写操作。","input_schema":$EXIT_PLAN_MODE_SCHEMA}"""
+
+        /** TaskCreate — 创建单个任务 */
+        private const val TASK_CREATE_SCHEMA = """{"type":"object","properties":{"subject":{"type":"string","description":"任务简短标题（显示在任务列表中）"},"description":{"type":"string","description":"任务详细描述（可选）"}},"required":["subject"],"additionalProperties":false}"""
+        private const val TASK_CREATE_JSON = """{"name":"TaskCreate","description":"创建一个执行任务。用于将规划方案拆分为可追踪的任务项。","input_schema":$TASK_CREATE_SCHEMA}"""
+
+        /** TaskUpdate — 更新任务状态 */
+        private const val TASK_UPDATE_SCHEMA = """{"type":"object","properties":{"id":{"type":"integer","description":"任务 ID（TaskCreate 返回的）"},"status":{"type":"string","enum":["in_progress","completed"],"description":"新状态：in_progress=开始执行, completed=已完成"},"result":{"type":"string","description":"完成时的结果摘要（status=completed 时使用）"}},"required":["id","status"],"additionalProperties":false}"""
+        private const val TASK_UPDATE_JSON = """{"name":"TaskUpdate","description":"更新任务状态。开始任务时标记 in_progress，完成后标记 completed。","input_schema":$TASK_UPDATE_SCHEMA}"""
+
+        /** TaskList — 列出所有任务 */
+        private const val TASK_LIST_SCHEMA = """{"type":"object","properties":{},"additionalProperties":false}"""
+        private const val TASK_LIST_JSON = """{"name":"TaskList","description":"列出当前所有任务及其状态。","input_schema":$TASK_LIST_SCHEMA}"""
+
+        /** TaskGet — 查询单个任务详情 */
+        private const val TASK_GET_SCHEMA = """{"type":"object","properties":{"id":{"type":"integer","description":"任务 ID"}},"required":["id"],"additionalProperties":false}"""
+        private const val TASK_GET_JSON = """{"name":"TaskGet","description":"查询指定任务的详细信息。","input_schema":$TASK_GET_SCHEMA}"""
     }
 
     val ctx = AgentContext(project)
     @Volatile private var cancelled = false
     @Volatile private var model: String = AppSettingsService.getInstance().getModel()
-    private var maxLoops: Int = MAX_LOOPS  // 可由 AgentType 覆盖
-    /** 是否为子 Agent（子 Agent 不注注册元工具，自动批准工具） */
+    private var maxLoops: Int = MAX_LOOPS
     @Volatile private var isSubAgent = false
-    /** 消息轮次分组计数器，跨 run() 持久递增，防止同 Agent 多次 run() 产生的消息跨轮合并 */
     private var roundGroupId: Int = 1
-    /** 当前 agent 后台线程引用，供 stop() 中断阻塞等待（网络挂起时无需等 2 分钟超时） */
     @Volatile private var agentThread: Thread? = null
-    /** 复用的 SDK 客户端（含 OkHttp 连接池），避免每轮 API 调用创建新的连接池导致线程/连接泄漏 */
     @Volatile private var sdkClient: com.aiassistant.AnthropicSdkClient? = null
     private var lastApiKey: String? = null
 
-    /** 刷新模型配置，用于 Settings 变更后同步 */
-    fun refreshModel() {
-        model = AppSettingsService.getInstance().getModel()
-    }
+    fun refreshModel() { model = AppSettingsService.getInstance().getModel() }
 
-    /** 切换到指定模型（skill preferredModel 路由） */
     fun switchModel(newModel: String) {
         if (newModel != model) {
             AppLogger.info("AgentLoop模型切换: $model → $newModel")
@@ -68,7 +76,6 @@ class AgentLoop(
         }
     }
 
-    /** 当前正在等待用户确认的 latch（用于 stop() 时解除阻塞，避免背景线程挂起）。 */
     @Volatile private var pendingConfirmLatch: CountDownLatch? = null
 
     var onMessage: ((AgentMessage) -> Unit)? = null
@@ -76,17 +83,16 @@ class AgentLoop(
     var onThinking: ((String?) -> Unit)? = null
     var onToolExecute: ((String, String) -> Unit)? = null
     var onToolResult: ((String, String) -> Unit)? = null
-    var onPlanUpdate: ((AgentContext.Plan) -> Unit)? = null
+    /** 任务列表变更回调（TaskCreate/TaskUpdate 触发） */
+    var onTaskUpdate: (() -> Unit)? = null
+    /** Plan Mode 审批回调（ExitPlanMode 触发，需用户审批） */
+    var onConfirmPlan: ((String, CountDownLatch, AtomicBoolean) -> Unit)? = null
     var onError: ((String) -> Unit)? = null
     var onStateChange: ((Boolean) -> Unit)? = null
     var onModelRouted: ((String) -> Unit)? = null
-    /** 思考过程实时流式回调 — 每个 ThinkingDelta 触发，参数为累积的思考文本 */
     var onThinkingDelta: ((String) -> Unit)? = null
-    /** 工具确认回调 — UI 层实现内联确认，通过 latch 通知结果 */
     var onConfirmTool: ((String, String, CountDownLatch, AtomicBoolean) -> Unit)? = null
-    /** 工具执行期间的中间输出回调（toolName → partialContent），用于子 Agent 实时输出 */
     var onToolStreaming: ((String, String) -> Unit)? = null
-    /** Compact 完成回调 — 自动/手动 compact 共用，通知 UI 更新消息列表 */
     var onCompact: ((String) -> Unit)? = null
 
     fun initialize(
@@ -100,18 +106,14 @@ class AgentLoop(
         maxLoops = overrideMaxLoops
         ctx.toolRegistry.registerBuiltIn(allowedTools, deniedTools)
         ctx.toolRegistry.registerMcp(mcpTools)
-        // 子 Agent 不加载 skill 和自定义 agent（不需要这些系统）
         if (!isSubAgent) {
             val basePath = project.basePath
             val skillDefs = if (basePath != null) SkillEngine.loadProjectSkills(basePath) else emptyList()
             skillDefs.forEach { ctx.skillDefs[it.name] = it }
-            // 加载自定义 Agent 定义（兼容 Claude Code .claude/agents/*.md）
             AgentTypes.loadCustom(basePath)
-            // 加载 Rules（.claude/rules/*.md），对齐 Claude Code paths 条件匹配
             val loadedRules = if (basePath != null) RulesEngine.loadAll(basePath) else emptyList()
             ctx.rules.clear()
             ctx.rules.addAll(loadedRules)
-            // 启动 skills 文件实时监听（新增/修改/删除 SKILL.md 后自动重载）
             if (basePath != null) {
                 SkillEngine.startWatching(basePath) { reloadSkills() }
             }
@@ -119,10 +121,6 @@ class AgentLoop(
         ctx.systemPrompt = buildSystemPrompt()
     }
 
-    /**
-     * 重载 skills 列表并更新 system prompt（文件监听回调）。
-     * 始终更新 systemPrompt——running 中时下一轮 run() 会自行重建，无副作用。
-     */
     private fun reloadSkills() {
         val basePath = project.basePath ?: return
         val skillDefs = SkillEngine.loadProjectSkills(basePath)
@@ -133,9 +131,7 @@ class AgentLoop(
         }
     }
 
-    // Fork 上下文继承：子 Agent 继承父对话历史（复用 prompt cache 省 token）
     private var forkHistory: List<AnthropicMessage>? = null
-    // Worktree 隔离：子 Agent 的工作目录（git worktree path）
     var workTreePath: String? = null
 
     fun run(userMessage: String, apiKey: String, images: List<ImageData>? = null, activatedSkill: String? = null,
@@ -143,37 +139,27 @@ class AgentLoop(
         this.forkHistory = forkHistory
         cancelled = false
         onStateChange?.invoke(true)
-        // 恢复或重建 system prompt：skill 激活时排除该 skill，普通消息时恢复完整 skill 列表
         ctx.activatedSkill = activatedSkill
         ctx.systemPrompt = buildSystemPrompt()
-        // 跨轮对话历史：每轮追加到 ctx.conversationHistory，使 LLM 能感知完整上下文
         val history = ctx.conversationHistory
 
         val t = Thread {
             try {
-                // 健康检查：恢复崩溃的 MCP 服务器（对齐 Claude Code，后台线程避免阻塞 EDT）
                 com.aiassistant.mcp.McpManager.getInstance(project.basePath)?.healthCheck()
 
-                // 自动 Compact：历史过长时先压缩再发送（对齐 Claude Code 自动 token 阈值触发）
                 if (shouldAutoCompact(history)) {
                     AppLogger.info("自动 Compact 触发: historySize=${history.size}")
                     autoCompact(apiKey)
                 }
 
-                // 诊断信息
                 val toolCount = ctx.toolRegistry.getAll().size
                 val toolNames = ctx.toolRegistry.getAll().joinToString(", ") { it.name }
                 edt { onMessage?.invoke(AgentMessage("system", "$toolCount 个工具已就绪: $toolNames")) }
 
-                // Fork：注入父对话上下文（复用 prompt cache 省 token）
-                // 确保消息交替——fork 末尾不能和当前 user 消息产生连续同 role
-                // 复合操作加锁，与 clearConversation() 互斥，防止消息交替被破坏
                 synchronized(ctx.historyLock) {
                     if (forkHistory != null && forkHistory.isNotEmpty()) {
                         val lastRole = forkHistory.last().role
                         if (lastRole == "user") {
-                            // 此处不应到达：正常对话历史末尾总是 assistant。
-                            // 若到达则说明 conversationHistory 构建有 bug，抛异常暴露根因而非静默修复。
                             error("fork 历史末尾为 user 角色，对话消息交替已被破坏，请检查 conversationHistory 构建逻辑")
                         }
                         history.addAll(0, forkHistory)
@@ -181,7 +167,6 @@ class AgentLoop(
                     history.add(AnthropicMessage("user", userMessage, images = images, groupId = roundGroupId))
                 }
 
-                // 检查并行子代理结果，注入到对话（主 Agent 下一轮 API 调用可感知）
                 val subResults = SubAgentRegistry.drainCompleted()
                 if (subResults.isNotEmpty()) {
                     AppLogger.info("AgentLoop: 注入 ${subResults.size} 个并行子代理结果")
@@ -205,7 +190,6 @@ class AgentLoop(
 
                 while (loopCount < maxLoops && !cancelled) {
                     roundGroupId++
-                    // 每轮检查并行子代理结果，注入到 history
                     val newSubResults = SubAgentRegistry.drainCompleted()
                     for (entry in newSubResults) {
                         val text = when (entry.status) {
@@ -226,7 +210,7 @@ class AgentLoop(
                     val result = callAnthropic(apiKey, history)
                     if (result == null) {
                         edt { onError?.invoke("API 调用失败") }
-                        callback("", "")  // 通知调用方（如 TaskTool）执行失败
+                        callback("", "")
                         break
                     }
 
@@ -242,7 +226,6 @@ class AgentLoop(
                     edt { onThinking?.invoke(null) }
 
                     if (toolCalls.isNotEmpty()) {
-                        // 工具调用轮：thinking + 部分文本 先固化为消息，让用户在工具执行期间可查阅
                         if (thinking.isNotEmpty()) {
                             edt { onMessage?.invoke(AgentMessage("thinking", thinking)) }
                         }
@@ -257,9 +240,7 @@ class AgentLoop(
                         }
                         consecutiveFailures = 0
 
-                        // 标记：只有第一个 toolCall 才将 textContent 添加到 history，后续 toolCall 跳过
                         var firstToolCallTextAdded = false
-                        // thinking content block 也只需在第一个 toolCall 时添加一次
                         var thinkingBlockAdded = false
 
                         for (tc in toolCalls) {
@@ -274,7 +255,24 @@ class AgentLoop(
                                 edt { onToolExecute?.invoke(tc.name, tc.arguments) }
                             }
 
-                            // Skill 元工具：统一的 skill 激活入口（对齐 Claude Code）
+                            // ---- Plan Mode: 写工具拦截 ----
+                            if (ctx.planMode && tc.name !in SAFE_TOOLS && tc.name !in META_TOOL_NAMES) {
+                                val denyMsg = "当前处于规划模式（EnterPlanMode），仅允许只读工具。请先调用 ExitPlanMode 提交方案并获得用户审批后，再执行写操作。"
+                                if (!firstToolCallTextAdded) {
+                                    if (!thinkingBlockAdded && thinking.isNotBlank()) {
+                                        history.add(AnthropicMessage("assistant", "", thinking = thinking, thinkingSignature = thinkingSignature))
+                                        thinkingBlockAdded = true
+                                    }
+                                    history.add(AnthropicMessage("assistant", textContent))
+                                    firstToolCallTextAdded = true
+                                }
+                                history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments, thinking = thinking, thinkingSignature = thinkingSignature))
+                                history.add(AnthropicMessage("user", denyMsg, toolCallId = tc.id, groupId = roundGroupId))
+                                edt { onToolResult?.invoke(tc.name, denyMsg) }
+                                continue
+                            }
+
+                            // Skill 元工具
                             if (tc.name == "Skill") {
                                 val skillParams = parseParams(tc.arguments)
                                 val skillName = skillParams["skill"]?.takeIf { it.isNotBlank() }
@@ -296,11 +294,9 @@ class AgentLoop(
                                 }
                                 val def = ctx.skillDefs[skillName]
                                 val skillResult = if (def != null) {
-                                    // 注入 skill prompt 到 system prompt（对齐 Claude Code）
                                     ctx.activatedSkillPrompt = def.prompt
                                     ctx.activatedSkill = skillName
                                     ctx.systemPrompt = buildSystemPrompt()
-                                    // Skill 模型路由
                                     if (def.preferredModel != null && def.preferredModel != model) {
                                         AppLogger.info("Skill模型路由: '$model' → '${def.preferredModel}' (skill: $skillName)")
                                         model = def.preferredModel!!
@@ -308,7 +304,7 @@ class AgentLoop(
                                     }
                                     "Skill '$skillName' 已激活。${if (!skillArgs.isNullOrBlank()) "用户输入: $skillArgs" else ""}"
                                 } else {
-                                    ctx.activatedSkill = null  // 清除残留的旧 skill 状态
+                                    ctx.activatedSkill = null
                                     "未知 Skill: $skillName。可用 skill: ${ctx.skillDefs.keys.joinToString(", ")}"
                                 }
                                 if (!firstToolCallTextAdded) {
@@ -325,101 +321,80 @@ class AgentLoop(
                                 continue
                             }
 
-                            // create_plan 元工具：LLM 自主决定是否创建执行计划
-                            if (tc.name == "create_plan") {
-                                val newPlan = parsePlanFromArgs(tc.arguments)
-                                // 如果 steps 为空（LLM 未提供步骤），返回错误提示让 LLM 修正重试
-                                if (newPlan.stepsSnapshot().isEmpty()) {
-                                    val errorResult = "计划创建失败：缺少有效的 steps 参数。请提供至少一个步骤（含 subject 和可选的 description）后重试。"
-                                    if (!firstToolCallTextAdded) {
-                                        if (!thinkingBlockAdded && thinking.isNotBlank()) {
-                                            AppLogger.info("AgentLoop: 添加thinking到history thinkingLen=${thinking.length} sigLen=${thinkingSignature.length}")
-                                            history.add(AnthropicMessage("assistant", "", thinking = thinking, thinkingSignature = thinkingSignature))
-                                            thinkingBlockAdded = true
-                                        }
-                                        history.add(AnthropicMessage("assistant", textContent))
-                                        firstToolCallTextAdded = true
-                                    }
-                                    history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments, thinking = thinking, thinkingSignature = thinkingSignature))
-                                    history.add(AnthropicMessage("user", errorResult, toolCallId = tc.id, groupId = roundGroupId))
-                                    edt { onToolResult?.invoke(tc.name, errorResult) }
-                                    continue
-                                }
-                                val existingPlan = ctx.currentPlan
-                                val planResult = if (existingPlan != null) {
-                                    // 已有计划 → 追加步骤到末尾
-                                    existingPlan.appendSteps(newPlan.stepsSnapshot())
-                                    edt { onPlanUpdate?.invoke(existingPlan) }
-                                    "已将 ${newPlan.stepsSnapshot().size} 个新步骤追加到当前计划（共 ${existingPlan.stepsSnapshot().size} 步）"
-                                } else {
-                                    // 新计划
-                                    ctx.currentPlan = newPlan
-                                    edt { onPlanUpdate?.invoke(newPlan) }
-                                    "计划已创建，共 ${newPlan.stepsSnapshot().size} 步。请从第一步开始执行。"
-                                }
+                            // EnterPlanMode — 进入规划模式
+                            if (tc.name == "EnterPlanMode") {
+                                ctx.planMode = true
+                                val msg = "已进入规划模式。现在只能使用只读工具（search_code、read_file、list_directory 等）探索代码库和设计方案。完成后调用 ExitPlanMode 提交方案。"
                                 if (!firstToolCallTextAdded) {
-                                    // thinking 记录在 history 中供 UI 展示，SDK 层已跳过不回传 Anthropic 协议
                                     if (!thinkingBlockAdded && thinking.isNotBlank()) {
-                                        AppLogger.info("AgentLoop: 添加thinking到history thinkingLen=${thinking.length} sigLen=${thinkingSignature.length}")
-                                        history.add(AnthropicMessage(
-                                            "assistant", "",
-                                            thinking = thinking,
-                                            thinkingSignature = thinkingSignature
-                                        ))
+                                        history.add(AnthropicMessage("assistant", "", thinking = thinking, thinkingSignature = thinkingSignature))
                                         thinkingBlockAdded = true
                                     }
                                     history.add(AnthropicMessage("assistant", textContent))
                                     firstToolCallTextAdded = true
                                 }
-                                history.add(AnthropicMessage(
-                                    "assistant", "", toolUseId = tc.id,
-                                    toolName = tc.name, toolInput = tc.arguments,
-                                    thinking = thinking, thinkingSignature = thinkingSignature
-                                ))
-                                history.add(AnthropicMessage(
-                                    "user", planResult, toolCallId = tc.id
-                                ))
+                                history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments, thinking = thinking, thinkingSignature = thinkingSignature))
+                                history.add(AnthropicMessage("user", msg, toolCallId = tc.id, groupId = roundGroupId))
+                                edt { onToolResult?.invoke(tc.name, msg); onTaskUpdate?.invoke() }
+                                continue
+                            }
+
+                            // ExitPlanMode — 提交规划方案，触发用户审批
+                            if (tc.name == "ExitPlanMode") {
+                                val planParams = parseParams(tc.arguments)
+                                val planText = planParams["plan"]?.takeIf { it.isNotBlank() } ?: "（方案内容为空）"
+                                // 提取首行作为标题
+                                val title = planText.lines().firstOrNull()?.removePrefix("#")?.trim()?.take(80) ?: "执行计划"
+                                var approved = false
+                                val latch = CountDownLatch(1)
+                                val userChoice = AtomicBoolean(false)
+                                pendingConfirmLatch = latch
+                                if (cancelled) latch.countDown()
+                                onConfirmPlan?.invoke(planText, latch, userChoice)
+                                try {
+                                    val confirmed = latch.await(10, java.util.concurrent.TimeUnit.MINUTES)
+                                    if (confirmed) approved = userChoice.get()
+                                    else consecutiveFailures = MAX_FAILURES
+                                } catch (_: InterruptedException) {
+                                    Thread.currentThread().interrupt()
+                                } finally { pendingConfirmLatch = null }
+                                if (cancelled) break
+                                val planResult = if (approved) {
+                                    ctx.planMode = false
+                                    ctx.approvedPlanTitle = title
+                                    ctx.approvedPlan = planText
+                                    edt { onTaskUpdate?.invoke() }
+                                    "方案已批准，退出规划模式。现在可以调用 TaskCreate 创建任务并开始执行。"
+                                } else {
+                                    "方案被用户拒绝。请根据反馈调整方案，或回到规划模式继续研究。"
+                                }
+                                if (!firstToolCallTextAdded) {
+                                    if (!thinkingBlockAdded && thinking.isNotBlank()) {
+                                        history.add(AnthropicMessage("assistant", "", thinking = thinking, thinkingSignature = thinkingSignature))
+                                        thinkingBlockAdded = true
+                                    }
+                                    history.add(AnthropicMessage("assistant", textContent))
+                                    firstToolCallTextAdded = true
+                                }
+                                history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments, thinking = thinking, thinkingSignature = thinkingSignature))
+                                history.add(AnthropicMessage("user", planResult, toolCallId = tc.id, groupId = roundGroupId))
                                 edt { onToolResult?.invoke(tc.name, planResult) }
                                 continue
                             }
 
-                            // update_plan_step 元工具：LLM 更新计划步骤状态
-                            if (tc.name == "update_plan_step") {
-                                val stepParams = parseParams(tc.arguments)
-                                val stepIndex = stepParams["index"]?.toIntOrNull()
-                                val status = stepParams["status"]
-                                val stepResult = stepParams["result"]
-                                var updated = false
-                                val msg = when {
-                                    stepIndex == null -> "更新失败：缺少或无效的 index 参数，请提供步骤编号（整数）"
-                                    status == null -> "更新失败：缺少 status 参数，请提供 in_progress / done / failed 之一"
-                                    else -> {
-                                        val stepStatus = when (status) {
-                                            "in_progress" -> AgentContext.StepStatus.IN_PROGRESS
-                                            "done" -> AgentContext.StepStatus.DONE
-                                            "failed" -> AgentContext.StepStatus.FAILED
-                                            else -> null
-                                        }
-                                        if (stepStatus == null) {
-                                            "更新失败：无效的 status 值 '$status'，仅支持 in_progress / done / failed"
-                                        } else {
-                                            updated = ctx.currentPlan?.updateStep(stepIndex, stepStatus, stepResult) ?: false
-                                            if (updated) {
-                                                ctx.currentPlan?.let { edt { onPlanUpdate?.invoke(it) } }
-                                                "步骤 $stepIndex 状态更新为 $status"
-                                            } else {
-                                                "更新失败：步骤 $stepIndex 不存在，当前计划共 ${ctx.currentPlan?.stepsSnapshot()?.size ?: 0} 步"
-                                            }
-                                        }
-                                    }
-                                }
+                            // TaskCreate — 创建一个任务
+                            if (tc.name == "TaskCreate") {
+                                val taskParams = parseParams(tc.arguments)
+                                val subject = taskParams["subject"]?.takeIf { it.isNotBlank() } ?: "未命名任务"
+                                val description = taskParams["description"] ?: ""
+                                val nextId = (ctx.tasks.maxOfOrNull { it.id } ?: 0) + 1
+                                val task = Task(id = nextId, subject = subject, description = description)
+                                ctx.tasks.add(task)
+                                edt { onTaskUpdate?.invoke() }
+                                val msg = "任务 #$nextId 已创建: $subject"
                                 if (!firstToolCallTextAdded) {
                                     if (!thinkingBlockAdded && thinking.isNotBlank()) {
-                                        history.add(AnthropicMessage(
-                                            "assistant", "",
-                                            thinking = thinking,
-                                            thinkingSignature = thinkingSignature
-                                        ))
+                                        history.add(AnthropicMessage("assistant", "", thinking = thinking, thinkingSignature = thinkingSignature))
                                         thinkingBlockAdded = true
                                     }
                                     history.add(AnthropicMessage("assistant", textContent))
@@ -431,47 +406,127 @@ class AgentLoop(
                                 continue
                             }
 
+                            // TaskUpdate — 更新任务状态
+                            if (tc.name == "TaskUpdate") {
+                                val taskParams = parseParams(tc.arguments)
+                                val taskId = taskParams["id"]?.toIntOrNull()
+                                val status = taskParams["status"]
+                                val result = taskParams["result"]
+                                val msg = when {
+                                    taskId == null -> "更新失败：缺少或无效的 id 参数"
+                                    status == null -> "更新失败：缺少 status 参数"
+                                    else -> {
+                                        val task = ctx.tasks.find { it.id == taskId }
+                                        if (task == null) {
+                                            "更新失败：任务 #$taskId 不存在，当前共 ${ctx.tasks.size} 个任务"
+                                        } else {
+                                            when (status) {
+                                                "in_progress" -> { task.status = TaskStatus.IN_PROGRESS; edt { onTaskUpdate?.invoke() }; "任务 #$taskId「${task.subject}」开始执行" }
+                                                "completed" -> { task.status = TaskStatus.COMPLETED; task.result = result; edt { onTaskUpdate?.invoke() }; "任务 #$taskId「${task.subject}」已完成${if (!result.isNullOrBlank()) ": $result" else ""}" }
+                                                else -> "更新失败：无效的 status 值 '$status'，仅支持 in_progress / completed"
+                                            }
+                                        }
+                                    }
+                                }
+                                if (!firstToolCallTextAdded) {
+                                    if (!thinkingBlockAdded && thinking.isNotBlank()) {
+                                        history.add(AnthropicMessage("assistant", "", thinking = thinking, thinkingSignature = thinkingSignature))
+                                        thinkingBlockAdded = true
+                                    }
+                                    history.add(AnthropicMessage("assistant", textContent))
+                                    firstToolCallTextAdded = true
+                                }
+                                history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments, thinking = thinking, thinkingSignature = thinkingSignature))
+                                history.add(AnthropicMessage("user", msg, toolCallId = tc.id, groupId = roundGroupId))
+                                edt { onToolResult?.invoke(tc.name, msg) }
+                                continue
+                            }
+
+                            // TaskList — 列出所有任务
+                            if (tc.name == "TaskList") {
+                                val msg = if (ctx.tasks.isEmpty()) {
+                                    "当前没有任务。可调用 TaskCreate 创建新任务。"
+                                } else {
+                                    val done = ctx.tasks.count { it.status == TaskStatus.COMPLETED }
+                                    val total = ctx.tasks.size
+                                    "当前任务列表（$done/$total 已完成）：\n" + ctx.tasks.joinToString("\n") { t ->
+                                        val mark = when (t.status) { TaskStatus.PENDING -> "☐"; TaskStatus.IN_PROGRESS -> "◉"; TaskStatus.COMPLETED -> "☑" }
+                                        "#${t.id} $mark ${t.subject}${if (t.result != null) " — ${t.result}" else ""}"
+                                    }
+                                }
+                                if (!firstToolCallTextAdded) {
+                                    if (!thinkingBlockAdded && thinking.isNotBlank()) {
+                                        history.add(AnthropicMessage("assistant", "", thinking = thinking, thinkingSignature = thinkingSignature))
+                                        thinkingBlockAdded = true
+                                    }
+                                    history.add(AnthropicMessage("assistant", textContent))
+                                    firstToolCallTextAdded = true
+                                }
+                                history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments, thinking = thinking, thinkingSignature = thinkingSignature))
+                                history.add(AnthropicMessage("user", msg, toolCallId = tc.id, groupId = roundGroupId))
+                                edt { onToolResult?.invoke(tc.name, msg) }
+                                continue
+                            }
+
+                            // TaskGet — 查询单个任务
+                            if (tc.name == "TaskGet") {
+                                val taskParams = parseParams(tc.arguments)
+                                val taskId = taskParams["id"]?.toIntOrNull()
+                                val msg = when {
+                                    taskId == null -> "查询失败：缺少 id 参数"
+                                    else -> {
+                                        val task = ctx.tasks.find { it.id == taskId }
+                                        if (task == null) "任务 #$taskId 不存在"
+                                        else {
+                                            val mark = when (task.status) { TaskStatus.PENDING -> "☐ 待处理"; TaskStatus.IN_PROGRESS -> "◉ 进行中"; TaskStatus.COMPLETED -> "☑ 已完成" }
+                                            "#$taskId $mark ${task.subject}\n描述: ${task.description.ifBlank { "（无）" }}\n${if (task.result != null) "结果: ${task.result}" else ""}"
+                                        }
+                                    }
+                                }
+                                if (!firstToolCallTextAdded) {
+                                    if (!thinkingBlockAdded && thinking.isNotBlank()) {
+                                        history.add(AnthropicMessage("assistant", "", thinking = thinking, thinkingSignature = thinkingSignature))
+                                        thinkingBlockAdded = true
+                                    }
+                                    history.add(AnthropicMessage("assistant", textContent))
+                                    firstToolCallTextAdded = true
+                                }
+                                history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments, thinking = thinking, thinkingSignature = thinkingSignature))
+                                history.add(AnthropicMessage("user", msg, toolCallId = tc.id, groupId = roundGroupId))
+                                edt { onToolResult?.invoke(tc.name, msg) }
+                                continue
+                            }
+
+                            // ---- 常规工具执行 ----
                             val params = parseParams(tc.arguments).toMutableMap()
-                            // Worktree 隔离：子 Agent 的工具操作指向独立 worktree
                             workTreePath?.let { params["_worktree"] = it }
-                            // Fork：注入父对话历史（JSON 序列化）供 TaskTool 使用
                             if (tc.name == "task") {
                                 params["_forkHistory"] = com.google.gson.Gson().toJson(history.toList())
                             }
-                            // read_file 特殊处理：仅在项目目录内自动放行，跨目录需用户确认
                             val readFileOutside = tc.name == "read_file" && params["path"] != null &&
                                 !com.aiassistant.shared.PathUtils.isInsideProject(params["path"]!!, project.basePath)
-                            // 检查 skill 的 allowed-tools：激活的 skill 预批准的工具自动放行
                             val skillAllowed = ctx.skillDefs[ctx.activatedSkill]?.allowedTools?.contains(tc.name) == true
                             val approved = if (!readFileOutside && (tc.name in SAFE_TOOLS || tc.name in AppSettingsService.getInstance().getToolWhitelist() || skillAllowed)) {
                                 true
                             } else {
-                                // 内联确认：通过回调 + CountDownLatch 等待用户操作。
-                                // 持有 latch 引用，使 stop() 能解除等待；带超时兜底防永久挂起。
                                 val latch = CountDownLatch(1)
                                 val userChoice = AtomicBoolean(false)
                                 pendingConfirmLatch = latch
-                                // 二次检查：防止 stop() 在赋值前被调用导致 countDown 空操作
                                 if (cancelled) latch.countDown()
                                 onConfirmTool?.invoke(tc.name, tc.arguments, latch, userChoice)
                                 try {
                                     val confirmed = latch.await(10, java.util.concurrent.TimeUnit.MINUTES)
                                     if (!confirmed) {
-                                        // 超时：用户未在 10 分钟内操作，结束本轮对话
                                         consecutiveFailures = MAX_FAILURES
                                         break
                                     }
                                 } catch (_: InterruptedException) {
                                     Thread.currentThread().interrupt()
-                                } finally {
-                                    pendingConfirmLatch = null
-                                }
-                                // 等待期间被取消 → 视为未授权，跳出
+                                } finally { pendingConfirmLatch = null }
                                 if (cancelled) break
                                 userChoice.get()
                             }
                             val toolResult = if (approved) {
-                                // MCP 工具：注入原始 JSON 参数，保留 number/boolean/array/object 类型
                                 val mcpAdapter = ctx.toolRegistry.find(tc.name) as? com.aiassistant.mcp.McpToolAdapter
                                 if (mcpAdapter != null) { mcpAdapter.rawArgsJson = tc.arguments }
                                 val r = ctx.toolRegistry.executeTool(tc.name, params, project) { partial ->
@@ -490,27 +545,16 @@ class AgentLoop(
                             val resultText = if (toolResult.success) toolResult.content else "错误: ${toolResult.error}"
 
                             if (!firstToolCallTextAdded) {
-                                // thinking content block 必须在 assistant 消息中随后续请求传回 API
                                 if (!thinkingBlockAdded && thinking.isNotBlank()) {
                                     AppLogger.info("AgentLoop: 添加thinking到history thinkingLen=${thinking.length} sigLen=${thinkingSignature.length}")
-                                    history.add(AnthropicMessage(
-                                        "assistant", "",
-                                        thinking = thinking,
-                                        thinkingSignature = thinkingSignature
-                                    ))
+                                    history.add(AnthropicMessage("assistant", "", thinking = thinking, thinkingSignature = thinkingSignature))
                                     thinkingBlockAdded = true
                                 }
                                 history.add(AnthropicMessage("assistant", textContent))
                                 firstToolCallTextAdded = true
                             }
-                            history.add(AnthropicMessage(
-                                "assistant", "", toolUseId = tc.id,
-                                toolName = tc.name, toolInput = tc.arguments,
-                                thinking = thinking, thinkingSignature = thinkingSignature
-                            ))
-                            history.add(AnthropicMessage(
-                                "user", resultText, toolCallId = tc.id
-                            ))
+                            history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments, thinking = thinking, thinkingSignature = thinkingSignature))
+                            history.add(AnthropicMessage("user", resultText, toolCallId = tc.id))
 
                             try {
                                 SwingUtilities.invokeAndWait {
@@ -524,7 +568,7 @@ class AgentLoop(
 
                         if (consecutiveFailures >= MAX_FAILURES) {
                             edt { onError?.invoke("连续失败超过 $MAX_FAILURES 次，已中止") }
-                            callback("", "")  // 通知调用方执行失败
+                            callback("", "")
                             break
                         }
                         if (truncated && continuationCount >= MAX_CONTINUATIONS) {
@@ -533,37 +577,28 @@ class AgentLoop(
                             break
                         }
                     } else {
-                        // 无工具调用
                         if (truncated) {
-                            // max_tokens 截断：将已生成内容加入 history
                             if (thinking.isNotBlank()) {
-                                history.add(AnthropicMessage("assistant", textContent,
-                                    thinking = thinking, thinkingSignature = thinkingSignature))
+                                history.add(AnthropicMessage("assistant", textContent, thinking = thinking, thinkingSignature = thinkingSignature))
                             } else {
                                 history.add(AnthropicMessage("assistant", textContent))
                             }
                             if (continuationCount >= MAX_CONTINUATIONS) {
-                                // 续写次数达上限，返回已有内容
                                 AppLogger.warn("AgentLoop: 续写次数已达上限 $MAX_CONTINUATIONS，返回已有内容")
                                 callback(textContent, thinking)
                                 break
                             }
-                            // 继续循环让模型续写
                             AppLogger.info("AgentLoop: max_tokens 截断续写，textLen=${textContent.length}")
                             loopCount++
                             continue
                         }
-                        // 正常结束：thinking 仅用于 UI 展示，SDK 层已跳过不回传
                         AppLogger.info("AgentLoop 最终回复: $textContent thinkingLen=${thinking.length} sigLen=${thinkingSignature.length}")
                         if (thinking.isNotBlank()) {
-                            history.add(AnthropicMessage("assistant", textContent,
-                                thinking = thinking, thinkingSignature = thinkingSignature))
+                            history.add(AnthropicMessage("assistant", textContent, thinking = thinking, thinkingSignature = thinkingSignature))
                         } else {
                             history.add(AnthropicMessage("assistant", textContent))
                         }
-                        // 目标模式：不结束，继续下一轮直到目标达成
                         if (ctx.goal != null) {
-                            // 检测 LLM 是否声明目标已达成（如"目标已达成"、"目标完成"等）
                             val goalAchieved = textContent.contains("目标已达成") ||
                                     textContent.contains("目标完成") ||
                                     textContent.contains("目标已经达成") ||
@@ -573,7 +608,6 @@ class AgentLoop(
                                 callback(textContent, thinking)
                                 break
                             }
-                            // 注入继续提示，让 LLM 判断目标是否达成
                             history.add(AnthropicMessage("user",
                                 "继续朝着目标「${ctx.goal}」努力。如果目标已达成，请明确说明「目标已达成」并总结完成情况。",
                                 groupId = roundGroupId))
@@ -586,7 +620,6 @@ class AgentLoop(
 
                     loopCount++
                 }
-                // maxLoops 到上限但未产生文本回复时，通知调用方结束
                 if (loopCount >= maxLoops) {
                     AppLogger.warn("AgentLoop: 达到最大轮次 $maxLoops")
                     callback("", "")
@@ -596,7 +629,7 @@ class AgentLoop(
             } catch (e: Exception) {
                 AppLogger.error("AgentLoop 异常: ${e.message}\n${e.stackTraceToString()}")
                 edt { onError?.invoke("Agent 错误: ${e.message}") }
-                callback("", "")  // 通知调用方（如 TaskTool）执行失败，防止 latch 永久阻塞
+                callback("", "")
             } finally {
                 onStateChange?.invoke(false)
                 edt { onThinking?.invoke(null) }
@@ -611,9 +644,7 @@ class AgentLoop(
         agentThread?.interrupt()
         com.aiassistant.mcp.McpManager.getInstance(project.basePath)?.cancelAll()
         pendingConfirmLatch?.countDown()
-        // 停止所有后台子 Agent
         SubAgentRegistry.stopAll()
-        // 停止 skills 文件监听
         SkillEngine.stopWatching(project.basePath ?: "")
     }
 
@@ -632,12 +663,14 @@ class AgentLoop(
     private fun callAnthropic(
         apiKey: String, history: List<AnthropicMessage>
     ): AnthropicResponse? {
-        val planPrompt = buildPlanPrompt()
+        val taskPrompt = buildTaskPrompt()
+        val planModePrompt = buildPlanModePrompt()
         val skillPrompt = ctx.activatedSkillPrompt
         val effectivePrompt = buildString {
             append(ctx.systemPrompt)
             if (skillPrompt != null) { append("\n\n---\n\n## 已激活 Skill\n\n"); append(skillPrompt) }
-            if (planPrompt.isNotEmpty()) { append("\n\n"); append(planPrompt) }
+            if (planModePrompt.isNotEmpty()) { append("\n\n"); append(planModePrompt) }
+            if (taskPrompt.isNotEmpty()) { append("\n\n"); append(taskPrompt) }
         }
         val thinkingEnabled = com.aiassistant.AppSettingsService.getInstance().isThinkingEnabled()
 
@@ -650,7 +683,6 @@ class AgentLoop(
         var thinkingSignature = ""
         var capturedStopReason = "end_turn"
 
-        // 复用 SDK 客户端，仅在 API Key 变更时重建，避免每轮创建新连接池
         if (sdkClient == null || lastApiKey != apiKey) {
             sdkClient = com.aiassistant.AnthropicSdkClient(apiKey)
             lastApiKey = apiKey
@@ -683,7 +715,6 @@ class AgentLoop(
                 override fun onStreamComplete(textContent: String, thinking: String, thinkingSig: String, sdkToolCalls: List<com.aiassistant.AnthropicSdkClient.StreamToolCall>, inputTokens: Int, outputTokens: Int, stopReason: String) {
                     ctx.lastInputTokens = inputTokens
                     ctx.lastOutputTokens = outputTokens
-                    // 记录 token 统计数据
                     ctx.tokenStats.totalInput += inputTokens
                     ctx.tokenStats.totalOutput += outputTokens
                     ctx.tokenStats.roundCount++
@@ -706,7 +737,6 @@ class AgentLoop(
             }
         )
 
-        // 等待流结束
         synchronized(done) {
             if (!hasResponse && errorDetail == null) {
                 try { done.wait(120_000) } catch (_: InterruptedException) {}
@@ -733,19 +763,9 @@ class AgentLoop(
         return AnthropicResponse(finalText, thinking, thinkingSignature, resultToolCalls, capturedStopReason)
     }
 
-    /**
-     * 压缩对话历史：使用 LLM 生成摘要，保留关键信息，释放 token 预算。
-     * 对齐 Claude Code /compact：保留原始任务、关键决策、文件变更、计划进度。
-     * @param messages 待压缩的消息列表
-     * @param apiKey API Key
-     * @return 摘要文本，失败返回 null
-     */
-    /**
-     * 统一的 Compact 实现：调用 LLM 生成摘要 → 注入 system prompt → 截断历史。
-     * 自动 compact 和手动 /compact 共用此方法。
-     * @param keepCount 保留的最近消息条数（自动=30，手动=15）
-     * @return 生成的摘要文本，失败返回 null
-     */
+    /** Plan Mode + Task 元工具名称集合（这些元工具在 Plan Mode 中仍然可用） */
+    private val META_TOOL_NAMES = setOf("Skill", "EnterPlanMode", "ExitPlanMode", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet")
+
     fun compactHistory(keepCount: Int, apiKey: String): String? {
         val history = synchronized(ctx.historyLock) { ctx.conversationHistory.toList() }
         if (history.size <= keepCount) return null
@@ -755,7 +775,6 @@ class AgentLoop(
 
         val summary = compact(historyToSummarize, apiKey) ?: return null
 
-        // 摘要注入 system prompt（对齐 Claude Code）
         ctx.systemPrompt = buildString {
             append(ctx.systemPrompt)
             append("\n\n## 对话摘要\n以下是之前对话的关键摘要，请基于此继续工作：\n\n")
@@ -770,17 +789,14 @@ class AgentLoop(
         return summary
     }
 
-    /** 调用 LLM 生成对话摘要（供 compactHistory 调用） */
     private fun compact(messages: List<AnthropicMessage>, apiKey: String): String? {
         if (messages.isEmpty()) return null
-        // 复用 SDK 客户端
         if (sdkClient == null || lastApiKey != apiKey) {
             sdkClient = com.aiassistant.AnthropicSdkClient(apiKey)
             lastApiKey = apiKey
         }
         val sdkClient = sdkClient!!
 
-        // 构建压缩提示词
         val compactPrompt = buildString {
             append("你是一个对话摘要助手。请将以下对话历史压缩为一段简洁的中文摘要，")
             append("保留以下关键信息：\n")
@@ -788,12 +804,11 @@ class AgentLoop(
             append("2. 已完成的关键操作和决策\n")
             append("3. 修改过的文件及原因\n")
             append("4. 遇到的错误及解决方案\n")
-            append("5. 当前执行计划进度（如有）\n")
+            append("5. 当前任务进度（如有）\n")
             append("6. 重要的技术细节和约定\n")
             append("\n请用 200-500 字输出摘要，不要使用标题或列表标记。\n\n")
             append("对话历史：\n")
             for (msg in messages) {
-                // 跳过 thinking-only 消息（不包含实质内容，UI 展示用）
                 if (msg.thinking.isNotBlank() && msg.content.isBlank() && msg.toolUseId == null) continue
                 val prefix = when {
                     msg.toolCallId != null -> "工具结果"
@@ -801,17 +816,13 @@ class AgentLoop(
                     msg.role == "user" -> "用户"
                     else -> "AI"
                 }
-                val content = msg.content.take(2000)  // 每条最多 2000 字符
+                val content = msg.content.take(2000)
                 append("[$prefix] $content\n")
             }
         }
 
-        // 构建摘要消息列表：system prompt + 压缩请求
-        val summaryHistory = listOf(
-            AnthropicMessage("user", compactPrompt)
-        )
+        val summaryHistory = listOf(AnthropicMessage("user", compactPrompt))
 
-        // 一次性调用，不传工具、不启用 thinking
         val result = try {
             val done = Object()
             var summaryText = ""
@@ -851,21 +862,13 @@ class AgentLoop(
         return result
     }
 
-    /**
-     * 判断是否超过上下文窗口的比例阈值。
-     * 使用最近一次 API 返回的 inputTokens（代表当前对话历史占用的 token 数），
-     * 因为上下文窗口限制只针对 input（输出 token 不影响下次请求）。
-     * 若 SDK 未返回 inputTokens（=0），降级为字符估算。
-     */
     private fun shouldAutoCompact(history: List<AnthropicMessage>): Boolean {
         if (history.size < 30) return false
         val contextWindow = 1_000_000L
         val ratio = com.aiassistant.AppSettingsService.getInstance().getCompactRatio()
         val threshold = (contextWindow * ratio).toLong()
-        // 优先使用 API 返回的精确 input token 数
         val tokens = ctx.lastInputTokens
         if (tokens > 0) return tokens > threshold
-        // 降级：字符数估算
         val allText = history.joinToString("") { it.content + it.thinking }
         val cjkCount = allText.count { it in '一'..'鿿' }
         val otherCount = allText.length - cjkCount
@@ -873,16 +876,11 @@ class AgentLoop(
         return estimatedTokens > threshold
     }
 
-    /**
-     * 自动 Compact：委托给 compactHistory，与手动 /compact 共用核心逻辑。
-     */
     private fun autoCompact(apiKey: String) {
         val summary = compactHistory(30, apiKey) ?: return
-        // 通知 UI（自动 compact 静默执行，不阻塞主流程）
         edt { onCompact?.invoke(summary) }
     }
 
-    /** 将 ToolRegistryV3 中的工具 + 元工具转换为 SDK 格式 */
     private fun buildSdkToolDefs(): List<com.aiassistant.AnthropicToolDef> {
         val builtIn = ctx.toolRegistry.getAll()
             .map { tool ->
@@ -895,18 +893,20 @@ class AgentLoop(
                     required = tool.parameters.filter { it.required }.map { it.name }.ifEmpty { null }
                 )
             }
-        // 子 Agent 不需要元工具（Skill/create_plan/update_plan_step）
         if (isSubAgent) return builtIn
-        // 元工具（由 AgentLoop 硬编码处理，不在 ToolRegistryV3 中）
+        // 元工具（对齐 Claude Code）
         val metaTools = listOf(
             com.aiassistant.AnthropicToolDef("Skill", "激活一个 skill，获取特定领域的专业指引"),
-            com.aiassistant.AnthropicToolDef("create_plan", "创建执行计划"),
-            com.aiassistant.AnthropicToolDef("update_plan_step", "更新计划步骤状态")
+            com.aiassistant.AnthropicToolDef("EnterPlanMode", "进入规划模式，只允许只读工具"),
+            com.aiassistant.AnthropicToolDef("ExitPlanMode", "提交规划方案并请求用户审批"),
+            com.aiassistant.AnthropicToolDef("TaskCreate", "创建一个执行任务"),
+            com.aiassistant.AnthropicToolDef("TaskUpdate", "更新任务状态"),
+            com.aiassistant.AnthropicToolDef("TaskList", "列出所有任务"),
+            com.aiassistant.AnthropicToolDef("TaskGet", "查询任务详情")
         )
         return builtIn + metaTools
     }
 
-    /** 使用 Gson 完整解析 JSON 参数，嵌套对象/数组序列化为 JSON 字符串 */
     private fun parseParams(json: String): Map<String, String> {
         return try {
             val gson = com.google.gson.Gson()
@@ -916,7 +916,7 @@ class AgentLoop(
                 val value = when (v) {
                     is String -> v
                     null -> ""
-                    else -> gson.toJson(v)  // 嵌套对象/数组 → JSON 字符串，工具可按需二次解析
+                    else -> gson.toJson(v)
                 }
                 k.toString() to value
             }.toMap()
@@ -931,7 +931,6 @@ class AgentLoop(
             val params = t.parameters.joinToString(", ") { "${it.name}:${it.type}" }
             "- **${t.name}**($params): ${t.description}"
         }
-        // Skills 段落：展示可用 skill 列表（排除已激活的），渐进披露
         val activeSkill = ctx.activatedSkill
         val availableSkills = ctx.skillDefs.values.filter { it.name != activeSkill }
         val skillsSection = if (availableSkills.isNotEmpty()) {
@@ -939,14 +938,12 @@ class AgentLoop(
                 "- **${s.name}**: ${s.description}"
             } + "\n\n可通过 /skill名称 激活 Skill，或调用 **Skill** 工具动态激活。"
         } else ""
-        // MCP Prompts 段落（对齐 Claude Code：MCP 服务器提供的 prompt 模板）
         val promptsSection = if (ctx.mcpPrompts.isNotEmpty()) {
             "\n## MCP Prompts\n" + ctx.mcpPrompts.joinToString("\n") { p ->
                 val argsStr = if (p.arguments.isNotEmpty()) "（参数: ${p.arguments.joinToString { "${it.name}:${it.type}" }}）" else ""
                 "- **${p.name}**$argsStr: ${p.description}"
             } + "\n\n需要时可通过 **mcp_get_prompt** 工具获取完整渲染内容（传入 name 和可选的 arguments JSON）。"
         } else ""
-        // MCP Resources 段落（对齐 Claude Code：MCP 服务器提供的资源）
         val resourcesSection = if (ctx.mcpResources.isNotEmpty()) {
             "\n## MCP Resources\n" + ctx.mcpResources.joinToString("\n") { r ->
                 "- `${r.uri}` — ${r.name}${if (r.description.isNotBlank()) ": ${r.description}" else ""}"
@@ -968,9 +965,13 @@ $toolList
 $goalSection
 $rulesSection
 ## Planning
-对于需要多步骤完成的复杂任务（如实现功能、重构代码、架构变更），你应该先调用 **create_plan** 工具创建执行计划。
-简单任务（读取文件、回答单个问题、一行修改）不要创建计划。
-创建计划后，每个步骤开始前调用 **update_plan_step**（status="in_progress"），完成后调用（status="done" + result 摘要），失败时调用（status="failed" + result 原因）。
+对于需要多步骤完成的复杂任务（如实现功能、重构代码、架构变更），你应该：
+1. 先调用 **EnterPlanMode** 进入规划模式，探索代码库、设计方案
+2. 完成研究后调用 **ExitPlanMode**（plan=方案内容）提交审批
+3. 用户批准后，用 **TaskCreate** 创建可追踪的任务，然后逐个执行
+4. 开始任务时调用 **TaskUpdate**（status="in_progress"），完成后调用（status="completed" + result）
+5. 需要查看全部任务状态时调用 **TaskList**，查看单个任务详情时调用 **TaskGet**
+简单任务（读取文件、回答单个问题、一行修改）不要进入规划模式，直接处理即可。
 $skillsSection
 $promptsSection
 $resourcesSection
@@ -984,7 +985,6 @@ $claudeMdContent
         """.trimIndent()
     }
 
-    /** 构建 Rules 段落：匹配当前编辑文件的 rules 注入 system prompt */
     private fun buildRulesSection(): String {
         val allRules = ctx.rules
         if (allRules.isEmpty()) return ""
@@ -1006,31 +1006,26 @@ $claudeMdContent
         } + "\n"
     }
 
-    /** 按照 Claude Code 层级自动加载 CLAUDE.md 文件 */
     private fun loadClaudeMdFiles(): String {
         val parts = mutableListOf<String>()
         val basePath = project.basePath ?: return ""
         val home = System.getProperty("user.home") ?: return ""
 
-        // 1. 用户全局 ~/.claude/CLAUDE.md
         val userGlobal = java.io.File(home, ".claude/CLAUDE.md")
         if (userGlobal.exists()) {
             try { parts.add(userGlobal.readText()) } catch (_: Exception) {}
         }
 
-        // 2. 项目根 CLAUDE.md
         val projectRoot = java.io.File(basePath, "CLAUDE.md")
         if (projectRoot.exists()) {
             try { parts.add(projectRoot.readText()) } catch (_: Exception) {}
         }
 
-        // 3. .claude/CLAUDE.md
         val dotClaude = java.io.File(basePath, ".claude/CLAUDE.md")
         if (dotClaude.exists()) {
             try { parts.add(dotClaude.readText()) } catch (_: Exception) {}
         }
 
-        // 4. CLAUDE.local.md (个人覆盖，gitignored)
         val localMd = java.io.File(basePath, "CLAUDE.local.md")
         if (localMd.exists()) {
             try { parts.add(localMd.readText()) } catch (_: Exception) {}
@@ -1040,61 +1035,40 @@ $claudeMdContent
         return "\n## CLAUDE.md\n\n${parts.joinToString("\n\n---\n\n")}"
     }
 
-    /** 将 create_plan 元工具拼接到 tools JSON 末尾（ToolRegistryV3 的 ToolParameter 无法表达嵌套 items 子结构） */
-    // 用于解析 create_plan JSON 参数的数据类
-    private data class PlanArgs(val title: String?, val steps: List<StepArg>?)
-    private data class StepArg(val subject: String?, val description: String? = null)
-
-    /** 从 create_plan 的 JSON 参数中解析 Plan。
-     *  容错：LLM 可能返回 null/missing fields，使用 try-catch + 空值兜底防止 NPE 中断 AgentLoop。 */
-    private fun parsePlanFromArgs(args: String): AgentContext.Plan {
-        return try {
-            val gson = com.google.gson.Gson()
-            val planArgs = gson.fromJson(args, PlanArgs::class.java)
-            val steps = (planArgs.steps ?: emptyList()).mapIndexed { i, s ->
-                AgentContext.Step(
-                    index = i + 1,
-                    subject = s.subject ?: "步骤 ${i + 1}",
-                    description = s.description ?: ""
-                )
-            }
-            AgentContext.Plan(
-                title = planArgs.title?.takeIf { it.isNotBlank() } ?: "执行计划",
-                steps = steps.toMutableList()
-            )
-        } catch (e: Exception) {
-            AppLogger.warn("解析 create_plan 参数失败: ${e.message}, args=$args")
-            AgentContext.Plan(title = "执行计划", steps = mutableListOf())
-        }
-    }
-
-    /** 动态生成当前计划状态提示，每次 API 调用前注入，确保 LLM 不会忘记未完成的计划 */
-    private fun buildPlanPrompt(): String {
-        val plan = ctx.currentPlan ?: return ""
-        val steps = plan.stepsSnapshot()
-        if (steps.isEmpty() || plan.isComplete()) return ""
-        val pendingCount = steps.count { it.status == AgentContext.StepStatus.PENDING }
-        val inProgressCount = steps.count { it.status == AgentContext.StepStatus.IN_PROGRESS }
-        val stepsSummary = steps.joinToString("\n") { s ->
-            val statusMark = when (s.status) {
-                AgentContext.StepStatus.DONE -> "✅"
-                AgentContext.StepStatus.IN_PROGRESS -> "🔄"
-                AgentContext.StepStatus.PENDING -> "⏳"
-                AgentContext.StepStatus.FAILED -> "❌"
-            }
-            "  ${s.index}. $statusMark ${s.subject}${if (s.description.isNotBlank()) " — ${s.description}" else ""}"
+    /** 动态生成当前任务状态提示，每次 API 调用前注入，确保 LLM 不会忘记未完成的任务 */
+    private fun buildTaskPrompt(): String {
+        val tasks = ctx.tasks
+        if (tasks.isEmpty()) return ""
+        val done = tasks.count { it.status == TaskStatus.COMPLETED }
+        if (done == tasks.size) return ""  // 全部完成
+        val inProgress = tasks.count { it.status == TaskStatus.IN_PROGRESS }
+        val pending = tasks.count { it.status == TaskStatus.PENDING }
+        val tasksSummary = tasks.joinToString("\n") { t ->
+            val mark = when (t.status) { TaskStatus.PENDING -> "⏳"; TaskStatus.IN_PROGRESS -> "🔄"; TaskStatus.COMPLETED -> "✅" }
+            "#${t.id} $mark ${t.subject}${if (t.description.isNotBlank()) " — ${t.description}" else ""}"
         }
         return """
-## Active Plan: ${plan.title}
-Progress: ${plan.progress()} (${steps.size} steps total, $inProgressCount in progress, $pendingCount pending)
+## 当前任务
+进度: $done/${tasks.size} 已完成（$inProgress 进行中, $pending 待处理）
 
-$stepsSummary
+$tasksSummary
 
-CRITICAL: You have an active plan. You MUST continue executing it step by step.
-- Call update_plan_step(index=<n>, status="in_progress") when starting a step
-- Call update_plan_step(index=<n>, status="done", result="...") when completing a step
-- After ask_user or any other tool result, proceed to the NEXT step — do NOT end the conversation
-- Only stop when ALL steps are DONE. Do NOT output final text until plan is complete.
+你需要继续执行未完成的任务：
+- 调用 TaskUpdate(id=<id>, status="in_progress") 开始一个任务
+- 完成后调用 TaskUpdate(id=<id>, status="completed", result="...")
+- 调用 TaskList 查看全部任务状态
+- 只在所有任务完成后才输出最终文字
+""".trimIndent()
+    }
+
+    /** 动态生成规划模式提示 */
+    private fun buildPlanModePrompt(): String {
+        if (!ctx.planMode) return ""
+        return """
+## 🔒 规划模式
+你当前处于规划模式。只能使用只读工具（search_code、read_file、list_directory、git_diff 等）探索代码库和设计方案。
+禁止使用任何写操作工具（write_file、edit_file、execute_command 等）。
+完成研究后，调用 ExitPlanMode(plan="方案内容") 提交方案供用户审批。
 """.trimIndent()
     }
 

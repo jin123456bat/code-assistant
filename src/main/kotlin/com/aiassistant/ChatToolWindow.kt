@@ -176,7 +176,7 @@ class ChatToolWindow(private val project: Project) {
         toolTipText = "新会话"
         border = JBUI.Borders.empty(2, 6, 2, 6)
         addMouseListener(object : MouseAdapter() {
-            override fun mouseClicked(e: MouseEvent) { needFullRebuild = true; viewModel.clearConversation(); viewModel.messageRefChips.clear(); refChips.clear(); selectionRefChip = null; rebuildChips(); planBar.updatePlan(null); rebuildConversation() }
+            override fun mouseClicked(e: MouseEvent) { needFullRebuild = true; viewModel.clearConversation(); viewModel.messageRefChips.clear(); refChips.clear(); selectionRefChip = null; rebuildChips(); planBar.updateState(false, null, null, emptyList()); rebuildConversation() }
             override fun mouseEntered(e: MouseEvent) { foreground = ChatTheme.accentHover }
             override fun mouseExited(e: MouseEvent) { foreground = ChatTheme.codeLangFg }
         })
@@ -807,7 +807,7 @@ class ChatToolWindow(private val project: Project) {
     private val editorListeners = java.util.concurrent.ConcurrentHashMap<com.intellij.openapi.editor.Editor, com.intellij.openapi.editor.event.SelectionListener>()
 
     // ---- plan bar（置顶，不随消息滚动）----
-    private val planBar = PlanBar().also { it.updatePlan(null) }
+    private val planBar = PlanBar()
 
     // ---- goal bar（置顶，目标模式时显示）----
     private val goalLabel = JLabel().apply {
@@ -1062,7 +1062,12 @@ class ChatToolWindow(private val project: Project) {
         viewModel.onConfirmTool = { _, _, _, _ ->
             ApplicationManager.getApplication().invokeLater { rebuildConversation() }
         }
-        viewModel.onPlanUpdate = { plan -> planBar.updatePlan(plan) }
+        viewModel.onTaskUpdate = {
+            planBar.updateState(viewModel.planMode, viewModel.approvedPlanTitle, viewModel.approvedPlan, viewModel.tasks)
+        }
+        viewModel.onConfirmPlan = { planText, latch, userChoice ->
+            showPlanApproval(planText, latch, userChoice)
+        }
         viewModel.onGoalUpdate = { _, _ -> updateGoalBar() }
     }
 
@@ -1643,8 +1648,8 @@ class ChatToolWindow(private val project: Project) {
 
         var commandText = ""  // executeCommand 中写入，供 /goal 等命令读取清空前的内容
         val commands = listOf(
-            Cmd("/new",   "新会话") { needFullRebuild = true; viewModel.clearConversation(); viewModel.messageRefChips.clear(); refChips.clear(); selectionRefChip = null; rebuildChips(); planBar.updatePlan(null); updateGoalBar(); rebuildConversation() },
-            Cmd("/plan",  "创建执行计划") { sendQuick("请为当前任务创建执行计划。先分析需求，然后调用 create_plan 工具。") },
+            Cmd("/new",   "新会话") { needFullRebuild = true; viewModel.clearConversation(); viewModel.messageRefChips.clear(); refChips.clear(); selectionRefChip = null; rebuildChips(); planBar.updateState(false, null, null, emptyList()); updateGoalBar(); rebuildConversation() },
+            Cmd("/plan",  "创建执行计划") { sendQuick("请先调用 EnterPlanMode 进入规划模式，探索代码库并设计方案，然后调用 ExitPlanMode 提交方案供审批。") },
             Cmd("/goal",  "设置目标自动执行") {
                 val goal = commandText.substringAfter("/goal").trim()
                 if (goal.isBlank()) { showWarning("请输入目标描述，如：/goal 所有测试通过") }
@@ -2083,6 +2088,50 @@ class ChatToolWindow(private val project: Project) {
         errorBannerPanel.isVisible = true
         // 互斥：显示 warning 时隐藏 error
         errorLabel.isVisible = false
+    }
+
+    /** Plan 审批对话框：ExitPlanMode 触发，显示方案文本 + 批准/拒绝按钮 */
+    private fun showPlanApproval(planText: String, latch: java.util.concurrent.CountDownLatch, userChoice: java.util.concurrent.atomic.AtomicBoolean) {
+        val title = planText.lines().firstOrNull()?.removePrefix("#")?.trim()?.take(80) ?: "执行计划"
+        val dialog = object : javax.swing.JDialog(SwingUtilities.getWindowAncestor(conversationScrollPane), "审批计划: $title", java.awt.Dialog.ModalityType.APPLICATION_MODAL) {
+            override fun dispose() {
+                super.dispose()
+                if (latch.count > 0) {
+                    userChoice.set(false)
+                    latch.countDown()
+                }
+            }
+        }
+        dialog.defaultCloseOperation = javax.swing.WindowConstants.DISPOSE_ON_CLOSE
+
+        val dlgPanel = JPanel(BorderLayout(10, 10)).apply { border = JBUI.Borders.empty(16) }
+
+        val textArea = javax.swing.JTextArea(planText).apply {
+            isEditable = false; lineWrap = true; wrapStyleWord = true
+            font = ChatTheme.metaFont; background = ChatTheme.winBg; foreground = ChatTheme.textPrimary
+        }
+        dlgPanel.add(JBScrollPane(textArea).apply {
+            preferredSize = java.awt.Dimension(550, 350)
+            border = javax.swing.BorderFactory.createLineBorder(ChatTheme.divider)
+        }, BorderLayout.CENTER)
+
+        val btnRow = JPanel().apply { layout = BoxLayout(this, BoxLayout.X_AXIS); isOpaque = false }
+        btnRow.add(Box.createHorizontalGlue())
+        val rejectBtn = JButton("拒绝").apply {
+            addActionListener { userChoice.set(false); latch.countDown(); dialog.dispose() }
+        }
+        val approveBtn = JButton("批准").apply {
+            background = ChatTheme.toolBar; foreground = java.awt.Color.WHITE
+            isOpaque = true; isBorderPainted = false
+            addActionListener { userChoice.set(true); latch.countDown(); dialog.dispose() }
+        }
+        btnRow.add(rejectBtn); btnRow.add(Box.createHorizontalStrut(8)); btnRow.add(approveBtn)
+        dlgPanel.add(btnRow, BorderLayout.SOUTH)
+
+        dialog.contentPane.add(dlgPanel)
+        dialog.pack()
+        dialog.setLocationRelativeTo(conversationScrollPane)
+        dialog.isVisible = true
     }
 
     private fun hideError() {

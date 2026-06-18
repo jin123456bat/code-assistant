@@ -89,7 +89,7 @@ IntelliJ IDEA 插件 — Swing UI 设计规范。Token 定义与 `ChatTheme.kt` 
 | `danger` | `#D98A3D` | `#D98A3D` | execute_command 危险边框 |
 | `error` | `#B5503E` | `#E08A72` | 错误文字 |
 | `errorCardBg` | `rgba(181,80,62,0.06)` | `rgba(224,138,114,0.10)` | 错误卡背景 |
-| `doneCheck` | `#5AA86A` | `#5AA86A` | 已完成 ✓ 对勾（PlanBar DONE 步骤、SelectionCard 已选、审批选项 允许/始终允许） |
+| `doneCheck` | `#5AA86A` | `#5AA86A` | 已完成 ✓ 对勾（PlanBar COMPLETED 任务、SelectionCard 已选、审批选项 允许/始终允许） |
 | `rejectedFg` | `#C0392B` | `#E08A72` | 审批拒绝后的文字色（light 暖浅红，dark 与 error 边框一致） |
 | `errorBannerBg` | `#FFEBEE` | `#462828` | 错误横幅背景 |
 | `errorBannerFg` | `#B00020` | `#FFB4B4` | 错误横幅文字 |
@@ -166,8 +166,8 @@ ask_user SelectionCard 同款样式，tool 行下方显示三个选项。
 
 | Token | 值 | 用途 |
 |------|----|------|
-| `PLAN_STEP_MAX_H` | 168 | 弹出步骤列表最大高度 |
-| `PLAN_STEP_ROW_H` | 24 | 单步最大高度 |
+| `PLAN_STEP_MAX_H` | 168 | 弹出任务列表/计划内容最大高度 |
+| `PLAN_STEP_ROW_H` | 24 | 单任务行最大高度 |
 | `PLAN_PROGRESS_W` | 60 | 迷你进度条宽度 |
 | `PLAN_PROGRESS_H` | 5 | 迷你进度条高度 |
 
@@ -261,27 +261,33 @@ panel (BorderLayout)
 - **折叠态**：`▸ 结果 · task` + 内容预览
 - **展开态**：完整输出含工具调用日志
 
-### PlanBar — 置顶计划条
+### PlanBar — 置顶计划/任务条（对齐 Claude Code）
 
-LLM 通过 `create_plan` 元工具自主创建执行计划，`update_plan_step` 更新步骤状态。
+LLM 通过 `EnterPlanMode` → `ExitPlanMode` 工作流完成规划审批，`TaskCreate`/`TaskUpdate` 追踪执行进度。
 
-**Plan 数据结构：**
-- `Plan(title, steps)` — 每个 `Step` 含 `index`（全局唯一递增）、`subject`（必填短名称）、`description`（可选详细描述）、`status`、`result`
-- 重复调用 `create_plan` 时**追加**而非覆盖——新步骤自动合并到已有计划末尾，`index` 从上次最大 +1 继续
-- 所有 `steps` 访问受 `synchronized` 保护，EDT 侧通过 `stepsSnapshot()` 获取只读快照
+**三态切换：**
+- 规划模式中：`"◉ 规划中…"` 蓝色文字，无展开
+- 计划已批准：标题 + "已批准" 绿色标签，点击展开查看 markdown 全文
+- 有任务：标题 + 进度 "2/5" + 迷你进度条，点击展开查看任务列表（☐ ◉ ☑ 状态标记）
+
+**Task 数据结构：**
+- `Task(id, subject, description?, status, result?)` — id 全局自增（`CopyOnWriteArrayList` 线程安全）
+- `TaskStatus`: `PENDING` / `IN_PROGRESS` / `COMPLETED`
 
 **显示规则：**
-- 折叠态：chevron + 标题 + 进度 "2/4" + 当前步骤 `subject` + 迷你进度条
-- 展开态：步骤列表通过 `JLayeredPane.POPUP_LAYER` 悬浮展示，**不推挤下方对话区**
-- 每行显示 `subject`（主名称）+ `description`（灰色小字副描述，可选）+ 状态图标
-- 步骤过多时内部滚动（max-height 168px），点击对话区自动收起
-- **增量更新**：`update_plan_step` 后同引用 Plan 不重建，只更新变化的步骤行（marker + 颜色 + 字体）+ 进度文字/进度条
-- 全部完成自动隐藏
+- 折叠态：chevron + 标题 + 进度 + 当前任务 subject + 迷你进度条
+- 展开态：任务列表通过 `JLayeredPane.POPUP_LAYER` 悬浮展示，**不推挤下方对话区**
+- 每行显示 `#id subject` + `description`（灰色小字）+ `result`（斜体，完成时）+ 状态图标
+- 任务过多时内部滚动（max-height 168px），点击对话区自动收起
+- **增量更新**：同 ID 集合不重建，只更新变化的任务行（marker + 颜色 + 字体）+ 进度文字/进度条
+- 全部完成不隐藏（保持可查看）
+- 无 Plan 无 Tasks 时自动隐藏
 
 **LLM 上下文注入：**
-- 每次 API 调用前通过 `buildPlanPrompt()` 动态生成计划状态提示，注入到 system prompt
-- 包含完整步骤列表、各步骤状态标记（✅🔄⏳❌）、进度百分比
-- 强制指令：`ask_user` 或其他工具调用后必须继续执行下一步，禁止提前结束对话
+- Plan Mode 中：`buildPlanModePrompt()` 注入只读提示，告知仅允许 SAFE_TOOLS
+- 有任务时：`buildTaskPrompt()` 动态生成任务状态提示，注入到 system prompt
+- 包含完整任务列表、各任务状态标记（⏳🔄✅）、进度
+- 强制指令：仅在全部任务完成后再输出最终文字
 
 ### SelectionCard — ask_user 选择卡
 - 单选模式：点击即提交，首项默认高亮，点击后卡片切换为"已选择"静态状态
@@ -323,7 +329,7 @@ LLM 通过 `create_plan` 元工具自主创建执行计划，`update_plan_step` 
 | 命令 | 描述 | 行为 |
 |------|------|------|
 | `/new` | 新会话 | `clearConversation()` + `rebuildConversation()` |
-| `/plan` | 创建执行计划 | 发送 "请为当前任务创建执行计划。先分析需求，然后调用 create_plan 工具。" |
+| `/plan` | 进入规划模式 | 发送 "请先调用 EnterPlanMode 进入规划模式，探索代码库并设计方案，然后调用 ExitPlanMode 提交方案供审批。" |
 | `/init` | 初始化项目文档 | 发送 "请分析当前项目结构，创建 CLAUDE.md 文档..." |
 | `/review` | 审查当前改动 | 发送 "请审查当前分支的代码改动..." |
 | `/test` | 运行测试 | 发送 "请运行 ./gradlew test，分析测试结果并修复失败的测试。" |

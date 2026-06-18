@@ -30,8 +30,19 @@ class AgentContext(val project: Project) {
     }
     val tokenStats = TokenStats()
 
-    // Plan mode
-    var currentPlan: Plan? = null
+    // ---- Plan Mode（对齐 Claude Code EnterPlanMode/ExitPlanMode） ----
+
+    /** 规划模式：Agent 进入只读研究模式，禁止写操作 */
+    @Volatile var planMode: Boolean = false
+    /** 已批准的计划标题（PlanBar 摘要行显示） */
+    @Volatile var approvedPlanTitle: String? = null
+    /** 已批准的计划全文（markdown，PlanBar 展开后显示） */
+    @Volatile var approvedPlan: String? = null
+
+    // ---- Task System（对齐 Claude Code TaskCreate/TaskUpdate/TaskList/TaskGet） ----
+
+    /** 任务列表（线程安全），替换旧 Plan/Step 模型 */
+    val tasks: MutableList<Task> = java.util.concurrent.CopyOnWriteArrayList()
 
     /** 目标驱动模式：设置后 Agent 持续工作直到目标达成（用户中断或 MAX_LOOPS） */
     @Volatile var goal: String? = null
@@ -56,62 +67,21 @@ class AgentContext(val project: Project) {
     val mcpPrompts = java.util.concurrent.CopyOnWriteArrayList<com.aiassistant.mcp.McpPromptDef>()
     /** MCP resources（对齐 Claude Code：MCP 服务器提供的资源 URI 列表，注入 system prompt） */
     val mcpResources = java.util.concurrent.CopyOnWriteArrayList<com.aiassistant.mcp.McpResourceDef>()
-
-    data class Step(
-        val index: Int,
-        val subject: String,
-        val description: String = "",
-        var status: StepStatus = StepStatus.PENDING,
-        var result: String? = null
-    )
-
-    class Plan(
-        val title: String,
-        private val steps: MutableList<Step>
-    ) {
-        /** 线程安全地获取步骤快照（供 EDT 渲染使用） */
-        fun stepsSnapshot(): List<Step> = synchronized(steps) { steps.toList() }
-
-        fun progress(): String = synchronized(steps) {
-            "${steps.count { it.status == StepStatus.DONE }}/${steps.size}"
-        }
-        fun isComplete(): Boolean = synchronized(steps) {
-            steps.all { it.status == StepStatus.DONE }
-        }
-        fun nextPending(): Step? = synchronized(steps) {
-            steps.firstOrNull { it.status == StepStatus.PENDING }
-        }
-
-        fun updateStep(index: Int, status: StepStatus, result: String? = null): Boolean {
-            return synchronized(steps) {
-                val step = steps.find { it.index == index }
-                if (step != null) {
-                    step.status = status
-                    step.result = result
-                    true
-                } else {
-                    false
-                }
-            }
-        }
-
-        /**
-         * 追加新步骤到已有计划末尾，index 自动递增。
-         * 设计决策：不设置步骤数量上限——LLM 通常先完成已有步骤再创建新步骤，
-         * 且新会话会清空 Plan，实际不会无限增长。
-         */
-        fun appendSteps(newSteps: List<Step>) {
-            synchronized(steps) {
-                val startIndex = (steps.lastOrNull()?.index ?: 0) + 1
-                newSteps.forEachIndexed { i, s ->
-                    steps.add(s.copy(index = startIndex + i))
-                }
-            }
-        }
-    }
-
-    enum class StepStatus { PENDING, IN_PROGRESS, DONE, FAILED }
 }
+
+// ---- Task Model（对齐 Claude Code） ----
+
+data class Task(
+    val id: Int,
+    val subject: String,
+    val description: String = "",
+    var status: TaskStatus = TaskStatus.PENDING,
+    var result: String? = null
+)
+
+enum class TaskStatus { PENDING, IN_PROGRESS, COMPLETED }
+
+// ---- 消息模型（跨 round 共享，AgentLoop/ChatViewModel/UI 共用） ----
 
 data class AgentMessage(
     val role: String,     // system, user, assistant, tool, tool_call

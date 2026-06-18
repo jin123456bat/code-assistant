@@ -43,7 +43,7 @@ ChatToolWindowFactory → ChatToolWindow (Swing UI, ~1590 行)
 | `ChatTheme` | 278 | 设计 token 单一来源：语义色（JBColor 明暗双值）、间距、圆角、字体、宽度约束。所有 UI 代码禁止硬编码值 |
 | `ToolRowFactory` | 604 | 工具/思考行 + 审批选项 + RefChip：统一左栏竖线 + 折叠/展开。含 toolCallRow、toolResultRow、thinkingRow、runningRow、errorCardRow、buildApprovalOptions |
 | `SelectionCard` | 452 | ask_user 选择卡：单选/多选模式，cheveron 高亮 + hover |
-| `PlanBar` | 331 | 置顶计划条：折叠看摘要（标题+进度+迷你进度条），展开看步骤列表 |
+| `PlanBar` | 331 | 置顶计划/任务条：规划中/已批准计划摘要/任务列表三态切换，折叠展开，进度条 |
 | `SimpleDiff` | 140 | 行级 diff 计算（LCS 算法），由测试驱动 |
 | `PathUtils` | 30 | 路径安全：canonical path 前缀校验，供 AgentLoop 审批 + 工具执行复用 |
 | `AskUserBridge` | 87 | ask_user 工具与 UI 之间的桥接：全局 handler + CountDownLatch 同步 |
@@ -57,7 +57,7 @@ panel (BorderLayout)
 ├── CENTER → conversationPanel (BorderLayout)
 │   ├── NORTH  → northStack (BoxLayout.Y_AXIS)
 │   │   ├── conversationHeader（"对话"标题 + 新会话按钮）
-│   │   └── planBar（置顶执行计划，不随消息滚动）
+│   │   └── planBar（置顶计划/任务条，不随消息滚动）
 │   └── CENTER → conversationScrollPane
 │       └── conversationContainer (BoxLayout.Y_AXIS, JBScrollPane 强制视图宽=视口宽)
 │           ├── 用户气泡 row（[glue] [ChatBubble] → 靠右）
@@ -105,7 +105,7 @@ msgIdToComponent:    Map<msgId → Component>  ← 已渲染组件引用
 
 **Agent 循环**（`agent/AgentLoop.kt`，核心）：在后台 `Thread` 上跑 `while` 循环（`MAX_LOOPS=100`，连续失败 `MAX_FAILURES=3` 即中止）。每轮调用模型 → 若返回 `tool_use` 则执行工具并把结果回填到 `history` 继续下一轮 → 若返回纯文本则结束。所有 UI 更新通过回调（`onMessage`/`onStreaming`/`onToolExecute`…）经 `invokeLater`/`invokeAndWait` 切回 EDT。
 
-**agent 包**（`agent/`）：包含 Agent 核心实现和共享类型——`AgentLoop`、`AgentContext`（贯穿生命周期的共享上下文，含 `Plan`/`Step`/`ImageData`/`AgentMessage`（`id: Long` 消息唯一标识 + `version: Int` 增量渲染版本号）、`skillDefs: Map<String, SkillDef>` 已加载 skill 定义）、`ToolRegistryV3`、`SkillEngine`、`AgentTool` 接口。
+**agent 包**（`agent/`）：包含 Agent 核心实现和共享类型——`AgentLoop`、`AgentContext`（贯穿生命周期的共享上下文，含 `Task`/`TaskStatus`（对齐 Claude Code Task 系统）、`planMode`/`approvedPlan`（Plan Mode 审批）、`ImageData`/`AgentMessage`（`id: Long` 消息唯一标识 + `version: Int` 增量渲染版本号）、`skillDefs: Map<String, SkillDef>` 已加载 skill 定义）、`ToolRegistryV3`、`SkillEngine`、`AgentTool` 接口。
 
 **跨轮对话历史**：`AgentContext.conversationHistory`（`synchronizedList<AnthropicMessage>`）跨 `sendMessage()` 调用保留完整 assistant/tool 消息，使 LLM 能感知之前的所有交互。每轮 `run()` 追加当前轮消息，`clearConversation()` 清空。线程安全：单操作由 `synchronizedList` 保护，复合操作（`toList()`+`clear()`+`addAll()`）使用 `historyLock`。
 
@@ -120,7 +120,7 @@ msgIdToComponent:    Map<msgId → Component>  ← 已渲染组件引用
 
 **适配器：`AnthropicAdapter` 是唯一的适配器**（Anthropic Messages 格式 + `input_schema` 工具）。
 
-**工具系统**：`tools/` 下每个工具实现 `agent.AgentTool` 接口（`name` / `description` / `parameters` / `execute()`）。18 个内置工具由 `ToolRegistryV3.registerBuiltIn()` 注册：`search_code`、`read_file`（支持 `resource://` URI 读取 MCP 资源）、`write_file`、`edit_file`、`list_directory`、`execute_command`、`git_diff`、`git_log`、`git_status`、`ask_user`、`web_search`、`web_fetch`、`notebook_edit`、`task`、`code_intelligence`、`mcp_get_prompt`、`workflow`。两类工具来源统一管理：内置 / MCP（`registerMcp`）。三个元工具由 `AgentLoop.buildSdkToolDefs()` 硬编码添加：`Skill`（统一 skill 激活）、`create_plan`、`update_plan_step`。
+**工具系统**：`tools/` 下每个工具实现 `agent.AgentTool` 接口（`name` / `description` / `parameters` / `execute()`）。18 个内置工具由 `ToolRegistryV3.registerBuiltIn()` 注册：`search_code`、`read_file`（支持 `resource://` URI 读取 MCP 资源）、`write_file`、`edit_file`、`list_directory`、`execute_command`、`git_diff`、`git_log`、`git_status`、`ask_user`、`web_search`、`web_fetch`、`notebook_edit`、`task`、`code_intelligence`、`mcp_get_prompt`、`workflow`。两类工具来源统一管理：内置 / MCP（`registerMcp`）。七个元工具由 `AgentLoop.buildSdkToolDefs()` 硬编码添加：`Skill`（统一 skill 激活）、`EnterPlanMode`/`ExitPlanMode`（Plan Mode 工作流）、`TaskCreate`/`TaskUpdate`/`TaskList`/`TaskGet`（Task 执行追踪）。
 
 **安全模型**：`AgentLoop.SAFE_TOOLS`（只读工具）+ 用户白名单 `AppSettingsService.getToolWhitelist()` 内的工具直接执行；其余工具（`write_file`、`execute_command` 等）触发内联确认——`onConfirmTool` 回调配合 `CountDownLatch`/`AtomicBoolean` 阻塞等待用户通过审批选择卡在 UI 上点确认。`read_file` 额外检查路径安全：项目内免审，项目外触发审批。
 
@@ -128,7 +128,7 @@ msgIdToComponent:    Map<msgId → Component>  ← 已渲染组件引用
 
 **Skills**（`agent/SkillEngine.kt`）：扫描 `<project>/.claude/skills/**/SKILL.md` 和 `~/.claude/skills/**/SKILL.md`，解析为 `SkillDef` 存入 `AgentContext.skillDefs`。对齐 Claude Code：skill 不作为独立工具注册，而是通过统一的 `Skill` 元工具（`Skill(skill=名称, args=输入)`）激活。激活后 skill prompt 注入 system prompt（而非 tool_result 消息），描述列表则始终在 system prompt 的 Skills 段落中渐进披露。支持 `/skill-name` 客户端拦截和 `preferredModel` 模型路由。YAML frontmatter 支持 `allowed-tools`（skill 激活时预批准的工具列表）和 `invoke-for`（`"user"`=仅命令菜单 / `"agent"`=仅 LLM 调用）。
 
-**Plan**：LLM 通过 `create_plan` 元工具自主决定是否创建执行计划，不再使用本地关键词判定。
+**Plan Mode + Task**（对齐 Claude Code）：LLM 通过 `EnterPlanMode` 进入只读规划模式探索代码库，`ExitPlanMode` 提交方案触发用户审批。批准后通过 `TaskCreate`/`TaskUpdate`/`TaskList`/`TaskGet` 追踪执行进度。PlanBar 三态切换：规划中 / 已批准计划摘要 / 任务列表进度。
 
 **Rules**（`agent/RulesEngine.kt`）：加载 `.claude/rules/*.md`（项目 + 全局），支持 YAML frontmatter `paths` 条件匹配当前编辑文件，匹配到的规则注入 system prompt。无 `paths` 的规则始终生效。
 
@@ -160,7 +160,7 @@ inputPanel (border: Empty(8,12,12,12), bg: winBg)
 
 ## 编码约定
 
-- **Git commit message 必须使用中文**：遵循 Conventional Commits 格式（`feat:`/`fix:`/`refactor:`/`chore:`/`docs:`/`test:`），但描述部分用中文撰写。示例：`feat(agent): 添加 update_plan_step 元工具`、`fix(ui): 修复气泡对齐问题`
+- **Git commit message 必须使用中文**：遵循 Conventional Commits 格式（`feat:`/`fix:`/`refactor:`/`chore:`/`docs:`/`test:`），但描述部分用中文撰写。示例：`feat(agent): 添加 EnterPlanMode/ExitPlanMode Plan Mode 工作流`、`fix(ui): 修复气泡对齐问题`
 - **对抗审查工作流（强制）**：任何代码工作遵循 `adversarial-review-requirement` memory 文档——新功能：① 制定方案 → ② 写入文档 → ③ 按文档开发 → ④ 对抗审查（文档未更新，不允许写代码）；修 Bug/重构：① 定位根因 → ② 改代码 → ③ 对抗审查 → ④ 更新文档。
 
 ## 关键约定与坑

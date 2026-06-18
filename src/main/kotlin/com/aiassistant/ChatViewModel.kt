@@ -4,6 +4,8 @@ import com.aiassistant.agent.AgentContext
 import com.aiassistant.agent.AgentLoop
 import com.aiassistant.agent.AgentMessage
 import com.aiassistant.agent.ImageData
+import com.aiassistant.agent.Task
+import com.aiassistant.agent.TaskStatus
 import com.aiassistant.mcp.McpManager
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicBoolean
@@ -38,7 +40,10 @@ class ChatViewModel {
      * 那是"执行中指示器闪烁"的根因。
      */
     @Volatile var activity: Activity = Activity.Idle
-    @Volatile var currentPlan: AgentContext.Plan? = null
+    @Volatile var tasks: List<Task> = emptyList()  // 任务列表（TaskCreate/TaskUpdate 触发更新）
+    @Volatile var planMode: Boolean = false       // 规划模式中
+    @Volatile var approvedPlanTitle: String? = null  // 已批准计划标题
+    @Volatile var approvedPlan: String? = null       // 已批准计划文本
     @Volatile var currentGoal: String? = null  // 目标模式：非空时 UI 显示 GoalBar
     @Volatile var goalRound: Int = 0           // 目标模式：当前轮次计数
     @Volatile var currentModel: String = "deepseek-chat"
@@ -66,10 +71,11 @@ class ChatViewModel {
     var onToolExecute: ((String, String) -> Unit)? = null
     var onToolResult: ((String, String) -> Unit)? = null
     var onToolStreaming: ((String, String) -> Unit)? = null  // 工具执行期间的中间输出
-    var onPlanUpdate: ((AgentContext.Plan) -> Unit)? = null
+    var onTaskUpdate: (() -> Unit)? = null
     var onGoalUpdate: ((String, Int) -> Unit)? = null  // 目标模式轮次更新：(goal, roundNumber)
     var onModelRouted: ((String) -> Unit)? = null
     var onConfirmTool: ((String, String, CountDownLatch, AtomicBoolean) -> Unit)? = null
+    var onConfirmPlan: ((String, CountDownLatch, AtomicBoolean) -> Unit)? = null  // Plan Mode 审批
     var onThinkingContent: ((String) -> Unit)? = null
 
     private var agent: AgentLoop? = null
@@ -202,7 +208,14 @@ class ChatViewModel {
                 onToolResult?.invoke(name, result); onMessagesChanged?.invoke()
             }
         }
-        a.onPlanUpdate = { plan -> runOnEdt { currentPlan = plan; onPlanUpdate?.invoke(plan); onMessagesChanged?.invoke() } }
+        a.onTaskUpdate = { runOnEdt {
+            tasks = a.ctx.tasks.toList()
+            planMode = a.ctx.planMode
+            approvedPlanTitle = a.ctx.approvedPlanTitle
+            approvedPlan = a.ctx.approvedPlan
+            onTaskUpdate?.invoke(); onMessagesChanged?.invoke()
+        } }
+        a.onConfirmPlan = { planText, latch, userChoice -> runOnEdt { onConfirmPlan?.invoke(planText, latch, userChoice) } }
         a.onError = { msg ->
             runOnEdt {
                 // 清理流式状态，防止残留的 streaming bubble 与错误消息重复渲染
@@ -416,7 +429,10 @@ class ChatViewModel {
         messages.clear()
         streamingContent = ""
         streamingThinking = ""
-        currentPlan = null
+        tasks = emptyList()
+        planMode = false
+        approvedPlanTitle = null
+        approvedPlan = null
         currentGoal = null
         goalRound = 0
         lastSavedCount = 0

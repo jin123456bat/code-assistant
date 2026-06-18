@@ -12,7 +12,7 @@ Code Assistant 是 IntelliJ IDEA 的开源 AI 编程 Agent 插件（IntelliJ Pla
 - **目标驱动**：`/goal` 命令让 Agent 持续工作直到目标达成，自动检测完成状态
 - **Rules 系统**：`.claude/rules/*.md` 按文件路径条件注入规则到 system prompt
 - **Skills 增强**：YAML frontmatter 支持 `allowed-tools`（工具预批准）+ `invoke-for`（可见性控制）
-- **计划模式**：LLM 自主创建执行计划 + PlanBar 可视化步骤进度
+- **Plan Mode + Task**：EnterPlanMode 只读规划 → ExitPlanMode 用户审批 → TaskCreate/TaskUpdate 追踪执行进度
 - **会话持久化**：自动保存对话历史，`/resume` 恢复，`/export` 导出 Markdown
 - **Token 追踪**：每条 AI 回复显示 token 消耗（悬停可见），📊Dashboard 天/周统计
 - **安全机制**：工具审批流、白名单、文件越界防护、Skill 级 allowed-tools
@@ -49,7 +49,7 @@ src/main/kotlin/com/aiassistant/
 │
 ├── agent/                     # Agent 核心实现 + 共享类型
 │   ├── AgentLoop.kt           # Agent 主循环 (while 循环 + 工具调用分发)
-│   ├── AgentContext.kt        # 共享上下文 (Plan/Step/ImageData/AgentMessage/TokenStats)
+│   ├── AgentContext.kt        # 共享上下文 (Task/TaskStatus/ImageData/AgentMessage/TokenStats)
 │   ├── AgentType.kt           # Agent 类型定义 (AgentType 数据类 + AgentTypes 预置类型)
 │   ├── AgentLoader.kt         # 自定义 Agent 加载器 (兼容 Claude Code .claude/agents/*.md)
 │   ├── RulesEngine.kt         # Rules 加载引擎 (.claude/rules/*.md + paths 条件匹配)
@@ -83,7 +83,7 @@ src/main/kotlin/com/aiassistant/
 │   ├── BubbleFactory.kt       # 气泡工厂
 │   ├── ToolRowFactory.kt      # 工具/思考折叠行工厂 + 审批选项（含 ApprovalActions/RefChip）
 │   ├── SelectionCard.kt       # ask_user 选择卡 (单选/多选)
-│   ├── PlanBar.kt             # 置顶执行计划条
+│   ├── PlanBar.kt             # 置顶计划/任务条（规划中/已批准/任务列表三态）
 │   ├── SimpleDiff.kt          # 行级 diff 计算
 │   ├── AskUserBridge.kt       # ask_user 工具 ↔ UI 桥接
 │   ├── MarkdownRenderer.kt     # Markdown → Swing JPanel（位于 com.aiassistant 根包）
@@ -148,11 +148,15 @@ AgentLoop 是核心调度器，在后台 `Thread` 上运行 `while` 循环：
 2. **MCP 工具**：通过 `registerMcp()` 注册，来自 MCP 服务器的工具发现
 ### 元工具（Meta-Tools）
 
-AgentLoop 内置三个不由 ToolRegistryV3 管理的元工具，由 `buildSdkToolDefs()` 硬编码注入：
+AgentLoop 内置七个不由 ToolRegistryV3 管理的元工具，由 `buildSdkToolDefs()` 硬编码注入：
 
-- **`create_plan`**：LLM 自主决定是否创建执行计划。`input_schema` 含嵌套 `items` 结构（`ToolParameter` 无法表达）。`parsePlanFromArgs()` 对 LLM 返回的 JSON 参数做空值容错，`steps` 为空时返回错误提示让 LLM 修正重试。参数解析使用 Gson（非手写正则）
+- **`EnterPlanMode`**：进入只读规划模式，禁止写操作。Agent 在此模式下探索代码库、设计方案
+- **`ExitPlanMode(plan)`**：提交规划方案触发用户审批（模态对话框），批准后退出规划模式。CountDownLatch 同步等待，支持超时、取消、窗口关闭等路径
+- **`TaskCreate(subject, description?)`**：创建执行任务，返回自增 ID。`CopyOnWriteArrayList` 线程安全存储
+- **`TaskUpdate(id, status, result?)`**：更新任务状态（`in_progress` / `completed`）。无效 id/status 返回独立错误提示
+- **`TaskList`**：列出全部任务及状态摘要
+- **`TaskGet(id)`**：查询单个任务详情
 - **`Skill(skill, args)`**：统一 skill 激活入口（对齐 Claude Code）。激活后 prompt 注入 system prompt，支持模型路由。参数解析使用 `parseParams()`（Gson），`skill` 缺失时返回明确错误提示
-- **`update_plan_step`**：更新计划步骤状态（`in_progress` / `done` / `failed`）。参数解析使用 `parseParams()`（Gson），`index`/`status` 无效时各自返回独立错误提示
 
 ### 安全模型
 
