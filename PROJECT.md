@@ -8,12 +8,16 @@ Code Assistant 是 IntelliJ IDEA 的开源 AI 编程 Agent 插件（IntelliJ Pla
 
 - **Agent 模式**：AI 自主规划并执行多步骤任务，使用内置工具（搜索代码、读写文件、执行命令、Git 操作等）
 - **流式聊天**：Markdown 渲染 + 语法高亮，实时流式输出
-- **工具系统**：15 个内置工具 + MCP（Model Context Protocol）扩展 + 统一 Skill 元工具（对齐 Claude Code）
-- **计划模式**：LLM 自主决定是否创建执行计划，并跟踪步骤进度
-- **安全机制**：工具审批流、白名单、文件越界防护
+- **工具系统**：18 个内置工具 + MCP 扩展 + 统一 Skill 元工具 + Edit 精确替换 + Workflow 编排（对齐 Claude Code）
+- **目标驱动**：`/goal` 命令让 Agent 持续工作直到目标达成，自动检测完成状态
+- **Rules 系统**：`.claude/rules/*.md` 按文件路径条件注入规则到 system prompt
+- **Skills 增强**：YAML frontmatter 支持 `allowed-tools`（工具预批准）+ `invoke-for`（可见性控制）
+- **计划模式**：LLM 自主创建执行计划 + PlanBar 可视化步骤进度
+- **会话持久化**：自动保存对话历史，`/resume` 恢复，`/export` 导出 Markdown
+- **Token 追踪**：每条 AI 回复显示 token 消耗（悬停可见），📊Dashboard 天/周统计
+- **安全机制**：工具审批流、白名单、文件越界防护、Skill 级 allowed-tools
 - **输入增强**：文件引用、编辑器选区自动引用、图片粘贴、斜杠命令
-- **跨轮对话**：完整 conversation history 跨 `sendMessage()` 保留，LLM 感知全部上下文
-- **对话压缩**：手动 `/compact` + 自动 token 阈值触发，摘要注入 system prompt 释放 token 预算
+- **跨轮对话**：完整 conversation history + 自动/手动 compact 压缩 token 预算
 - **文件链接**：气泡中文件路径悬停手型光标，点击跳转 IDE 编辑器；URL 点击浏览器打开
 
 ## 技术栈
@@ -45,15 +49,16 @@ src/main/kotlin/com/aiassistant/
 │
 ├── agent/                     # Agent 核心实现 + 共享类型
 │   ├── AgentLoop.kt           # Agent 主循环 (while 循环 + 工具调用分发)
-│   ├── AgentContext.kt        # 共享上下文 (Plan/Step/ImageData/AgentMessage，含 id/version 用于增量渲染)
+│   ├── AgentContext.kt        # 共享上下文 (Plan/Step/ImageData/AgentMessage/TokenStats)
 │   ├── AgentType.kt           # Agent 类型定义 (AgentType 数据类 + AgentTypes 预置类型)
 │   ├── AgentLoader.kt         # 自定义 Agent 加载器 (兼容 Claude Code .claude/agents/*.md)
+│   ├── RulesEngine.kt         # Rules 加载引擎 (.claude/rules/*.md + paths 条件匹配)
 │   ├── SubAgentRegistry.kt    # 并行子 Agent 注册中心 (线程安全，结果注入)
 │   ├── ToolRegistryV3.kt      # 统一工具注册中心 (内置/MCP)
 │   ├── SkillEngine.kt         # Skill 加载引擎（SkillDef → ctx.skillDefs，统一 Skill 元工具激活）
 │   └── AgentTool.kt           # 工具接口定义 (AgentTool/ToolParameter/ToolResult)
 │
-├── tools/                     # 15 个内置工具实现
+├── tools/                     # 18 个内置工具实现（含 EditTool/WorkflowTool）
 │   ├── ReadFileTool.kt        # 读取文件（项目内免审，项目外触发审批）
 │   ├── WriteFileTool.kt       # 写入文件 (含越界防护)
 │   ├── SearchCodeTool.kt      # 搜索代码
@@ -84,6 +89,11 @@ src/main/kotlin/com/aiassistant/
 │   ├── MarkdownRenderer.kt     # Markdown → Swing JPanel（位于 com.aiassistant 根包）
 │   ├── FilePathNavigator.kt     # 文件路径/URL 点击跳转（MouseListener + viewToModel2D）
 │   └── WrapLayout.kt            # 可换行 FlowLayout 变体（preferredSize 基于容器宽度模拟换行）
+│   ├── TokenDashboard.kt         # Token 用量 Dashboard（天/周图表）
+│   └── TokenTracker.kt           # Token 聚合统计
+│
+├── session/                   # 会话持久化
+│   └── SessionStore.kt         # JSON 存储 + 原子写入 + TokenStats 序列化
 │
 ├── actions/                   # IntelliJ Actions
 │   ├── OpenChatAction.kt      # 打开聊天窗口

@@ -102,6 +102,11 @@ class BubbleFactory(
             background = ChatTheme.aiBg
         }
         val bubble = ChatBubble(content, ChatTheme.aiBg, ChatTheme.aiBorder, ChatTheme.AI_FRACTION) { availableWidth() }
+        // 仅在最终 AI 回复上显示 token 消耗（需设置开启）
+        if (com.aiassistant.AppSettingsService.isTokenDisplayEnabled()
+            && (message.inputTokens > 0 || message.outputTokens > 0)) {
+            bubble.setTokenUsage(message.inputTokens, message.outputTokens)
+        }
         val row = rowPanel().apply {
             add(bubble)                        // AI 气泡靠左
             add(Box.createHorizontalGlue())

@@ -20,5 +20,19 @@ class OpenAiToolWindowOnStartup : StartupActivity {
                 }
             }
         }
+        // 自动追加 .code-assistant 到 .gitignore（幂等）
+        ensureGitignoreHasCodeAssistant(project)
+    }
+
+    private fun ensureGitignoreHasCodeAssistant(project: Project) {
+        val basePath = project.basePath ?: return
+        val gitignoreFile = java.io.File(basePath, ".gitignore")
+        if (!gitignoreFile.exists()) return
+        try {
+            val existing = gitignoreFile.readText()
+            if (existing.contains(".code-assistant")) return
+            val toAppend = if (existing.endsWith("\n")) ".code-assistant/\n" else "\n.code-assistant/\n"
+            gitignoreFile.appendText(toAppend)
+        } catch (_: Exception) {}
     }
 }

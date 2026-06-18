@@ -107,6 +107,10 @@ class AgentLoop(
             skillDefs.forEach { ctx.skillDefs[it.name] = it }
             // 加载自定义 Agent 定义（兼容 Claude Code .claude/agents/*.md）
             AgentTypes.loadCustom(basePath)
+            // 加载 Rules（.claude/rules/*.md），对齐 Claude Code paths 条件匹配
+            val loadedRules = if (basePath != null) RulesEngine.loadAll(basePath) else emptyList()
+            ctx.rules.clear()
+            ctx.rules.addAll(loadedRules)
         }
         ctx.systemPrompt = buildSystemPrompt()
     }
@@ -225,13 +229,12 @@ class AgentLoop(
                             edt { onMessage?.invoke(AgentMessage("thinking", thinking)) }
                         }
                         if (textContent.isNotEmpty()) {
+                            val capturedInputTokens = ctx.lastInputTokens
+                            val capturedOutputTokens = ctx.lastOutputTokens
                             edt {
-                                // 先清空流式状态，再添加消息。
-                                // 如果顺序反过来，onMessage 触发 rebuildConversation 时
-                                // streamingContent 尚未清空，会导致同一个 AI 回复同时出现在
-                                // 流式气泡和正式消息气泡中（两份重复渲染）。
                                 onStreaming?.invoke("")
-                                onMessage?.invoke(AgentMessage("assistant", textContent))
+                                onMessage?.invoke(AgentMessage("assistant", textContent,
+                                    inputTokens = capturedInputTokens, outputTokens = capturedOutputTokens))
                             }
                         }
                         consecutiveFailures = 0
@@ -287,6 +290,7 @@ class AgentLoop(
                                     }
                                     "Skill '$skillName' 已激活。${if (!skillArgs.isNullOrBlank()) "用户输入: $skillArgs" else ""}"
                                 } else {
+                                    ctx.activatedSkill = null  // 清除残留的旧 skill 状态
                                     "未知 Skill: $skillName。可用 skill: ${ctx.skillDefs.keys.joinToString(", ")}"
                                 }
                                 if (!firstToolCallTextAdded) {
@@ -419,7 +423,9 @@ class AgentLoop(
                             // read_file 特殊处理：仅在项目目录内自动放行，跨目录需用户确认
                             val readFileOutside = tc.name == "read_file" && params["path"] != null &&
                                 !com.aiassistant.shared.PathUtils.isInsideProject(params["path"]!!, project.basePath)
-                            val approved = if (!readFileOutside && (tc.name in SAFE_TOOLS || tc.name in AppSettingsService.getInstance().getToolWhitelist())) {
+                            // 检查 skill 的 allowed-tools：激活的 skill 预批准的工具自动放行
+                            val skillAllowed = ctx.skillDefs[ctx.activatedSkill]?.allowedTools?.contains(tc.name) == true
+                            val approved = if (!readFileOutside && (tc.name in SAFE_TOOLS || tc.name in AppSettingsService.getInstance().getToolWhitelist() || skillAllowed)) {
                                 true
                             } else {
                                 // 内联确认：通过回调 + CountDownLatch 等待用户操作。
@@ -654,8 +660,14 @@ class AgentLoop(
                     AppLogger.info("SDK tool_use: id=$id name=$name")
                 }
                 override fun onToolInputDelta(partial: String) {}
-                override fun onStreamComplete(textContent: String, thinking: String, thinkingSig: String, sdkToolCalls: List<com.aiassistant.AnthropicSdkClient.StreamToolCall>, inputTokens: Int, stopReason: String) {
+                override fun onStreamComplete(textContent: String, thinking: String, thinkingSig: String, sdkToolCalls: List<com.aiassistant.AnthropicSdkClient.StreamToolCall>, inputTokens: Int, outputTokens: Int, stopReason: String) {
                     ctx.lastInputTokens = inputTokens
+                    ctx.lastOutputTokens = outputTokens
+                    // 记录 token 统计数据
+                    ctx.tokenStats.totalInput += inputTokens
+                    ctx.tokenStats.totalOutput += outputTokens
+                    ctx.tokenStats.roundCount++
+                    ctx.tokenStats.perRound.add(AgentContext.RoundToken(inputTokens, outputTokens))
                     textBuffer.clear(); textBuffer.append(textContent)
                     thinkingBuffer.clear(); thinkingBuffer.append(thinking)
                     thinkingSignature = thinkingSig
@@ -795,7 +807,7 @@ class AgentLoop(
                     override fun onThinkingDelta(fullThinking: String) {}
                     override fun onToolUseStart(id: String, name: String) {}
                     override fun onToolInputDelta(partial: String) {}
-                    override fun onStreamComplete(textContent: String, thinking: String, thinkingSignature: String, toolCalls: List<com.aiassistant.AnthropicSdkClient.StreamToolCall>, inputTokens: Int, stopReason: String) {
+                    override fun onStreamComplete(textContent: String, thinking: String, thinkingSignature: String, toolCalls: List<com.aiassistant.AnthropicSdkClient.StreamToolCall>, inputTokens: Int, outputTokens: Int, stopReason: String) {
                         summaryText = textContent
                         synchronized(done) { done.notifyAll() }
                     }
@@ -923,6 +935,7 @@ class AgentLoop(
         val goalSection = if (ctx.goal != null) {
             "\n## 🎯 当前目标\n你的任务是持续工作直到达成以下目标——不要提前结束，使用工具不断尝试直到成功。如果目标已达成，请明确告知用户。\n**目标：${ctx.goal}**\n"
         } else ""
+        val rulesSection = buildRulesSection()
         val claudeMdContent = loadClaudeMdFiles()
         return """
 You are an AI coding assistant in idea. Use tools to work with the project.
@@ -933,6 +946,7 @@ Path: ${project.basePath ?: "unknown"}
 ## Tools
 $toolList
 $goalSection
+$rulesSection
 ## Planning
 对于需要多步骤完成的复杂任务（如实现功能、重构代码、架构变更），你应该先调用 **create_plan** 工具创建执行计划。
 简单任务（读取文件、回答单个问题、一行修改）不要创建计划。
@@ -948,6 +962,28 @@ $claudeMdContent
 - For search: use search_code (not execute_command grep)
 - For commands: use execute_command
         """.trimIndent()
+    }
+
+    /** 构建 Rules 段落：匹配当前编辑文件的 rules 注入 system prompt */
+    private fun buildRulesSection(): String {
+        val allRules = ctx.rules
+        if (allRules.isEmpty()) return ""
+        val basePath = project.basePath ?: ""
+        val openedFiles = try {
+            com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project)
+                .openFiles.mapNotNull { f ->
+                    val abs = f.path
+                    if (abs.startsWith(basePath)) abs.removePrefix(basePath).removePrefix("/") else null
+                }
+        } catch (_: Exception) { emptyList() }
+        val matched = allRules.filter { rule ->
+            if (rule.paths == null) true
+            else openedFiles.any { f -> RulesEngine.matchesFile(rule, f) }
+        }
+        if (matched.isEmpty()) return ""
+        return "\n## 项目规则\n" + matched.joinToString("\n\n") { r ->
+            "### ${r.description}\n${r.content}"
+        } + "\n"
     }
 
     /** 按照 Claude Code 层级自动加载 CLAUDE.md 文件 */

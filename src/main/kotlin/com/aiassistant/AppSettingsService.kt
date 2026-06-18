@@ -27,6 +27,14 @@ class AppSettingsService {
         private const val COMPLETION_MANUAL_SHORTCUT_KEY = "$SERVICE_NAME.COMPLETION.MANUAL_SHORTCUT"
         private const val COMPLETION_PREV_CANDIDATE_KEY = "$SERVICE_NAME.COMPLETION.PREV_CANDIDATE"
         private const val COMPLETION_NEXT_CANDIDATE_KEY = "$SERVICE_NAME.COMPLETION.NEXT_CANDIDATE"
+        private const val TOKEN_DISPLAY_KEY = "$SERVICE_NAME.TOKEN_DISPLAY"
+
+        fun isTokenDisplayEnabled(): Boolean =
+            com.intellij.ide.util.PropertiesComponent.getInstance().getBoolean(TOKEN_DISPLAY_KEY, true)
+
+        fun setTokenDisplayEnabled(enabled: Boolean) {
+            com.intellij.ide.util.PropertiesComponent.getInstance().setValue(TOKEN_DISPLAY_KEY, enabled, true)
+        }
 
         val AVAILABLE_MODELS = listOf(
             "deepseek-v4-flash" to "DeepSeek V4 Flash (快速/工具调用)",

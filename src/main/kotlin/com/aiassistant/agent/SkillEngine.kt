@@ -13,7 +13,9 @@ object SkillEngine {
         val name: String,
         val description: String,
         val prompt: String,
-        val preferredModel: String? = null
+        val preferredModel: String? = null,
+        val allowedTools: List<String> = emptyList(),
+        val invokeFor: String? = null  // null=两者皆可, "user"=仅命令, "agent"=仅LLM
     )
 
     fun loadProjectSkills(projectBasePath: String): List<SkillDef> {
@@ -80,6 +82,8 @@ object SkillEngine {
         val skillName = fields["name"]?.toString()?.trim() ?: name.replace('-', ' ')
         val description = fields["description"]?.toString()?.trim() ?: "Skill: $skillName"
         val preferredModel = fields["model"]?.toString()?.trim()
-        return SkillDef(skillName, description, body, preferredModel)
+        val allowedTools = (fields["allowed-tools"] as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
+        val invokeFor = fields["invoke-for"]?.toString()?.trim()?.takeIf { it == "user" || it == "agent" }
+        return SkillDef(skillName, description, body, preferredModel, allowedTools, invokeFor)
     }
 }

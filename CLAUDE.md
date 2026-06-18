@@ -120,15 +120,23 @@ msgIdToComponent:    Map<msgId → Component>  ← 已渲染组件引用
 
 **适配器：`AnthropicAdapter` 是唯一的适配器**（Anthropic Messages 格式 + `input_schema` 工具）。
 
-**工具系统**：`tools/` 下每个工具实现 `agent.AgentTool` 接口（`name` / `description` / `parameters` / `execute()`）。15 个内置工具由 `ToolRegistryV3.registerBuiltIn()` 注册：`search_code`、`read_file`（支持 `resource://` URI 读取 MCP 资源）、`write_file`、`list_directory`、`execute_command`、`git_diff`、`git_log`、`git_status`、`ask_user`、`web_search`、`web_fetch`、`notebook_edit`、`task`、`code_intelligence`、`mcp_get_prompt`。两类工具来源统一管理：内置 / MCP（`registerMcp`）。三个元工具由 `AgentLoop.buildSdkToolDefs()` 硬编码添加：`Skill`（统一 skill 激活）、`create_plan`、`update_plan_step`。
+**工具系统**：`tools/` 下每个工具实现 `agent.AgentTool` 接口（`name` / `description` / `parameters` / `execute()`）。18 个内置工具由 `ToolRegistryV3.registerBuiltIn()` 注册：`search_code`、`read_file`（支持 `resource://` URI 读取 MCP 资源）、`write_file`、`edit_file`、`list_directory`、`execute_command`、`git_diff`、`git_log`、`git_status`、`ask_user`、`web_search`、`web_fetch`、`notebook_edit`、`task`、`code_intelligence`、`mcp_get_prompt`、`workflow`。两类工具来源统一管理：内置 / MCP（`registerMcp`）。三个元工具由 `AgentLoop.buildSdkToolDefs()` 硬编码添加：`Skill`（统一 skill 激活）、`create_plan`、`update_plan_step`。
 
 **安全模型**：`AgentLoop.SAFE_TOOLS`（只读工具）+ 用户白名单 `AppSettingsService.getToolWhitelist()` 内的工具直接执行；其余工具（`write_file`、`execute_command` 等）触发内联确认——`onConfirmTool` 回调配合 `CountDownLatch`/`AtomicBoolean` 阻塞等待用户通过审批选择卡在 UI 上点确认。`read_file` 额外检查路径安全：项目内免审，项目外触发审批。
 
 **MCP**（`mcp/`）：`McpManager` 从 `~/.claude.json`（用户全局）和 `.mcp.json`（项目根）读取 MCP server 配置，`McpClient` 支持 **stdio** 和 **HTTP** 两种传输。JSON-RPC 2.0 协议（`initialize` → `initialized` → `tools/list` → `tools/call`）。Client capabilities：`roots`+`sampling`（对齐 Claude Code）。工具发现后包装为 `McpToolAdapter` 注册到 `ToolRegistryV3.registerMcp()`。支持 `McpToolAdapter.rawArgsJson` 保留原始 JSON 参数类型。支持 **MCP Prompts**（`prompts/list` 列在 system prompt + `mcp_get_prompt` 工具按需获取渲染内容）和 **MCP Resources**（`resources/list` 列在 system prompt + `read_file` 支持 `resource://` URI 按需读取）。支持 **SSE 推送通知**（stdio 后台线程持续监听 + HTTP SSE 流，自动处理 `tools/prompts/resources/list_changed`）和 **Ping 心跳**（回复 `{}` 防止服务器超时断连）。支持 **Cancelled 取消通知**（`stop()` 时向所有服务器发送 `notifications/cancelled`）和 **自动健康检查**（`healthCheck` 在每次 agent 对话启动时运行，恢复崩溃的服务器并重新发现工具，同时重试初始连接失败的配置，最多 3 次）。`McpChangeListener` 接口在服务器推送变更时自动更新 `ToolRegistryV3` 和 `AgentContext`（线程安全：`mcpTools` 用 `ConcurrentHashMap`，`mcpPrompts`/`mcpResources` 用 `CopyOnWriteArrayList`）。MCP 加载在后台线程执行避免阻塞 EDT。通知回调使用 `bgExecutor` 线程池复用线程。
 
-**Skills**（`agent/SkillEngine.kt`）：扫描 `<project>/.claude/skills/**/SKILL.md` 和 `~/.claude/skills/**/SKILL.md`，解析为 `SkillDef` 存入 `AgentContext.skillDefs`。对齐 Claude Code：skill 不作为独立工具注册，而是通过统一的 `Skill` 元工具（`Skill(skill=名称, args=输入)`）激活。激活后 skill prompt 注入 system prompt（而非 tool_result 消息），描述列表则始终在 system prompt 的 Skills 段落中渐进披露。支持 `/skill-name` 客户端拦截和 `preferredModel` 模型路由。
+**Skills**（`agent/SkillEngine.kt`）：扫描 `<project>/.claude/skills/**/SKILL.md` 和 `~/.claude/skills/**/SKILL.md`，解析为 `SkillDef` 存入 `AgentContext.skillDefs`。对齐 Claude Code：skill 不作为独立工具注册，而是通过统一的 `Skill` 元工具（`Skill(skill=名称, args=输入)`）激活。激活后 skill prompt 注入 system prompt（而非 tool_result 消息），描述列表则始终在 system prompt 的 Skills 段落中渐进披露。支持 `/skill-name` 客户端拦截和 `preferredModel` 模型路由。YAML frontmatter 支持 `allowed-tools`（skill 激活时预批准的工具列表）和 `invoke-for`（`"user"`=仅命令菜单 / `"agent"`=仅 LLM 调用）。
 
 **Plan**：LLM 通过 `create_plan` 元工具自主决定是否创建执行计划，不再使用本地关键词判定。
+
+**Rules**（`agent/RulesEngine.kt`）：加载 `.claude/rules/*.md`（项目 + 全局），支持 YAML frontmatter `paths` 条件匹配当前编辑文件，匹配到的规则注入 system prompt。无 `paths` 的规则始终生效。
+
+**Goal 目标驱动**：`/goal` 命令设置目标后 Agent 持续工作直到达标（检测"目标已达成"关键词自动终止），GoalBar 显示进度。
+
+**会话持久化**（`session/SessionStore.kt`）：自动保存对话到 `.code-assistant/sessions/`（JSON + 原子写入），`/resume` 恢复，`/export` 导出 Markdown。增量追加：仅在新增消息时写盘。
+
+**Token 追踪**（`ui/TokenDashboard.kt` + `ui/TokenTracker.kt`）：SDK 层捕获 `outputTokens`，AgentMessage 携带 token 数据，气泡悬停显示消耗量（半透明极小字），📊 Dashboard 天/周统计。设置中可关闭。
 
 ### 输入区域（Composer）
 
@@ -165,7 +173,10 @@ inputPanel (border: Empty(8,12,12,12), bg: winBg)
 - **API Key**：存于 IntelliJ PasswordSafe（CredentialStore），通过 `AppSettingsService` 读写，不落明文。
 - **i18n**：用户可见文案走 `messages/AiAssistantBundle*.properties`（含 `_zh`），通过 `AiAssistantBundle` 读取。
 - **全局键盘拦截必须聚焦守卫**：`ChatToolWindow.popupKeyDispatcher` 通过 `KeyboardFocusManager.addKeyEventDispatcher()` 注册全局钩子。必须在入口检查 `focusOwner` 是否属于聊天面板（`SwingUtilities.isDescendingFrom(focusOwner, panel)`），否则焦点在编辑器时也会触发拦截器，可能干扰 IDE 快捷键（如 `Ctrl+C`）。
-- **Skill 不注册为独立工具**：对齐 Claude Code，每个 skill **不再**作为独立 `AgentTool` 注册到 `ToolRegistryV3`。统一通过 `Skill` 元工具激活，prompt 注入 system prompt。`ctx.skillDefs` 存储已加载的 `SkillDef`，`buildSystemPrompt()` 生成 Skills 段落（渐进披露）。
+- **Skill 不注册为独立工具**：对齐 Claude Code，每个 skill 不注册为独立 `AgentTool`，统一通过 `Skill` 元工具激活。`ctx.skillDefs` 存储已加载的 `SkillDef`，`buildSystemPrompt()` 生成 Skills 段落（渐进披露）。`allowed-tools` 中的工具在 skill 激活时自动放行。
+- **Edit 工具**：`edit_file` 精确替换文件中唯一匹配的文本，多次匹配报错并列出位置。
+- **Workflow 工具**：`workflow` 一次声明多个子任务并行/串行执行，自动收割合并结果。
+- **Token 追踪**：`AgentMessage.inputTokens/outputTokens` 携带每条消息的 token 消耗。气泡悬停显示。`ctx.tokenStats` 累计全会话 token 数据。
 
 ## 设计规范
 

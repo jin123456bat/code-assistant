@@ -23,7 +23,7 @@ class AnthropicSdkClient(
         fun onThinkingDelta(fullThinking: String)
         fun onToolUseStart(id: String, name: String)
         fun onToolInputDelta(partial: String)
-        fun onStreamComplete(textContent: String, thinking: String, thinkingSignature: String, toolCalls: List<StreamToolCall>, inputTokens: Int, stopReason: String)
+        fun onStreamComplete(textContent: String, thinking: String, thinkingSignature: String, toolCalls: List<StreamToolCall>, inputTokens: Int, outputTokens: Int, stopReason: String)
         fun onError(error: Throwable)
     }
 
@@ -142,16 +142,20 @@ class AnthropicSdkClient(
                         val inputTokens = try {
                             message.usage().inputTokens().toInt()
                         } catch (_: Exception) { 0 }
+                        val outputTokens = try {
+                            message.usage().outputTokens().toInt()
+                        } catch (_: Exception) { 0 }
                         val stopReason = try {
                             message.stopReason().map { it.toString() }.orElse("end_turn")
                         } catch (_: Exception) { "end_turn" }
-                        com.aiassistant.AppLogger.info("SDK响应: text=${textBuffer} inputTokens=$inputTokens stopReason=$stopReason")
+                        com.aiassistant.AppLogger.info("SDK响应: text=${textBuffer} inputTokens=$inputTokens outputTokens=$outputTokens stopReason=$stopReason")
                         callback.onStreamComplete(
                             textBuffer.toString(),
                             thinkingBuffer.toString(),
                             currentThinkingSignature ?: "",
                             toolCalls.toList(),
                             inputTokens,
+                            outputTokens,
                             stopReason
                         )
                         latch.countDown()

@@ -19,12 +19,31 @@ class AgentContext(val project: Project) {
     val historyLock = Any()
     /** 最近一次 API 调用的 input tokens（从 API usage 获取），用于判断是否触发自动 Compact */
     @Volatile var lastInputTokens: Int = 0
+    @Volatile var lastOutputTokens: Int = 0
+
+    data class RoundToken(val inputTokens: Int, val outputTokens: Int, val timestamp: Long = System.currentTimeMillis())
+    class TokenStats {
+        @Volatile var totalInput: Long = 0
+        @Volatile var totalOutput: Long = 0
+        @Volatile var roundCount: Int = 0
+        val perRound: MutableList<RoundToken> = java.util.concurrent.CopyOnWriteArrayList()
+    }
+    val tokenStats = TokenStats()
 
     // Plan mode
     var currentPlan: Plan? = null
 
     /** 目标驱动模式：设置后 Agent 持续工作直到目标达成（用户中断或 MAX_LOOPS） */
     @Volatile var goal: String? = null
+
+    val rules = mutableListOf<RuleDef>()
+
+    data class RuleDef(
+        val name: String,
+        val description: String,
+        val paths: String? = null,
+        val content: String
+    )
 
     /** 所有已加载的 skill 定义（名称 → SkillDef），不包括已激活的 skill */
     val skillDefs = mutableMapOf<String, SkillEngine.SkillDef>()
@@ -103,7 +122,9 @@ data class AgentMessage(
     val approvalPending: Boolean = false,  // 待审批状态
     val images: List<ImageData>? = null,   // 用户粘贴的图片（Claude 原生 image 块格式）
     val id: Long = nextId(),               // 消息唯一 ID，用于 messageRefChips 索引
-    val version: Int = 0                   // 消息版本号：原地更新（copy）时递增，用于增量渲染变更检测
+    val version: Int = 0,                   // 消息版本号：原地更新（copy）时递增，用于增量渲染变更检测
+    val inputTokens: Int = 0,               // 本条消息消耗的 input tokens（仅 assistant 消息有意义）
+    val outputTokens: Int = 0               // 本条消息消耗的 output tokens（仅 assistant 消息有意义）
 ) {
     companion object {
         private val counter = java.util.concurrent.atomic.AtomicLong(0)

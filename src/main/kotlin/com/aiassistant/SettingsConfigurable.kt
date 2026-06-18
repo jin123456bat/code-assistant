@@ -47,6 +47,10 @@ class SettingsConfigurable : Configurable {
         toolWhitelistPanel.layout = BoxLayout(toolWhitelistPanel, BoxLayout.Y_AXIS)
         commandWhitelistPanel.layout = BoxLayout(commandWhitelistPanel, BoxLayout.Y_AXIS)
     }
+    // ---- Token 显示 ----
+    private val tokenDisplayCheckBox = JBCheckBox("在气泡上显示 Token 消耗量（悬停可见）").apply {
+        isSelected = AppSettingsService.isTokenDisplayEnabled()
+    }
     // ---- 补全设置 ----
     private val completionEnabledCheckBox = JBCheckBox("启用 AI 代码补全").apply { isSelected = true }
     private val completionMaxTokensSpinner = JSpinner(SpinnerNumberModel(1024, 1, 1024, 1))
@@ -173,23 +177,28 @@ class SettingsConfigurable : Configurable {
         resetBtn.addActionListener { promptArea.text = AppSettingsService.DEFAULT_COMMIT_PROMPT_ZH }
         contentPanel.add(resetBtn, gbc)
 
-        // ---- Whitelist section ----
+        // Token 显示开关
+        gbc.insets = JBUI.insets(12, 8, 4, 8)
         gbc.gridy = 9; gbc.gridx = 0; gbc.gridwidth = 2; gbc.weighty = 0.0; gbc.fill = GridBagConstraints.HORIZONTAL
+        contentPanel.add(tokenDisplayCheckBox, gbc)
+
+        // ---- Whitelist section ----
+        gbc.gridy = 10; gbc.gridx = 0; gbc.gridwidth = 2; gbc.weighty = 0.0; gbc.fill = GridBagConstraints.HORIZONTAL
         gbc.insets = JBUI.insets(16, 8, 4, 8)
         contentPanel.add(JLabel("<html><b>${AiAssistantBundle.message("settings.whitelist.header")}</b></html>"), gbc)
-        gbc.gridy = 10; gbc.insets = JBUI.insets(2, 8, 2, 8)
+        gbc.gridy = 11; gbc.insets = JBUI.insets(2, 8, 2, 8)
         contentPanel.add(JLabel(AiAssistantBundle.message("settings.whitelist.desc")).apply {
             foreground = JBColor(0x666666, 0x8C8C8C)
         }, gbc)
 
-        gbc.gridy = 11; gbc.insets = JBUI.insets(4, 16, 2, 8)
+        gbc.gridy = 12; gbc.insets = JBUI.insets(4, 16, 2, 8)
         contentPanel.add(JLabel(AiAssistantBundle.message("settings.whitelist.tool")), gbc)
-        gbc.gridy = 12; gbc.insets = JBUI.insets(0, 24, 4, 8)
+        gbc.gridy = 13; gbc.insets = JBUI.insets(0, 24, 4, 8)
         contentPanel.add(toolWhitelistPanel, gbc)
 
-        gbc.gridy = 13; gbc.insets = JBUI.insets(4, 16, 2, 8)
+        gbc.gridy = 14; gbc.insets = JBUI.insets(4, 16, 2, 8)
         contentPanel.add(JLabel(AiAssistantBundle.message("settings.whitelist.command")), gbc)
-        gbc.gridy = 14; gbc.insets = JBUI.insets(0, 24, 4, 8)
+        gbc.gridy = 15; gbc.insets = JBUI.insets(0, 24, 4, 8)
         contentPanel.add(commandWhitelistPanel, gbc)
 
         // Status（放在 whitelist 之后，避免被覆盖）
@@ -285,12 +294,15 @@ class SettingsConfigurable : Configurable {
         if (svc.getCompletionMaxTokens() != (completionMaxTokensSpinner.value as Int)) return true
         if (svc.getCompletionDebounceMs() != (completionDebounceSpinner.value as Int)) return true
         if (svc.getCompletionNumCandidates() != (completionNumCandidatesSpinner.value as Int)) return true
+        if (AppSettingsService.isTokenDisplayEnabled() != tokenDisplayCheckBox.isSelected) return true
 
         return false
     }
 
     override fun apply() {
         val service = AppSettingsService.getInstance()
+
+        AppSettingsService.setTokenDisplayEnabled(tokenDisplayCheckBox.isSelected)
 
         val apiKey = String(apiKeyField.password).trim()
         if (apiKey.isEmpty()) {

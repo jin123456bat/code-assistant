@@ -181,6 +181,21 @@ class ChatToolWindow(private val project: Project) {
             override fun mouseExited(e: MouseEvent) { foreground = ChatTheme.codeLangFg }
         })
     }
+    private val tokenDashboardIcon = JLabel("📊").apply {
+        font = ChatTheme.largeFont.deriveFont(14f)
+        foreground = ChatTheme.codeLangFg
+        cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+        toolTipText = "Token 用量"
+        border = JBUI.Borders.empty(2, 6, 2, 2)
+        addMouseListener(object : MouseAdapter() {
+            override fun mouseClicked(e: MouseEvent) {
+                val stats = viewModel.getTokenStats() ?: return
+                com.aiassistant.ui.TokenDashboard.show(stats)
+            }
+            override fun mouseEntered(e: MouseEvent) { foreground = ChatTheme.accentHover }
+            override fun mouseExited(e: MouseEvent) { foreground = ChatTheme.codeLangFg }
+        })
+    }
     private val conversationHeader = JPanel(BorderLayout()).apply {
         isOpaque = false
         border = JBUI.Borders.empty(4, 10, 4, 8)
@@ -188,7 +203,10 @@ class ChatToolWindow(private val project: Project) {
             font = ChatTheme.headerFont
             foreground = ChatTheme.headerTitleFg
         }, BorderLayout.WEST)
-        add(newSessionBtn, BorderLayout.EAST)
+        val eastPanel = JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0)).apply { isOpaque = false }
+        eastPanel.add(tokenDashboardIcon)
+        eastPanel.add(newSessionBtn)
+        add(eastPanel, BorderLayout.EAST)
     }
 
     // ---- conversation area ----
@@ -901,6 +919,7 @@ class ChatToolWindow(private val project: Project) {
         }
         bindViewModel()
         addRefreshListener(checkEmptyListener)
+        addRefreshListener { needFullRebuild = true; rebuildConversation() }  // 设置变更时重建气泡，同步 token 显示状态
         ApplicationManager.getApplication().invokeLater { checkEmptyState() }
 
         // viewport 宽度变化时重算气泡：仅在宽度真正改变时触发。这样首次 viewport
@@ -1644,6 +1663,16 @@ class ChatToolWindow(private val project: Project) {
                 if (apiKey.isNullOrBlank()) { showWarning("请先配置 API Key") }
                 else { viewModel.compactConversation(apiKey) }
             },
+            Cmd("/context", "Token 用量") {
+                val stats = viewModel.getTokenStats() ?: return@Cmd
+                com.aiassistant.ui.TokenDashboard.show(stats)
+            },
+            Cmd("/resume", "恢复会话") { showSessionResumePopup() },
+            Cmd("/export", "导出对话") {
+                val text = viewModel.messages.joinToString("\n\n") { "[${it.role}] ${it.content.take(500)}" }
+                val file = java.io.File(project.basePath, "conversation-export-${System.currentTimeMillis()}.md")
+                file.writeText(text)
+            },
             Cmd("/clear",   "清空输入") { /* 已在 executeCommand 中清空 */ }
         )
 
@@ -1732,6 +1761,29 @@ class ChatToolWindow(private val project: Project) {
      * - 文件：读取内容作为代码引用
      * - 目录（以 / 结尾）：生成目录列表，不读取文件内容
      */
+    private fun showSessionResumePopup() {
+        val popup = JPopupMenu()
+        val sessions = viewModel.listSessions()
+        if (sessions.isEmpty()) {
+            popup.add(JMenuItem("(无保存的会话)").apply { isEnabled = false })
+        } else {
+            val fmt = java.text.SimpleDateFormat("MM-dd HH:mm")
+            sessions.take(20).forEach { s ->
+                val item = JMenuItem("${s.name}  ·  ${s.messageCount}条  ·  ${fmt.format(java.util.Date(s.updatedAt))}").apply {
+                    font = ChatTheme.metaFont; border = JBUI.Borders.empty(4, 10)
+                    addActionListener {
+                        popup.isVisible = false
+                        if (viewModel.messages.isNotEmpty()) viewModel.autoSaveSession()
+                        viewModel.loadSession(s.id)
+                    }
+                }
+                popup.add(item)
+            }
+        }
+        popup.pack()
+        popup.show(inputPanel, 0, -popup.preferredSize.height)
+    }
+
     private fun showFileRefPopup() {
         val popup = JPopupMenu()
         var selectedIndex = 0

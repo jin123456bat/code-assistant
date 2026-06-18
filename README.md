@@ -16,11 +16,15 @@
 ## 核心能力
 
 - **Agent 自主循环**：AI 自动规划并执行多步骤任务，最大 100 轮推理，连续失败 3 次自动中止
-- **14 个内置工具**：代码搜索、文件读写、命令执行、Git 操作、网页抓取、PSI 代码智能等
+- **18 个内置工具**：代码搜索、文件读写、Edit 精确替换、Workflow 编排、Git 操作、网页抓取、PSI 代码智能等
 - **MCP 协议**：连接外部 Model Context Protocol 服务器扩展工具集
-- **Skills 引擎**：从 `.claude/skills/**/SKILL.md` 加载自定义技能
-- **执行计划**：LLM 自主决定是否创建计划，可视化步骤追踪
-- **安全审批**：写入/命令执行需用户确认，支持白名单机制
+- **Skills 引擎**：从 `.claude/skills/**/SKILL.md` 加载自定义技能，支持 `allowed-tools`/`invoke-for`
+- **Rules 系统**：`.claude/rules/*.md` 按文件路径条件注入规则
+- **目标驱动**：`/goal` 命令让 Agent 持续工作直到目标达成
+- **执行计划**：LLM 自主创建计划 + PlanBar 可视化步骤进度
+- **会话持久化**：自动保存对话，`/resume` 恢复，`/export` 导出
+- **Token 追踪**：气泡悬停显示 token 消耗，📊 Dashboard 天/周统计
+- **安全审批**：写入/命令执行需用户确认，Skill 级 allowed-tools 预批准
 - **流式聊天**：Markdown 实时渲染 + 代码语法高亮
 - **PSI 代码智能**：基于 IntelliJ PSI 引擎的跳转定义、查找引用、类型信息、符号搜索
 - **文件引用**：输入 `@` 快速选择文件、选中代码自动添加到引用
@@ -44,6 +48,9 @@
 | `write_file` | 写入/覆写文件（含越界防护） | 需确认 |
 | `execute_command` | 执行 Shell 命令（危险命令拦截） | 需确认 |
 | `notebook_edit` | 编辑 Jupyter Notebook | 需确认 |
+| `edit_file` | 精确替换文件中的文本（唯一匹配） | 需确认 |
+| `workflow` | 并行/串行编排多个子 Agent 任务 | 只读 |
+| `mcp_get_prompt` | 获取 MCP 服务器 Prompt 模板 | 只读 |
 
 ## 斜杠命令
 
@@ -51,10 +58,15 @@
 |------|------|
 | `/new` | 清空对话，开始新会话 |
 | `/plan` | 创建执行计划 |
+| `/goal` | 设置目标，Agent 持续工作直到达标 |
 | `/init` | 初始化项目文档（CLAUDE.md） |
 | `/review` | 审查当前分支代码改动 |
 | `/test` | 运行测试并分析结果 |
 | `/stop` | 停止 AI 生成 |
+| `/compact` | 压缩对话释放 token |
+| `/context` | 查看 Token 用量 Dashboard |
+| `/resume` | 恢复已保存的会话 |
+| `/export` | 导出对话为 Markdown 文件 |
 | `/clear` | 清空输入框 |
 
 ## 兼容性

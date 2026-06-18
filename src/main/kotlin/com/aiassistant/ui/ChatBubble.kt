@@ -2,7 +2,10 @@ package com.aiassistant.ui
 
 import com.intellij.util.ui.JBUI
 import java.awt.*
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
 import javax.swing.JComponent
+import javax.swing.JLabel
 import javax.swing.JPanel
 import javax.swing.JTextArea
 import javax.swing.JTextPane
@@ -41,12 +44,47 @@ class ChatBubble(
     private val availableWidth: () -> Int
 ) : JPanel(BorderLayout()) {
 
+    /** token 消耗标签：默认隐藏，鼠标悬停时浮现（半透明极小字） */
+    private var tokenLabel: JLabel? = null
+
     init {
         isOpaque = false
         border = JBUI.Borders.empty(ChatTheme.PAD_BUBBLE_V, ChatTheme.PAD_BUBBLE_H)
-        // alignmentY 保持默认 CENTER（与 row 中 glue 的默认对齐一致）：
-        // X_AXIS BoxLayout 下若气泡 TOP、glue CENTER 不一致，会撑高整行。
         add(content, BorderLayout.CENTER)
+        // 悬停显示 token 消耗量（200ms 延迟隐藏，防抖）
+        addMouseListener(object : MouseAdapter() {
+            private var hideTimer: javax.swing.Timer? = null
+            override fun mouseEntered(e: MouseEvent) {
+                hideTimer?.stop()
+                tokenLabel?.isVisible = true
+            }
+            override fun mouseExited(e: MouseEvent) {
+                hideTimer?.stop()
+                hideTimer = javax.swing.Timer(200) { tokenLabel?.isVisible = false }.apply {
+                    isRepeats = false; start()
+                }
+            }
+        })
+    }
+
+    /** 设置 token 消耗标签（半透明极小字，默认隐藏） */
+    fun setTokenUsage(inputTokens: Int, outputTokens: Int) {
+        if (inputTokens <= 0 && outputTokens <= 0) return
+        tokenLabel = JLabel(buildTokenText(inputTokens, outputTokens)).apply {
+            font = ChatTheme.metaFont.deriveFont(8f)
+            foreground = Color(textMutedColor.red, textMutedColor.green, textMutedColor.blue, 128)
+            border = JBUI.Borders.empty(0, 0, 2, 4)
+            isVisible = false
+        }
+        val south = JPanel(FlowLayout(FlowLayout.RIGHT, 0, 0)).apply { isOpaque = false; add(tokenLabel) }
+        add(south, BorderLayout.SOUTH)
+    }
+
+    private fun buildTokenText(inputTokens: Int, outputTokens: Int): String {
+        val parts = mutableListOf<String>()
+        if (inputTokens > 0) parts.add("←${formatTokens(inputTokens)}")
+        if (outputTokens > 0) parts.add("→${formatTokens(outputTokens)}")
+        return parts.joinToString(" ")
     }
 
     private fun horizontalPad(): Int = JBUI.scale(ChatTheme.PAD_BUBBLE_H) * 2
@@ -102,6 +140,14 @@ class ChatBubble(
     }
 
     companion object {
+        private val textMutedColor = ChatTheme.textMuted
+
+        fun formatTokens(n: Int): String = when {
+            n >= 1_000_000 -> "${n / 1_000_000}.${(n % 1_000_000) / 100_000}M"
+            n >= 1_000 -> "${n / 1_000}.${(n % 1_000) / 100}k"
+            else -> "$n"
+        }
+
         /**
          * 实时测量内容在给定最大宽度下的真实 (宽, 高)，并 hug content。
          * 不缓存、不冻结——每次布局即时计算，因此 viewport/字体就绪后自动正确。

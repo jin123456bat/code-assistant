@@ -14,8 +14,11 @@
 - [ ] **更多斜杠命令**
   `/review` 代码审查、`/test` 运行测试、`/diff` 查看变更、`/security-review` 安全审查
 
-- [ ] **会话管理**
-  会话命名、恢复、分支、导出，多会话并行
+- [x] **会话管理** ✅ 已完成
+  自动保存 + `/resume` 恢复 + `/export` 导出 Markdown
+
+- [x] **Token 精细化追踪** ✅ 已完成
+  气泡悬停显示 token 消耗，📊 Dashboard 天/周统计，设置中可关闭
 
 - [ ] **Memory 记忆系统**
   跨会话自动记忆，用户/项目/本地三层存储，`/memory` 命令管理
@@ -42,8 +45,8 @@
 - [ ] **后台代理**
   Agent 后台运行不阻塞编辑，`/background` 启动，`/tasks` 查看进度
 
-- [ ] **Workflow 工作流编排**
-  多子代理并行/流水线编排，`Workflow` 工具 + `/workflows` 查看进度
+- [x] **Workflow 工作流编排** ✅ 已完成
+  `workflow` 工具：并行/串行多子 Agent + 自动结果合并
 
 ## P4 — 安全与生态
 

@@ -19,7 +19,7 @@ class ToolRegistryV3 {
             ReadFileTool(), WriteFileTool(), EditTool(), SearchCodeTool(), ListDirectoryTool(),
             ExecuteCommandTool(), GitDiffTool(), GitLogTool(), GitStatusTool(),
             AskUserTool(), WebSearchTool(), WebFetchTool(), NotebookEditTool(), TaskTool(),
-            CodeIntelligenceTool(), McpGetPromptTool()
+            CodeIntelligenceTool(), McpGetPromptTool(), WorkflowTool()
         )
         all.forEach {
             val allowed = allowedTools == null || it.name in allowedTools

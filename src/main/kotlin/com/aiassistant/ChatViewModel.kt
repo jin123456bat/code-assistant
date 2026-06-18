@@ -88,9 +88,13 @@ class ChatViewModel {
     fun getSkillNames(): List<String> = getSkills().map { it.name }
 
     /** 获取所有 skill 的名称和描述（用于 UI 菜单展示） */
+    /** UI 菜单中的 skill 列表：过滤掉 invoke-for="agent" 的（仅 LLM 可调用） */
     fun getSkills(): List<SkillInfo> = agent?.ctx?.skillDefs?.values
+        ?.filter { it.invokeFor != "agent" }
         ?.map { SkillInfo(it.name, it.description) }
         ?: emptyList()
+
+    fun getTokenStats(): AgentContext.TokenStats? = agent?.ctx?.tokenStats
 
     fun addMcpTools(mcpTools: List<com.aiassistant.agent.AgentTool>) {
         agent?.ctx?.toolRegistry?.registerMcp(mcpTools)
@@ -229,7 +233,7 @@ class ChatViewModel {
                 isStreaming = streaming
                 // 运行开始→思考中；结束→空闲，清理所有流式状态防止残留渲染
                 if (streaming) { if (activity == Activity.Idle) activity = Activity.Thinking }
-                else { activity = Activity.Idle; currentToolName = null; streamingThinking = ""; streamingContent = ""; isThinking = false }
+                else { activity = Activity.Idle; currentToolName = null; streamingThinking = ""; streamingContent = ""; isThinking = false; autoSaveSession() }
                 onStreamingStateChanged?.invoke(streaming)
             }
         }
@@ -415,6 +419,8 @@ class ChatViewModel {
         currentPlan = null
         currentGoal = null
         goalRound = 0
+        lastSavedCount = 0
+        autoSaveSessionId = java.util.UUID.randomUUID().toString().take(8)  // /clear 后开启新会话
         isRateLimited = false
         pendingApprovals.clear()
         activity = Activity.Idle
@@ -460,4 +466,62 @@ class ChatViewModel {
             } finally { isCompacting.set(false) }
         }.start()
     }
+
+    // ---- 会话持久化（增量追加）----
+
+    private var autoSaveSessionId: String = java.util.UUID.randomUUID().toString().take(8)
+    @Volatile private var lastSavedCount: Int = 0  // EDT 读 + 后台 Thread 写，需 @Volatile
+
+    fun autoSaveSession() {
+        val path = project?.basePath ?: return
+        if (messages.isEmpty()) return
+        val currentSize = messages.size
+        if (currentSize == lastSavedCount) return  // 无新消息，跳过
+        val snapshot = messages.toList()
+        val sessionId = autoSaveSessionId
+        val savedCount = currentSize
+        val stats = agent?.ctx?.tokenStats
+        val statsDTO = stats?.let {
+            com.aiassistant.session.SessionStore.TokenStatsDTO(
+                totalInput = it.totalInput, totalOutput = it.totalOutput, roundCount = it.roundCount,
+                perRound = it.perRound.map { r ->
+                    com.aiassistant.session.SessionStore.RoundTokenDTO(r.inputTokens, r.outputTokens, r.timestamp)
+                }
+            )
+        }
+        Thread {
+            val name = snapshot.firstOrNull { it.role == "user" }?.content?.take(50) ?: "空会话"
+            com.aiassistant.session.SessionStore.save(path, sessionId, name, snapshot, statsDTO)
+            lastSavedCount = savedCount
+        }.start()
+    }
+
+    fun loadSession(id: String) {
+        val data = project?.basePath?.let { com.aiassistant.session.SessionStore.load(it, id) } ?: return
+        clearConversation()
+        messages.addAll(data.messages.mapNotNull { dto ->
+            when (dto.role) {
+                "user" -> AgentMessage("user", dto.content)
+                "assistant" -> AgentMessage("assistant", dto.content)
+                else -> null
+            }
+        })
+        // 恢复 token 统计数据
+        data.tokenStats?.let { ts ->
+            agent?.ctx?.tokenStats?.apply {
+                totalInput = ts.totalInput
+                totalOutput = ts.totalOutput
+                roundCount = ts.roundCount
+                perRound.clear()
+                ts.perRound.forEach { r ->
+                    perRound.add(com.aiassistant.agent.AgentContext.RoundToken(r.inputTokens, r.outputTokens, r.timestamp))
+                }
+            }
+        }
+        lastSavedCount = messages.size  // 恢复后以此为基准，只追加新消息
+        runOnEdt { onMessagesChanged?.invoke() }
+    }
+
+    fun listSessions(): List<com.aiassistant.session.SessionStore.SessionMeta> =
+        project?.basePath?.let { com.aiassistant.session.SessionStore.list(it) } ?: emptyList()
 }

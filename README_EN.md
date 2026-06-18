@@ -16,11 +16,15 @@ Powered by [DeepSeek V4](https://platform.deepseek.com) models. Agent loop auton
 ## Core Capabilities
 
 - **Autonomous Agent Loop**: AI plans and executes multi-step tasks, up to 100 turns, auto-aborts after 3 consecutive failures
-- **14 Built-in Tools**: Code search, file I/O, command execution, Git operations, web fetch, PSI code intelligence, etc.
+- **18 Built-in Tools**: Edit, Workflow orchestration, code search, file I/O, command execution, Git, web fetch, PSI, etc.
 - **MCP Protocol**: Connect external Model Context Protocol servers to extend tool capabilities
-- **Skills Engine**: Load custom skills from `.claude/skills/**/SKILL.md`
-- **Execution Plans**: LLM autonomously decides whether to create step-by-step plans with visual progress tracking
-- **Security Approval**: Write/execute operations require user confirmation with whitelist support
+- **Skills Engine**: Custom skills with YAML frontmatter (`allowed-tools`, `invoke-for`), aligned with Claude Code
+- **Rules System**: `.claude/rules/*.md` with path-conditional injection into system prompt
+- **Goal-Driven Mode**: `/goal` command lets Agent work continuously until goal is reached
+- **Execution Plans**: LLM autonomously creates step-by-step plans with visual progress tracking
+- **Session Persistence**: Auto-save conversations, `/resume` to restore, `/export` to Markdown
+- **Token Tracking**: Per-message token usage on hover, 📊 Dashboard with daily/weekly stats
+- **Security Approval**: Write/execute require confirmation, skill-level `allowed-tools` auto-approval
 - **Streaming Chat**: Real-time Markdown rendering with syntax highlighting
 - **PSI Code Intelligence**: Go-to-definition, find references, type info, and symbol search via IntelliJ PSI engine
 - **File References**: Type `@` to quickly select files; selected code auto-added to references
@@ -44,6 +48,9 @@ Powered by [DeepSeek V4](https://platform.deepseek.com) models. Agent loop auton
 | `write_file` | Create or overwrite files (path traversal protection) | Confirmation |
 | `execute_command` | Execute shell commands (dangerous command interception) | Confirmation |
 | `notebook_edit` | Edit Jupyter Notebook cells | Confirmation |
+| `edit_file` | Precise string replacement (unique match required) | Confirmation |
+| `workflow` | Parallel/sequential multi sub-agent orchestration | Read-only |
+| `mcp_get_prompt` | Get MCP server prompt templates | Read-only |
 
 ## Slash Commands
 
@@ -51,10 +58,15 @@ Powered by [DeepSeek V4](https://platform.deepseek.com) models. Agent loop auton
 |---------|-------------|
 | `/new` | Clear conversation and start fresh |
 | `/plan` | Create an execution plan |
+| `/goal` | Set a goal — Agent works continuously until achieved |
 | `/init` | Initialize project documentation (CLAUDE.md) |
 | `/review` | Review current branch changes |
 | `/test` | Run tests and analyze results |
 | `/stop` | Stop AI generation |
+| `/compact` | Compress conversation to free up tokens |
+| `/context` | Open Token usage Dashboard |
+| `/resume` | Restore a saved session |
+| `/export` | Export conversation to Markdown file |
 | `/clear` | Clear input area |
 
 ## Compatibility
