@@ -15,9 +15,19 @@ class CompletionPostProcessorTest {
     }
 
     @Test
-    fun `should filter short results`() {
+    fun `should keep short but valid results`() {
         val choices = listOf(
             DeepSeekFimClient.FimChoice("ab", 0, "stop")
+        )
+        val processed = CompletionPostProcessor.process(choices, "", "")
+        assertEquals(1, processed.size)
+        assertEquals("ab", processed[0])
+    }
+
+    @Test
+    fun `should filter empty results`() {
+        val choices = listOf(
+            DeepSeekFimClient.FimChoice("", 0, "stop")
         )
         val processed = CompletionPostProcessor.process(choices, "", "")
         assertTrue(processed.isEmpty())
@@ -33,13 +43,14 @@ class CompletionPostProcessorTest {
     }
 
     @Test
-    fun `should keep valid completion`() {
+    fun `should keep valid completion and trim it`() {
         val choices = listOf(
             DeepSeekFimClient.FimChoice("    return userRepository.findById(id);\n}", 0, "stop")
         )
         val processed = CompletionPostProcessor.process(choices, "", "")
         assertEquals(1, processed.size)
-        assertEquals("    return userRepository.findById(id);\n}", processed[0])
+        // 修复 Bug 3 后：results.add(trimmed)，所以前导空格被 trim 掉了
+        assertEquals("return userRepository.findById(id);\n}", processed[0])
     }
 
     @Test
@@ -62,13 +73,14 @@ class CompletionPostProcessorTest {
     }
 
     @Test
-    fun `should trim prefix overlap`() {
+    fun `should trim prefix overlap and trim result`() {
         val choices = listOf(
             DeepSeekFimClient.FimChoice("return x;\n    .filter { it > 0 }\n}", 0, "stop")
         )
         val prefix = "return x;"
         val processed = CompletionPostProcessor.process(choices, prefix, "")
         assertEquals(1, processed.size)
-        assertEquals("\n    .filter { it > 0 }\n}", processed[0])
+        // 修复 Bug 3 后：results.add(trimmed)，前导换行和空格被 trim 掉
+        assertEquals(".filter { it > 0 }\n}", processed[0])
     }
 }
