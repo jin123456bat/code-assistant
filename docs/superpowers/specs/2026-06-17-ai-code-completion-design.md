@@ -1,8 +1,8 @@
 # AI 代码补全功能设计文档
 
 - **日期**: 2026-06-17
-- **版本**: 1.0
-- **状态**: 设计中
+- **版本**: 2.0（v1.0 已实现并通过对抗审查修复 13 个 bug）
+- **状态**: 迭代中
 
 ---
 
@@ -456,3 +456,109 @@ timer 到期   → 新请求
 ### 6.3 模型依赖
 - DeepSeek V4 Pro 支持 `/beta/completions` FIM 端点
 - 多候选依赖 `n` 参数（DeepSeek FIM API 支持）
+
+---
+
+## 7. v2.0 改进（对比 Copilot 复盘后新增）
+
+### 7.1 改进 1：增强上下文收集
+
+**现状**：仅取同目录 1 个兄弟文件（按字母序首个），文件路径/语言等元信息未传入 prompt。
+
+**改进**：
+- **邻近文件选择**：取同目录下最多 5 个同扩展名文件，用 Jaccard 相似度（基于 import/use 行）排序，选最相关的前 N 个
+- **打开标签页信号**：利用 `FileEditorManager.getOpenFiles()` 获取最近打开的文件，优先选取已打开的标签页文件（权重 ×2）
+- **文件路径元信息**：在 prompt 中以注释形式嵌入文件路径，帮助模型理解上下文
+  ```
+  // File: src/Service/UserService.php
+  // Project: my-app
+  <?php
+  namespace App\Service;
+  ...
+  ```
+
+### 7.2 改进 2：候选导航 Action 注册
+
+**现状**：`AppSettingsService` 中已配置 `PrevCandidateKey`（UP）/ `NextCandidateKey`（DOWN），但 plugin.xml 中未注册对应 Action，用户配置的快捷键不生效。
+
+**改进**：
+- 在 plugin.xml 中注册 `AiAssistant.NextCandidate` 和 `AiAssistant.PrevCandidate` Action
+- 默认快捷键：`↓`（下一个）、`↑`（上一个）
+- 通过 IntelliJ `InlineCompletionHandler` API 切换候选
+- 幽灵文本显示时，快捷键优先于光标移动；无幽灵文本时恢复为正常光标移动
+
+### 7.3 改进 3：网络层优化
+
+**现状**：`HttpURLConnection` 每次新建连接（无连接池），连接超时 2s/读取 3s（偏激进），仅 1 次重试。
+
+**改进**：
+- 从 `HttpURLConnection` 迁移到 OkHttp（复用 Anthropic Java SDK 内置的 OkHttp 依赖）
+- 启用连接池（默认 5 个空闲连接，保活 5 分钟）和 HTTP/2 多路复用
+- 超时调整：连接 5s、读取 10s（对齐 Copilot 的宽松策略）
+- 指数退避重试：2 次重试，间隔 200ms → 400ms → 800ms
+- 使用 OkHttp `Dispatcher` 管理请求优先级
+
+### 7.4 改进 4：遥测持久化与统计 Dashboard
+
+**现状**：`CompletionStats` 统计存内存，重启 IDE 清零，设置页无 Dashboard。
+
+**改进**：
+- **持久化**：每日/每周统计写入项目 `.claude/completion-stats.json`
+- **按语言维度**：分语言统计接受率（PHP/JS/HTML/CSS 各自独立）
+- **拒绝原因分类**：记录用户取消时的前缀片段（脱敏后的 hash），分析高频拒绝模式
+- **设置页 Dashboard**：
+  ```
+  ┌─ 补全统计 ──────────────────────────────────┐
+  │  本次会话:                                    │
+  │  显示: 128   接受: 89   接受率: 69.5%        │
+  │  平均延迟: 320ms                              │
+  │                                               │
+  │  按语言:                                      │
+  │  PHP:     53/80  (66.3%)  平均 290ms         │
+  │  JS:      25/34  (73.5%)  平均 340ms         │
+  │  HTML:    8/10   (80.0%)  平均 260ms         │
+  │  CSS:     3/4    (75.0%)  平均 310ms         │
+  │                                               │
+  │  近 7 日:  显示: 1847  接受: 1254 (67.9%)   │
+  │                                               │
+  │  [重置统计]                                   │
+  └───────────────────────────────────────────────┘
+  ```
+
+### 7.5 改进 5：Prompt 结构化
+
+**现状**：prompt 是 `smartContext + "\n" + prefix` 的纯文本拼接。
+
+**改进**：添加文件路径/语言等元信息标记，对齐 Copilot 风格：
+```
+// File: src/Service/UserService.php
+// Language: php
+// Project: my-app
+<?php
+namespace App\Service;
+...
+[光标前代码]
+<fim_suffix>
+[光标后代码]
+```
+
+FIM API 中 `prompt` 和 `suffix` 分别传输，`suffix` 不需要 `<fim_suffix>` 标记（API 字段本身就是分隔）。所以实际 prompt 结构为：
+
+```
+// File: {fileName}
+// Language: {language}
+
+{smartContext}
+
+{prefix}
+```
+
+---
+
+## 8. 版本历史
+
+| 版本 | 日期 | 变更 |
+|------|------|------|
+| 1.0 | 2026-06-17 | 初版设计，实现核心功能 |
+| 1.1 | 2026-06-18 | 对抗审查，修复 13 个 bug |
+| 2.0 | 2026-06-18 | 对比 Copilot 复盘，新增 5 项改进 |
