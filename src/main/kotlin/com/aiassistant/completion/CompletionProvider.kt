@@ -49,13 +49,12 @@ object CompletionPostProcessor {
             // 有效性过滤
             val trimmed = text.trim()
             if (trimmed.isEmpty()) continue
-            if (trimmed.length < 3) continue
             // 如果补全内容和 suffix 开头完全相同则无意义
             if (trimmed == suffix.take(trimmed.length).trim()) continue
             if (seen.contains(trimmed)) continue
 
             seen.add(trimmed)
-            results.add(text)
+            results.add(trimmed)
         }
 
         return results

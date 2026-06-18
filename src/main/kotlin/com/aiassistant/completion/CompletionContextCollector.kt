@@ -1,8 +1,10 @@
 package com.aiassistant.completion
 
+import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.project.Project
 import com.intellij.psi.PsiDocumentManager
+import com.intellij.psi.PsiFile
 
 /**
  * 补全上下文数据结构。
@@ -45,10 +47,14 @@ class CompletionContextCollector(
         val suffix = suffixRaw.take(budgetManager.maxSuffixChars)
 
         // PSI 增强层
-        val psiFile = PsiDocumentManager.getInstance(project).getPsiFile(document)
+        val psiFile = ReadAction.compute<PsiFile?, Throwable> {
+            PsiDocumentManager.getInstance(project).getPsiFile(document)
+        }
         val strategy = selectPsiStrategy(language)
         val smartContext = if (psiFile != null) {
-            strategy.collectContext(editor, project, psiFile)?.take(budgetManager.maxSmartContextChars)
+            ReadAction.compute<String?, Throwable> {
+                strategy.collectContext(editor, project, psiFile)?.take(budgetManager.maxSmartContextChars)
+            }
         } else null
 
         return CompletionContext(

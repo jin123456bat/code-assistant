@@ -10,6 +10,11 @@ import java.net.URI
 import java.nio.charset.StandardCharsets
 
 /**
+ * FIM API 异常，携带 HTTP 状态码用于重试判断。
+ */
+class FimApiException(val statusCode: Int, message: String) : IOException(message)
+
+/**
  * DeepSeek FIM API 客户端。封装 `/beta/completions` 调用，非流式，带超时和重试。
  */
 class DeepSeekFimClient(
@@ -89,10 +94,12 @@ class DeepSeekFimClient(
         for (attempt in 0..MAX_RETRIES) {
             try {
                 return execute(request, apiKey)
+            } catch (e: FimApiException) {
+                if (e.statusCode in 400..499) break  // 4xx 不重试
+                lastError = e
             } catch (e: IOException) {
                 lastError = e
-                activeConnection = null
-                if (e.message?.contains("4") == true) break
+                // 网络错误继续重试
             }
         }
         throw lastError ?: IOException("Unknown error")
@@ -121,7 +128,7 @@ class DeepSeekFimClient(
             val responseCode = connection.responseCode
             if (responseCode !in 200..299) {
                 val errorBody = connection.errorStream?.bufferedReader(StandardCharsets.UTF_8)?.readText() ?: ""
-                throw IOException("FIM API error $responseCode: $errorBody")
+                throw FimApiException(responseCode, "FIM API error $responseCode: $errorBody")
             }
 
             val responseBody = connection.inputStream.bufferedReader(StandardCharsets.UTF_8).readText()
@@ -129,6 +136,7 @@ class DeepSeekFimClient(
             val responseType = object : com.google.gson.reflect.TypeToken<FimResponse>() {}.type
             return gson.fromJson(responseBody, responseType)
         } finally {
+            activeConnection = null
             connection.disconnect()
         }
     }
