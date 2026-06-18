@@ -34,10 +34,11 @@ class PhpPsiStrategy : PsiCompletionStrategy {
         if (containingFunction != null) {
             sb.appendLine("// ${containingFunction.text.take(500)}\n")
         } else {
-            val text = document.charsSequence.toString()
-            val headerEnd = getPhpHeaderEnd(text)
+            // 只取文件头部（namespace + use 声明通常在文件前 2000 字符内）
+            val headerText = document.immutableCharSequence.take(2000).toString()
+            val headerEnd = getPhpHeaderEnd(headerText)
             if (headerEnd > 0) {
-                sb.appendLine(text.substring(0, headerEnd.coerceAtMost(1500)))
+                sb.appendLine(headerText.substring(0, headerEnd.coerceAtMost(1500)))
             }
         }
 
