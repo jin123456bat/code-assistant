@@ -58,8 +58,8 @@ object SkillEngine {
         }
     }
 
-    // YAML frontmatter 分隔符
-    private val FRONTMATTER = Regex("^---\\s*\\n(.*?)\\n---\\s*\\n(.*)", setOf(RegexOption.DOT_MATCHES_ALL))
+    // YAML frontmatter 分隔符（\R 匹配 \n / \r\n / \r，兼容 Windows CRLF）
+    private val FRONTMATTER = Regex("^---\\s*\\R(.*?)\\R---\\s*\\R(.*)", setOf(RegexOption.DOT_MATCHES_ALL))
 
     /** 解析 SKILL.md 的 YAML front matter 和正文内容（使用 SnakeYAML） */
     private fun parseSkill(name: String, content: String): SkillDef? {

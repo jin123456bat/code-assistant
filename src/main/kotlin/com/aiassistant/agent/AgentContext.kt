@@ -23,6 +23,9 @@ class AgentContext(val project: Project) {
     // Plan mode
     var currentPlan: Plan? = null
 
+    /** 目标驱动模式：设置后 Agent 持续工作直到目标达成（用户中断或 MAX_LOOPS） */
+    @Volatile var goal: String? = null
+
     /** 所有已加载的 skill 定义（名称 → SkillDef），不包括已激活的 skill */
     val skillDefs = mutableMapOf<String, SkillEngine.SkillDef>()
     /** 客户端通过 /skill-name 激活的 skill（此 skill 不会作为工具暴露给 LLM，防止重复调用） */

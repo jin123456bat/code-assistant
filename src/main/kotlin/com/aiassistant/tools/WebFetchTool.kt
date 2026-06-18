@@ -183,9 +183,9 @@ class WebFetchTool : AgentTool {
         sb.append("# $title\n\n")
         sb.append("> 来源: $url\n\n")
 
-        // Remove scripts, styles, comments
+        // Remove scripts, styles, comments, and non-content sections
         val opt = setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)
-        val cleaned = html
+        var cleaned = html
             .replace(Regex("<script[^>]*>.*?</script>", opt), "")
             .replace(Regex("<style[^>]*>.*?</style>", opt), "")
             .replace(Regex("<!--.*?-->", RegexOption.DOT_MATCHES_ALL), "")
@@ -195,37 +195,65 @@ class WebFetchTool : AgentTool {
             .replace(Regex("<header[^>]*>.*?</header>", opt), "")
 
         // Extract body content
-        val body = Regex("<body[^>]*>(.*?)</body>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
-            .find(cleaned)?.groupValues?.get(1)?.trim() ?: cleaned
+        val bodyMatch = Regex("<body[^>]*>(.*?)</body>", opt).find(cleaned)
+        val body = bodyMatch?.groupValues?.get(1)?.trim() ?: cleaned
 
-        // Convert HTML to markdown
-        var md = body
+        // Phase 1: Preserve <pre> blocks to avoid regex damage to code content
+        val preBlocks = mutableListOf<String>()
+        cleaned = body.replace(Regex("<pre[^>]*>(.*?)</pre>", opt)) { mr ->
+            val content = mr.groupValues[1]
+                .replace(Regex("</?code[^>]*>", RegexOption.IGNORE_CASE), "")
+                .replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+                .replace("&quot;", "\"").replace("&#39;", "'").replace("&nbsp;", " ")
+            preBlocks.add(content)
+            "\n PRE${preBlocks.lastIndex} \n"
+        }
+
+        // Phase 2: Convert HTML to markdown
+        var md = cleaned
+            // Headings
             .replace(Regex("</?h1[^>]*>", RegexOption.IGNORE_CASE), "\n\n# ")
             .replace(Regex("</?h2[^>]*>", RegexOption.IGNORE_CASE), "\n\n## ")
             .replace(Regex("</?h3[^>]*>", RegexOption.IGNORE_CASE), "\n\n### ")
+            .replace(Regex("</?h4[^>]*>", RegexOption.IGNORE_CASE), "\n\n#### ")
+            .replace(Regex("</?h5[^>]*>", RegexOption.IGNORE_CASE), "\n\n##### ")
+            .replace(Regex("</?h6[^>]*>", RegexOption.IGNORE_CASE), "\n\n###### ")
+            // Paragraphs and line breaks
             .replace(Regex("</p>", RegexOption.IGNORE_CASE), "\n\n")
             .replace(Regex("<br\\s*/?>", RegexOption.IGNORE_CASE), "\n")
-            .replace(Regex("<pre[^>]*><code[^>]*>", RegexOption.IGNORE_CASE), "\n```\n")
-            .replace(Regex("</code></pre>", RegexOption.IGNORE_CASE), "\n```\n")
-            .replace(Regex("<code[^>]*>", RegexOption.IGNORE_CASE), "`")
-            .replace(Regex("</code>", RegexOption.IGNORE_CASE), "`")
+            // Inline code (only standalone, not inside pre blocks)
+            .replace(Regex("<code[^>]*>(.*?)</code>", RegexOption.IGNORE_CASE)) { mr ->
+                "`${mr.groupValues[1].trim()}`"
+            }
+            // Links
             .replace(Regex("<a[^>]*href=\"([^\"]*)\"[^>]*>([^<]*)</a>", RegexOption.IGNORE_CASE)) { mr ->
-                val h = mr.groupValues[1]
-                val t = mr.groupValues[2].trim()
+                val h = mr.groupValues[1]; val t = mr.groupValues[2].trim()
                 if (h == t) h else "[$t]($h)"
             }
+            // Bold, italic
             .replace(Regex("</?(strong|b)>", RegexOption.IGNORE_CASE), "**")
             .replace(Regex("</?(em|i)>", RegexOption.IGNORE_CASE), "*")
-            .replace(Regex("</?li[^>]*>", RegexOption.IGNORE_CASE), "\n- ")
-            .replace(Regex("</?ul[^>]*>", RegexOption.IGNORE_CASE), "\n")
+            // Lists
+            .replace(Regex("<li[^>]*>", RegexOption.IGNORE_CASE), "\n- ")
+            .replace(Regex("</li>", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("<ul[^>]*>|</ul>", RegexOption.IGNORE_CASE), "\n")
+            .replace(Regex("<ol[^>]*>|</ol>", RegexOption.IGNORE_CASE), "\n")
+            // Strip remaining HTML tags
             .replace(Regex("<[^>]*>"), "")
+            // HTML entities
             .replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
             .replace("&quot;", "\"").replace("&#39;", "'").replace("&nbsp;", " ")
+            // Collapse excessive newlines
             .replace(Regex("\n{3,}"), "\n\n")
             .trim()
 
+        // Phase 3: Restore preserved pre blocks
+        for ((i, block) in preBlocks.withIndex()) {
+            md = md.replace(" PRE$i ", "\n```\n$block\n```\n")
+        }
+
         if (md.length > maxChars) {
-            md = md.take(maxChars) + "\n\n... (内容已截断至 ${maxChars} 字符)"
+            md = md.take(maxChars) + "\n\n... (内容已截断至 $maxChars 字符)"
         }
 
         sb.append(md)

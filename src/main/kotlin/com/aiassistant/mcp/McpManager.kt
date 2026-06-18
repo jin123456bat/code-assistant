@@ -224,6 +224,7 @@ class McpManager(private val project: Project) {
         clients.clear()
         configs.clear()
         restartCount.clear()
+        instances.remove(project.basePath ?: "")
     }
 
     fun getConnectedServers(): List<String> = clients.keys.toList()

@@ -1,7 +1,12 @@
 package com.aiassistant.ui
 
 import com.aiassistant.agent.AgentMessage
+import com.intellij.diff.DiffManager
+import com.intellij.diff.contents.DocumentContentImpl
+import com.intellij.diff.requests.SimpleDiffRequest
 import com.intellij.openapi.editor.colors.EditorColorsManager
+import com.intellij.openapi.fileTypes.FileTypeManager
+import com.intellij.openapi.project.Project
 import com.intellij.ui.JBColor
 import com.intellij.util.ui.JBUI
 import java.awt.*
@@ -187,11 +192,33 @@ class ToolRowFactory(
         val argsPart = if (hasResult) rawContent.substringBefore(sep) else rawContent
         val resultPart = if (hasResult) rawContent.substringAfter(sep) else ""
 
+        // 检测 write_file diff 标记：提取旧/新内容，清洗显示文本
+        val oldMarker = "[OLD_CONTENT]"
+        val endOldMarker = "[/OLD_CONTENT]"
+        val newMarker = "[NEW_CONTENT]"
+        val endNewMarker = "[/NEW_CONTENT]"
+        val isWriteFileDiff = (toolName == "write_file" || toolName == "edit_file") && resultPart.contains(newMarker)
+        val diffData: DiffData? = if (isWriteFileDiff) {
+            val oldStart = resultPart.indexOf(oldMarker)
+            val oldEnd = resultPart.indexOf(endOldMarker)
+            val newStart = resultPart.indexOf(newMarker)
+            val newEnd = resultPart.indexOf(endNewMarker)
+            val old = if (oldStart >= 0 && oldEnd > oldStart) resultPart.substring(oldStart + oldMarker.length, oldEnd).trim() else null
+            val new = if (newStart >= 0 && newEnd > newStart) resultPart.substring(newStart + newMarker.length, newEnd).trim() else null
+            // 清洗显示文本：移除 diff 标记块，保留文件头信息
+            val clean = resultPart
+                .replace(Regex("\\[OLD_CONTENT\\].*?\\[/OLD_CONTENT\\]\\s*", RegexOption.DOT_MATCHES_ALL), "")
+                .replace(Regex("\\[NEW_CONTENT\\].*?\\[/NEW_CONTENT\\]\\s*", RegexOption.DOT_MATCHES_ALL), "")
+                .trim()
+            DiffData(old, new, clean)
+        } else null
+
+        val cleanResult = diffData?.cleanDisplay ?: resultPart
         val argsPreview = argsPart.replace('\n', ' ').replace('\r', ' ').take(40)
             .let { if (argsPart.length > 40) "$it…" else it }
-        val isTruncated = resultPart.length > ChatTheme.RESULT_MAX_CHARS
-        val displayText = if (isTruncated) resultPart.take(ChatTheme.RESULT_MAX_CHARS) + "\n… (已截断)" else resultPart
-        val lineCount = resultPart.count { it == '\n' } + 1
+        val isTruncated = cleanResult.length > ChatTheme.RESULT_MAX_CHARS
+        val displayText = if (isTruncated) cleanResult.take(ChatTheme.RESULT_MAX_CHARS) + "\n… (已截断)" else cleanResult
+        val lineCount = cleanResult.count { it == '\n' } + 1
 
         val outerRow = outerRow()
         val collapsed = AtomicBoolean(true)
@@ -248,20 +275,45 @@ class ToolRowFactory(
             }
 
             if (!isCollapsed && hasResult) {
-                val textArea = JTextArea(displayText).apply {
-                    isEditable = false; lineWrap = true; wrapStyleWord = true
-                    font = toolCodeFont; background = ChatTheme.codeBg
-                    foreground = ChatTheme.textSecondary; border = JBUI.Borders.empty(4, 6)
-                }
-                if (project != null) FilePathNavigator.attach(textArea, project)
                 val codePanel = JPanel(BorderLayout()).apply {
                     background = ChatTheme.codeBg
                     border = BorderFactory.createCompoundBorder(
                         BorderFactory.createMatteBorder(1, 0, 0, 0, ChatTheme.codeBorder),
                         JBUI.Borders.empty(0, 0)
                     )
-                    add(textArea, BorderLayout.CENTER)
                 }
+                // write_file diff 按钮
+                if (diffData != null && diffData.oldContent != null && diffData.newContent != null && project != null) {
+                    val proj = project
+                    val old = diffData.oldContent
+                    val new = diffData.newContent
+                    val diffBtn = JLabel("  View Diff →  ").apply {
+                        font = toolFont
+                        foreground = ChatTheme.toolFg
+                        isOpaque = true
+                        background = ChatTheme.toolBg
+                        cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                        border = BorderFactory.createCompoundBorder(
+                            BorderFactory.createMatteBorder(0, 0, 1, 0, ChatTheme.codeBorder),
+                            JBUI.Borders.empty(5, 6, 5, 6)
+                        )
+                        addMouseListener(object : MouseAdapter() {
+                            override fun mouseClicked(e: MouseEvent) {
+                                openDiffView(proj, old, new, toolName)
+                            }
+                            override fun mouseEntered(e: MouseEvent) { foreground = ChatTheme.accentHover }
+                            override fun mouseExited(e: MouseEvent) { foreground = ChatTheme.toolFg }
+                        })
+                    }
+                    codePanel.add(diffBtn, BorderLayout.NORTH)
+                }
+                val textArea = JTextArea(displayText).apply {
+                    isEditable = false; lineWrap = true; wrapStyleWord = true
+                    font = toolCodeFont; background = ChatTheme.codeBg
+                    foreground = ChatTheme.textSecondary; border = JBUI.Borders.empty(4, 6)
+                }
+                if (project != null) FilePathNavigator.attach(textArea, project)
+                codePanel.add(textArea, BorderLayout.CENTER)
                 // 截断时添加"展开全部"按钮，保留完整 resultPart 引用
                 if (isTruncated) {
                     val expandBtn = JLabel("展开全部 ▼").apply {
@@ -435,7 +487,7 @@ class ToolRowFactory(
         bar.repaint()
     }
 
-    /** 子代理工具执行中行：agentBar 色 spinner + 工具名，默认折叠 */
+    /** 子代理工具执行中行：agentBar 色 spinner + 工具名，默认折叠，展开显示状态提示 */
     fun subAgentToolRunningRow(toolName: String): JPanel {
         val collapsed = java.util.concurrent.atomic.AtomicBoolean(true)
         val chevron = JLabel("▸").apply {
@@ -457,15 +509,29 @@ class ToolRowFactory(
             add(label)
             add(Box.createHorizontalGlue())
         }
+        val statusArea = JTextArea("执行中，等待子代理返回结果…").apply {
+            font = ChatTheme.metaFont
+            foreground = ChatTheme.textSecondary
+            background = ChatTheme.agentBg
+            isEditable = false
+            lineWrap = true
+            wrapStyleWord = true
+            border = JBUI.Borders.empty(2, 16, 4, 8)
+            isVisible = false
+        }
         val leftBar = JPanel(BorderLayout()).apply {
             isOpaque = false
             background = ChatTheme.agentBg
             border = LeftBarBorder(ChatTheme.agentBar, 2, 4)
             add(header, BorderLayout.NORTH)
+            add(statusArea, BorderLayout.CENTER)
             addMouseListener(object : java.awt.event.MouseAdapter() {
                 override fun mouseClicked(e: java.awt.event.MouseEvent) {
                     collapsed.set(!collapsed.get())
                     chevron.text = if (collapsed.get()) "▸" else "▾"
+                    statusArea.isVisible = !collapsed.get()
+                    revalidate()
+                    repaint()
                 }
             })
             cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
@@ -795,4 +861,23 @@ class ToolRowFactory(
 
         override fun isBorderOpaque(): Boolean = false
     }
+}
+
+/** write_file 工具的 diff 数据：旧内容、新内容、清洗后的显示文本 */
+private data class DiffData(
+    val oldContent: String?,
+    val newContent: String?,
+    val cleanDisplay: String
+)
+
+/** 打开 IntelliJ diff 视图，对比 write_file 的旧/新内容 */
+private fun openDiffView(project: Project, oldContent: String, newContent: String, title: String) {
+    val fileType = FileTypeManager.getInstance().getFileTypeByFileName(title)
+    val oldDoc = com.intellij.openapi.editor.EditorFactory.getInstance().createDocument(oldContent)
+    val newDoc = com.intellij.openapi.editor.EditorFactory.getInstance().createDocument(newContent)
+    val oldContentImpl = DocumentContentImpl(project, oldDoc, fileType)
+    val newContentImpl = DocumentContentImpl(project, newDoc, fileType)
+    val request = SimpleDiffRequest("$title — 改动对比", oldContentImpl, newContentImpl, "写入前", "写入后")
+    DiffManager.getInstance().showDiff(project, request)
+    // 注意：EditorFactory document 在 diff 窗口关闭后由 IntelliJ 框架管理生命周期，不手动释放
 }

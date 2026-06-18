@@ -39,13 +39,12 @@ class ReadFileTool : AgentTool {
         val basePath = params["_worktree"] ?: project.basePath ?: return ToolResult.err("项目路径不可用")
         val file = if (File(path).isAbsolute) File(path) else File(basePath, path)
 
-        if (!file.exists()) return ToolResult.err("文件不存在: ${file.absolutePath}")
-        if (!file.isFile) return ToolResult.err("不是文件: $path")
+        if (!file.exists()) return ToolResult.err("参数错误: path 参数指定的文件不存在: $path")
+        if (!file.isFile) return ToolResult.err("参数错误: path 不是文件: $path")
 
         // 纵深防御：canonical path 前缀校验（AgentLoop 层已做一次，此处为二次保险）
-        // 设计决策：安全拦截时统一返回"文件不存在"，不暴露实际路径也不透露项目目录位置
         if (!PathUtils.isInsideProject(path, basePath)) {
-            return ToolResult.err("文件不存在: ${file.absolutePath}")
+            return ToolResult.err("参数错误: path 参数指定的路径不在项目目录内")
         }
 
         if (file.length() > 1_000_000) return ToolResult.err("文件过大 (${file.length() / 1024}KB)，请用 offset/limit 分段读取")

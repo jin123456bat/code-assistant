@@ -27,6 +27,13 @@ class SearchCodeTool : AgentTool {
         val caseSensitive = params["case_sensitive"]?.toBoolean() ?: false
         val maxResults = params["max_results"]?.toIntOrNull() ?: 30
 
+        val isWindows = System.getProperty("os.name").lowercase().contains("win")
+        return if (isWindows) searchJava(query, basePath, filePattern, caseSensitive, maxResults)
+               else searchGrep(query, basePath, filePattern, caseSensitive, maxResults)
+    }
+
+    /** grep 搜索（Unix/macOS） */
+    private fun searchGrep(query: String, basePath: String, filePattern: String?, caseSensitive: Boolean, maxResults: Int): ToolResult {
         return try {
             val args = mutableListOf("grep", "-rn")
             if (filePattern != null) args.add("--include=$filePattern")
@@ -41,22 +48,59 @@ class SearchCodeTool : AgentTool {
             val output = process.inputStream.bufferedReader().use { it.readText() }
             val finished = process.waitFor(10, TimeUnit.SECONDS); if (!finished) { process.destroyForcibly(); process.waitFor(2, TimeUnit.SECONDS) }
 
-            val lines = output.lines().filter { it.isNotBlank() }.take(maxResults)
-            if (lines.isEmpty()) {
-                ToolResult.ok("未找到匹配 \"$query\" 的结果")
-            } else {
-                ToolResult.ok(lines.joinToString("\n") { line ->
-                    // 将 grep 输出格式化为更易读的格式
-                    val parts = line.split(":", limit = 3)
-                    if (parts.size >= 3) {
-                        "${parts[0]}:${parts[1]} — ${parts[2].trim()}"
-                    } else {
-                        line
-                    }
-                })
-            }
+            formatResults(output, query, maxResults)
         } catch (e: Exception) {
             ToolResult.err("搜索失败: ${e.message}")
         }
+    }
+
+    /** Java 文件遍历搜索（Windows 回退） */
+    private fun searchJava(query: String, basePath: String, filePattern: String?, caseSensitive: Boolean, maxResults: Int): ToolResult {
+        return try {
+            val target = if (caseSensitive) query else query.lowercase()
+            val patternRegex = filePattern?.let {
+                Regex(it.replace(".", "\\.").replace("*", ".*"))
+            }
+            val results = mutableListOf<String>()
+            val dir = File(basePath); if (!dir.exists()) return ToolResult.err("项目路径不可用")
+            val ignoreDirs = setOf(".git", ".idea", ".gradle", "build", "node_modules", "out", "target",
+                ".code-assistant", "vendor", "dist", "__pycache__", ".venv", "venv", ".next", ".nuxt")
+            val maxFileSize = 1_000_000L
+            val maxFiles = 50000
+            var fileCount = 0
+            for (f in dir.walkTopDown().onEnter { !ignoreDirs.contains(it.name) }) {
+                if (!f.isFile) continue
+                if (results.size >= maxResults || fileCount >= maxFiles) break
+                if (f.length() > maxFileSize) continue
+                fileCount++
+                if (patternRegex != null && !patternRegex.matches(f.name)) continue
+                val relativePath = f.relativeTo(dir).path.replace('\\', '/')
+                try {
+                    f.bufferedReader().use { reader ->
+                        reader.forEachLine { line ->
+                            if (results.size >= maxResults) return@forEachLine
+                            val check = if (caseSensitive) line else line.lowercase()
+                            if (check.contains(target)) {
+                                results.add("$relativePath:${line.trim().take(200)}")
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+            formatResults(results.joinToString("\n"), query, maxResults)
+        } catch (e: Exception) {
+            ToolResult.err("搜索失败: ${e.message}")
+        }
+    }
+
+    private fun formatResults(output: String, query: String, maxResults: Int): ToolResult {
+        val lines = output.lines().filter { it.isNotBlank() }.take(maxResults)
+        if (lines.isEmpty()) {
+            return ToolResult.ok("未找到匹配 \"$query\" 的结果")
+        }
+        return ToolResult.ok(lines.joinToString("\n") { line ->
+            val parts = line.split(":", limit = 3)
+            if (parts.size >= 3) "${parts[0]}:${parts[1]} — ${parts[2].trim()}" else line
+        })
     }
 }

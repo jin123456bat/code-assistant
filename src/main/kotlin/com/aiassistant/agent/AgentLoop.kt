@@ -86,6 +86,8 @@ class AgentLoop(
     var onConfirmTool: ((String, String, CountDownLatch, AtomicBoolean) -> Unit)? = null
     /** 工具执行期间的中间输出回调（toolName → partialContent），用于子 Agent 实时输出 */
     var onToolStreaming: ((String, String) -> Unit)? = null
+    /** Compact 完成回调 — 自动/手动 compact 共用，通知 UI 更新消息列表 */
+    var onCompact: ((String) -> Unit)? = null
 
     fun initialize(
         mcpTools: List<AgentTool> = emptyList(),
@@ -133,7 +135,7 @@ class AgentLoop(
                 // 自动 Compact：历史过长时先压缩再发送（对齐 Claude Code 自动 token 阈值触发）
                 if (shouldAutoCompact(history)) {
                     AppLogger.info("自动 Compact 触发: historySize=${history.size}")
-                    autoCompact(history, apiKey)
+                    autoCompact(apiKey)
                 }
 
                 // 诊断信息
@@ -535,6 +537,25 @@ class AgentLoop(
                         } else {
                             history.add(AnthropicMessage("assistant", textContent))
                         }
+                        // 目标模式：不结束，继续下一轮直到目标达成
+                        if (ctx.goal != null) {
+                            // 检测 LLM 是否声明目标已达成（如"目标已达成"、"目标完成"等）
+                            val goalAchieved = textContent.contains("目标已达成") ||
+                                    textContent.contains("目标完成") ||
+                                    textContent.contains("目标已经达成") ||
+                                    textContent.contains("目标已达到")
+                            if (goalAchieved) {
+                                AppLogger.info("AgentLoop: 目标模式检测到目标达成标记，结束循环")
+                                callback(textContent, thinking)
+                                break
+                            }
+                            // 注入继续提示，让 LLM 判断目标是否达成
+                            history.add(AnthropicMessage("user",
+                                "继续朝着目标「${ctx.goal}」努力。如果目标已达成，请明确说明「目标已达成」并总结完成情况。",
+                                groupId = roundGroupId))
+                            loopCount++
+                            continue
+                        }
                         callback(textContent, thinking)
                         break
                     }
@@ -687,7 +708,38 @@ class AgentLoop(
      * @param apiKey API Key
      * @return 摘要文本，失败返回 null
      */
-    fun compact(messages: List<AnthropicMessage>, apiKey: String): String? {
+    /**
+     * 统一的 Compact 实现：调用 LLM 生成摘要 → 注入 system prompt → 截断历史。
+     * 自动 compact 和手动 /compact 共用此方法。
+     * @param keepCount 保留的最近消息条数（自动=30，手动=15）
+     * @return 生成的摘要文本，失败返回 null
+     */
+    fun compactHistory(keepCount: Int, apiKey: String): String? {
+        val history = synchronized(ctx.historyLock) { ctx.conversationHistory.toList() }
+        if (history.size <= keepCount) return null
+
+        val historyKeep = history.takeLast(keepCount)
+        val historyToSummarize = history.dropLast(keepCount)
+
+        val summary = compact(historyToSummarize, apiKey) ?: return null
+
+        // 摘要注入 system prompt（对齐 Claude Code）
+        ctx.systemPrompt = buildString {
+            append(ctx.systemPrompt)
+            append("\n\n## 对话摘要\n以下是之前对话的关键摘要，请基于此继续工作：\n\n")
+            append(summary)
+        }
+        synchronized(ctx.historyLock) {
+            ctx.conversationHistory.clear()
+            ctx.conversationHistory.addAll(historyKeep)
+        }
+        ctx.lastInputTokens = 0
+        AppLogger.info("Compact 完成: ${historyToSummarize.size} 条 → 1 段摘要, 保留 ${historyKeep.size} 条")
+        return summary
+    }
+
+    /** 调用 LLM 生成对话摘要（供 compactHistory 调用） */
+    private fun compact(messages: List<AnthropicMessage>, apiKey: String): String? {
         if (messages.isEmpty()) return null
         // 复用 SDK 客户端
         if (sdkClient == null || lastApiKey != apiKey) {
@@ -790,28 +842,12 @@ class AgentLoop(
     }
 
     /**
-     * 自动 Compact：静默压缩旧消息，摘要注入 system prompt。
-     * 对齐 Claude Code 自动 token 阈值触发机制。
+     * 自动 Compact：委托给 compactHistory，与手动 /compact 共用核心逻辑。
      */
-    private fun autoCompact(history: MutableList<AnthropicMessage>, apiKey: String) {
-        if (history.size <= 30) return
-        // 保留最近约 30 条历史记录（对应约 10 轮对话）
-        val historyKeep = history.takeLast(30).toList()
-        val historyToSummarize = history.dropLast(30).toList()
-        if (historyToSummarize.isEmpty()) return
-
-        val summary = compact(historyToSummarize, apiKey) ?: return
-        // 摘要注入 system prompt（对齐 Claude Code，不破坏消息交替结构）
-        ctx.systemPrompt = buildString {
-            append(ctx.systemPrompt)
-            append("\n\n## 对话摘要（自动生成）\n$summary")
-        }
-        // 重建历史：仅保留最近的消息
-        synchronized(ctx.historyLock) {
-            history.clear()
-            history.addAll(historyKeep)
-        }
-        AppLogger.info("自动 Compact 完成: ${historyToSummarize.size} 条 → 1 段摘要, 保留 ${historyKeep.size} 条")
+    private fun autoCompact(apiKey: String) {
+        val summary = compactHistory(30, apiKey) ?: return
+        // 通知 UI（自动 compact 静默执行，不阻塞主流程）
+        edt { onCompact?.invoke(summary) }
     }
 
     /** 将 ToolRegistryV3 中的工具 + 元工具转换为 SDK 格式 */
@@ -822,7 +858,7 @@ class AgentLoop(
                     name = tool.name,
                     description = tool.description,
                     properties = tool.parameters.associate { p ->
-                        p.name to com.aiassistant.PropertyDef(p.type, p.description)
+                        p.name to com.aiassistant.PropertyDef(p.type, p.description, p.enum)
                     }.ifEmpty { null },
                     required = tool.parameters.filter { it.required }.map { it.name }.ifEmpty { null }
                 )
@@ -884,6 +920,9 @@ class AgentLoop(
                 "- `${r.uri}` — ${r.name}${if (r.description.isNotBlank()) ": ${r.description}" else ""}"
             } + "\n\n可通过 **read_file** 工具读取上述 MCP 资源（传入 resource:// URI 作为 path 参数）。"
         } else ""
+        val goalSection = if (ctx.goal != null) {
+            "\n## 🎯 当前目标\n你的任务是持续工作直到达成以下目标——不要提前结束，使用工具不断尝试直到成功。如果目标已达成，请明确告知用户。\n**目标：${ctx.goal}**\n"
+        } else ""
         val claudeMdContent = loadClaudeMdFiles()
         return """
 You are an AI coding assistant in idea. Use tools to work with the project.
@@ -893,7 +932,7 @@ Path: ${project.basePath ?: "unknown"}
 
 ## Tools
 $toolList
-
+$goalSection
 ## Planning
 对于需要多步骤完成的复杂任务（如实现功能、重构代码、架构变更），你应该先调用 **create_plan** 工具创建执行计划。
 简单任务（读取文件、回答单个问题、一行修改）不要创建计划。

@@ -39,6 +39,8 @@ class ChatViewModel {
      */
     @Volatile var activity: Activity = Activity.Idle
     @Volatile var currentPlan: AgentContext.Plan? = null
+    @Volatile var currentGoal: String? = null  // 目标模式：非空时 UI 显示 GoalBar
+    @Volatile var goalRound: Int = 0           // 目标模式：当前轮次计数
     @Volatile var currentModel: String = "deepseek-chat"
     /** Agent 当前是否在思考中（由 onThinkingDelta 直接设置，避免字符串嗅探语言依赖） */
     @Volatile var isThinking = false
@@ -65,6 +67,7 @@ class ChatViewModel {
     var onToolResult: ((String, String) -> Unit)? = null
     var onToolStreaming: ((String, String) -> Unit)? = null  // 工具执行期间的中间输出
     var onPlanUpdate: ((AgentContext.Plan) -> Unit)? = null
+    var onGoalUpdate: ((String, Int) -> Unit)? = null  // 目标模式轮次更新：(goal, roundNumber)
     var onModelRouted: ((String) -> Unit)? = null
     var onConfirmTool: ((String, String, CountDownLatch, AtomicBoolean) -> Unit)? = null
     var onThinkingContent: ((String) -> Unit)? = null
@@ -142,6 +145,11 @@ class ChatViewModel {
                     addThinkingMessage(msg.content)
                 } else {
                     messages.add(msg)
+                    // 目标模式下，每收到 assistant 回复递增轮次
+                    if (msg.role == "assistant" && currentGoal != null) {
+                        goalRound++
+                        onGoalUpdate?.invoke(currentGoal!!, goalRound)
+                    }
                 }
                 onMessagesChanged?.invoke()
             }
@@ -240,10 +248,18 @@ class ChatViewModel {
         a.onConfirmTool = { name, args, latch, result ->
             runOnEdt {
                 pendingApprovals[name] = ApprovalState(latch, result)
-                // 标记 tool 消息为待审批
                 val idx = messages.indexOfLast { it.role == "tool" && it.toolName == name }
                 if (idx >= 0) messages[idx] = messages[idx].copy(approvalPending = true, version = messages[idx].version + 1)
                 onConfirmTool?.invoke(name, args, latch, result)
+            }
+        }
+        a.onCompact = { summary ->
+            runOnEdt {
+                val keep = messages.takeLast(8).toList()
+                messages.clear()
+                messages.add(AgentMessage("system", "📋 对话摘要：$summary"))
+                messages.addAll(keep)
+                onMessagesChanged?.invoke()
             }
         }
     }
@@ -391,16 +407,33 @@ class ChatViewModel {
         agent?.ctx?.let { ctx ->
             ctx.conversationHistory.clear()  // synchronizedList 保护单操作
             ctx.lastInputTokens = 0
+            ctx.goal = null  // 清空目标
         }
         messages.clear()
         streamingContent = ""
         streamingThinking = ""
         currentPlan = null
+        currentGoal = null
+        goalRound = 0
         isRateLimited = false
         pendingApprovals.clear()
         activity = Activity.Idle
         isThinking = false
         runOnEdt { onMessagesChanged?.invoke() }
+    }
+
+    /** 设置目标驱动模式 */
+    fun setGoal(goal: String) {
+        agent?.ctx?.goal = goal
+        currentGoal = goal
+        goalRound = 0
+    }
+
+    /** 清除目标 */
+    fun clearGoal() {
+        agent?.ctx?.goal = null
+        currentGoal = null
+        goalRound = 0
     }
 
     /**
@@ -409,50 +442,14 @@ class ChatViewModel {
      * 同步更新跨轮历史（ctx.conversationHistory）和 UI 消息列表（messages）。
      */
     fun compactConversation(apiKey: String) {
-        // 防止重复调用创建多个压缩线程（compareAndSet 原子化 check-then-set）
         if (!isCompacting.compareAndSet(false, true)) return
-        val a = agent
-        val ctx = a?.ctx
-        val allMessages = messages.toList()
-        if (a == null || ctx == null || allMessages.size <= 10) {
-            isCompacting.set(false)
-            return  // agent 未初始化或消息太少不需要压缩
-        }
-
-        // 保留最近 KEEP_COUNT 条消息 + 对应的跨轮历史
-        val keepCount = 15
-        val recentMessages = allMessages.takeLast(keepCount)
-
-        // 停止当前 agent 防止 compact 与 agent 循环并发使用 sdkClient
-        stopGeneration()
-        // 后台线程执行压缩，避免阻塞 UI
+        val a = agent ?: run { isCompacting.set(false); return }
+        val recentMessages = messages.toList().takeLast(15)
+        stopGeneration()  // 防止 compact 与 agent 循环并发使用 sdkClient
         Thread {
             try {
-                // 用跨轮历史（含完整 thinking/tool_use）生成摘要
-                val history = synchronized(ctx.historyLock) { ctx.conversationHistory.toList() }
-                if (history.size <= keepCount * 3) return@Thread
-
-                // 保留最近部分对应的历史记录（估算：每条 UI 消息约对应 2-3 条历史记录）
-                val historyKeep = history.takeLast(keepCount * 3)
-                val historyToSummarize = history.dropLast(keepCount * 3)
-
-                val summary = a.compact(historyToSummarize, apiKey)
+                val summary = a.compactHistory(15, apiKey)
                 if (summary != null) {
-                    // 重建跨轮历史：摘要作为 system prompt 注入（对齐 Claude Code）
-                    // 避免用 user 消息注入摘要导致与后续 user 消息被 mergeConsecutiveSameRole 合并丢失
-                    ctx.systemPrompt = buildString {
-                        append(ctx.systemPrompt)
-                        append("\n\n## 对话摘要（由 /compact 生成）\n")
-                        append("以下是之前对话的关键摘要，请基于此继续工作：\n\n")
-                        append(summary)
-                    }
-                    synchronized(ctx.historyLock) {
-                        ctx.conversationHistory.clear()
-                        ctx.conversationHistory.addAll(historyKeep)
-                    }
-                    ctx.lastInputTokens = 0  // 重置：compact 后下次 API 调用会返回新的更低 input token 数
-
-                    // 更新 UI 消息列表
                     runOnEdt {
                         messages.clear()
                         messages.add(AgentMessage("system", "📋 对话摘要：$summary"))
@@ -460,9 +457,7 @@ class ChatViewModel {
                         onMessagesChanged?.invoke()
                     }
                 }
-            } finally {
-                isCompacting.set(false)  // 无论成功失败，完成后重置标志
-            }
+            } finally { isCompacting.set(false) }
         }.start()
     }
 }

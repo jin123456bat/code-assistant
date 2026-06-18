@@ -34,11 +34,15 @@ class WebSearchTool : AgentTool {
 
         return try {
             val html = connection.inputStream.bufferedReader().use { it.readText() }
+            // 检测页面结构是否变更（无结果 vs 解析失败）
+            val hasMarkers = html.contains("result-link") || html.contains("result-snippet")
             val results = parseResults(html, maxResults)
-            if (results.isEmpty()) {
-                ToolResult.ok("未找到 \"$query\" 的搜索结果")
-            } else {
-                ToolResult.ok(if (results.length > 10000) results.take(10000) + "\n… (已截断)" else results)
+            when {
+                results.isNotEmpty() -> {
+                    ToolResult.ok(if (results.length > 10000) results.take(10000) + "\n… (已截断)" else results)
+                }
+                hasMarkers -> ToolResult.ok("未找到 \"$query\" 的搜索结果")
+                else -> ToolResult.err("搜索服务暂不可用：页面结构已变更，请稍后重试或联系开发者更新解析规则")
             }
         } catch (e: java.net.UnknownHostException) {
             ToolResult.err("网络不可达，请检查网络连接")
@@ -52,12 +56,19 @@ class WebSearchTool : AgentTool {
     }
 
     private fun parseResults(html: String, max: Int): String {
-        val sb = StringBuilder()
-        // DuckDuckGo Lite: each result has a link and a snippet
+        // 验证页面结构是否可解析（DuckDuckGo Lite 的关键标记）
+        val hasResultMarkers = html.contains("result-link") || html.contains("result-snippet")
         val linkRegex = Regex("""<a[^>]*class="result-link"[^>]*href="([^"]*)"[^>]*>([^<]*)</a>""")
-        val snippetRegex = Regex("""<td class="result-snippet"[^>]*>(.*?)</td>""")
         val links = linkRegex.findAll(html).take(max).toList()
+
+        // 没有可识别标记 → 解析失败（页面结构已变更）
+        if (!hasResultMarkers && links.isEmpty()) {
+            return ""
+        }
+
+        val snippetRegex = Regex("""<td class="result-snippet"[^>]*>(.*?)</td>""")
         val snippets = snippetRegex.findAll(html).take(max).toList()
+        val sb = StringBuilder()
 
         for (i in links.indices) {
             val title = links[i].groupValues[2].trim()

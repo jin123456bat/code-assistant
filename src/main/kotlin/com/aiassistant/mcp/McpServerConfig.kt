@@ -11,7 +11,8 @@ data class McpServerConfig(
     val command: String = "",     // stdio: npx / node / python
     val args: List<String> = emptyList(),
     val env: Map<String, String> = emptyMap(),
-    val url: String = "",         // http: http://localhost:3000
+    val url: String = "",         // http: JSON-RPC endpoint（如 http://localhost:3000/message）
+    val sseUrl: String = "",      // SSE 推送端点（如 http://localhost:3000/sse），为空时复用 url
     val enabled: Boolean = true
 ) {
     companion object {
@@ -60,6 +61,7 @@ data class McpServerConfig(
                     val obj = serverObj as? Map<String, Any> ?: continue
                     val command = obj["command"]?.toString() ?: ""
                     val url = obj["url"]?.toString() ?: ""
+                    val sseUrl = obj["sseUrl"]?.toString() ?: ""
                     val type = obj["type"]?.toString() ?: ""
                     val transport = when {
                         type.equals("http", ignoreCase = true) -> "http"
@@ -74,7 +76,7 @@ data class McpServerConfig(
                     val env = envMap.mapValues { it.value.toString() }
 
                     configs.add(McpServerConfig(name = name, transport = transport,
-                        command = command, args = args, env = env, url = url))
+                        command = command, args = args, env = env, url = url, sseUrl = sseUrl))
                 }
                 configs
             } catch (_: Exception) {
@@ -88,10 +90,14 @@ data class McpServerConfig(
         fun toJson(configs: List<McpServerConfig>): String {
             val serversJson = configs.joinToString(",\n") { config ->
                 buildString {
-                    append("    \"${config.name}\": {\n")
+                    append("    \"${JsonUtils.escapeJson(config.name)}\": {\n")
                     append("      \"type\": \"${config.transport}\",\n")
                     if (config.transport == "http") {
-                        append("      \"url\": \"${JsonUtils.escapeJson(config.url)}\"\n")
+                        append("      \"url\": \"${JsonUtils.escapeJson(config.url)}\"")
+                        if (config.sseUrl.isNotBlank()) {
+                            append(",\n      \"sseUrl\": \"${JsonUtils.escapeJson(config.sseUrl)}\"")
+                        }
+                        append("\n")
                     } else {
                         append("      \"command\": \"${JsonUtils.escapeJson(config.command)}\",\n")
                         if (config.args.isNotEmpty()) {

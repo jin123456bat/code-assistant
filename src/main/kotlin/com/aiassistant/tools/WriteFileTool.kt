@@ -30,6 +30,10 @@ class WriteFileTool : AgentTool {
         val file = if (File(relativePath).isAbsolute) File(relativePath) else File(basePath, relativePath)
         return try {
             val targetFile = file.canonicalFile
+            // 写之前记录文件是否已存在（写入后 exists 永远为 true，无法判断 isNew）
+            val fileExistedBefore = targetFile.isFile
+            // 写之前读取旧内容（用于 diff 对比，不存在则为空）
+            val oldContent = if (fileExistedBefore) targetFile.readText(Charsets.UTF_8) else ""
             targetFile.parentFile?.mkdirs()
             // 原子写入：先写临时文件，成功后再 rename，避免写入中断导致原文件损坏
             val tmpFile = File(targetFile.path + ".tmp")
@@ -51,7 +55,20 @@ class WriteFileTool : AgentTool {
                 return ToolResult.err("写入失败: 无法完成文件移动")
             }
             val lineCount = content.lines().size
-            ToolResult.ok("文件已写入: $relativePath ($lineCount 行, ${content.length} 字符)")
+            val isNew = !fileExistedBefore
+            val header = if (isNew) "文件已创建: $relativePath ($lineCount 行, ${content.length} 字符)"
+                        else "文件已写入: $relativePath ($lineCount 行, ${content.length} 字符)"
+            // 嵌入旧/新内容标记，供 UI 层渲染 diff 按钮（新文件无需 diff）
+            // 大文件截断：每部分最多 5000 字符，避免撑爆 LLM 上下文
+            val maxEmbedChars = 5000
+            val sb = StringBuilder(header)
+            if (!isNew && oldContent.isNotEmpty()) {
+                val truncatedOld = if (oldContent.length > maxEmbedChars) oldContent.take(maxEmbedChars) + "\n… (已截断)" else oldContent
+                sb.append("\n\n[OLD_CONTENT]\n").append(truncatedOld).append("\n[/OLD_CONTENT]")
+            }
+            val truncatedNew = if (content.length > maxEmbedChars) content.take(maxEmbedChars) + "\n… (已截断)" else content
+            sb.append("\n\n[NEW_CONTENT]\n").append(truncatedNew).append("\n[/NEW_CONTENT]")
+            ToolResult.ok(sb.toString())
         } catch (e: Exception) {
             ToolResult.err("写入失败: ${e.message}")
         }

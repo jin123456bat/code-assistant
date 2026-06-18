@@ -61,7 +61,8 @@ class McpClient(private val config: McpServerConfig) {
 
     private val responseLock = Object()
     private val writeLock = Object()  // 保护 stdio 写入，防止多线程同时写入管道导致消息交错
-    private var pendingResponseBody: String? = null
+    /** 按响应 ID 精确匹配，消除单字段覆盖导致的响应丢失（对齐 Claude Code 请求-响应关联） */
+    private val pendingResponses = java.util.concurrent.ConcurrentHashMap<Int, String>()
     @Volatile private var sseRunning = false
 
     /**
@@ -161,8 +162,9 @@ class McpClient(private val config: McpServerConfig) {
             while (sseRunning && initialized) {
                 try {
                     // 尝试 GET SSE 流
+                    val sseEndpoint = config.sseUrl.ifBlank { config.url }
                     val sseRequest = HttpRequest.newBuilder()
-                        .uri(URI.create(config.url))
+                        .uri(URI.create(sseEndpoint))
                         .header("Accept", "text/event-stream")
                         .timeout(Duration.ofSeconds(60))
                         .GET()
@@ -213,8 +215,11 @@ class McpClient(private val config: McpServerConfig) {
         if (id != null && method != null) {
             handleServerRequest(method, json)
         } else if (id != null) {
+            // HTTP 模式下响应由 sendHttpRequest 同步返回，SSE 仅推送通知；跳过写入防止泄漏
+            if (isHttpTransport) return
+            val responseId = (id as? Number)?.toInt() ?: return
+            pendingResponses[responseId] = json
             synchronized(responseLock) {
-                pendingResponseBody = json
                 responseLock.notifyAll()
             }
         } else {
@@ -384,9 +389,11 @@ class McpClient(private val config: McpServerConfig) {
     fun disconnect() {
         initialized = false
         sseRunning = false
-        synchronized(responseLock) { responseLock.notifyAll() }
+        // 先杀进程再清 pendingResponses，防止 reader 线程在清理后写入孤条目（TOCTOU）
         try { process?.destroyForcibly()?.waitFor(3, TimeUnit.SECONDS) } catch (_: Exception) {}
         process = null
+        pendingResponses.clear()
+        synchronized(responseLock) { responseLock.notifyAll() }
     }
 
     fun isConnected(): Boolean = initialized && (isHttpTransport || process?.isAlive == true)
@@ -421,7 +428,7 @@ class McpClient(private val config: McpServerConfig) {
         val deadline = System.currentTimeMillis() + timeoutMs
         synchronized(responseLock) {
             try {
-                while (pendingResponseBody == null) {
+                while (!pendingResponses.containsKey(expectedId)) {
                     val remaining = deadline - System.currentTimeMillis()
                     if (remaining <= 0) break
                     responseLock.wait(remaining)
@@ -430,12 +437,7 @@ class McpClient(private val config: McpServerConfig) {
                 Thread.currentThread().interrupt()
                 return null
             }
-            val body = pendingResponseBody ?: return null
-            pendingResponseBody = null
-            // 验证响应 ID
-            val idMatch = Regex(""""id"\s*:\s*(\d+)""").find(body)
-            if (idMatch?.groupValues?.get(1)?.toIntOrNull() != expectedId) return null
-            return body
+            return pendingResponses.remove(expectedId)
         }
     }
 

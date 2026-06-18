@@ -16,7 +16,7 @@ class ToolRegistryV3 {
     /** 注册内置工具。allowedTools 为 null 时注册全部，非 null 时仅注册白名单中的工具。deniedTools 从白名单中排除 */
     fun registerBuiltIn(allowedTools: Set<String>? = null, deniedTools: Set<String> = emptySet()) {
         val all = listOf(
-            ReadFileTool(), WriteFileTool(), SearchCodeTool(), ListDirectoryTool(),
+            ReadFileTool(), WriteFileTool(), EditTool(), SearchCodeTool(), ListDirectoryTool(),
             ExecuteCommandTool(), GitDiffTool(), GitLogTool(), GitStatusTool(),
             AskUserTool(), WebSearchTool(), WebFetchTool(), NotebookEditTool(), TaskTool(),
             CodeIntelligenceTool(), McpGetPromptTool()

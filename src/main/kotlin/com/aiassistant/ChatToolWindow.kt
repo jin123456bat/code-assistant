@@ -28,6 +28,7 @@ import com.intellij.util.ui.JBUI
 import java.awt.BorderLayout
 import java.awt.Color
 import java.awt.Component
+import java.awt.Cursor
 import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.Font
@@ -209,7 +210,8 @@ class ChatToolWindow(private val project: Project) {
         minimumSize = Dimension(100, 100)
     }
 
-    private var projectFilesCache: List<String> = emptyList()
+    @Volatile private var projectFilesCache: List<String> = emptyList()
+    private var fileRefLoading: Boolean = false
 
     /** DocumentListener 内修改文档时防止递归触发补全逻辑的重入标志 */
     private val inputListenerGuard = AtomicBoolean(false)
@@ -337,7 +339,7 @@ class ChatToolWindow(private val project: Project) {
         val files = mutableListOf<String>()
         val dir = File(basePath)
         if (!dir.exists()) return files
-        // 排除目录：版本控制、IDE、构建产物、依赖、缓存
+        val maxFiles = 50000  // 上限防止大项目 OOM 或 EDT 卡顿
         val ignoreDirs = setOf(
             ".git", ".idea", ".gradle", "build", "node_modules",
             ".code-assistant", "vendor", "target", "out", "dist",
@@ -345,25 +347,21 @@ class ChatToolWindow(private val project: Project) {
             ".pytest_cache", ".ruff_cache", "coverage", ".next",
             ".nuxt", ".output", "public/build"
         )
-        // 排除文件名模式（用于跳过自动生成的大文件）
         val ignoreNames = setOf(".DS_Store", "Thumbs.db")
         try {
             dir.walkTopDown()
                 .filter { f ->
-                    if (!f.isFile) return@filter true  // 继续遍历目录，不跳过
+                    if (!f.isFile) return@filter true
                     val relative = f.relativeTo(dir).path.replace('\\', '/')
                     val parts = relative.split('/')
-                    // 跳过忽略目录内的所有文件和忽略文件名
                     parts.none { it in ignoreDirs } && f.name !in ignoreNames
                 }
                 .forEach { f ->
-                    if (f.isFile) {
+                    if (f.isFile && files.size < maxFiles) {
                         files.add(f.relativeTo(dir).path)
                     }
                 }
-        } catch (_: Exception) {
-            // 权限不足等异常时返回空列表，不崩溃
-        }
+        } catch (_: Exception) {}
         return files.sorted()
     }
     // ---- reference chips (selected files/code) ----
@@ -793,18 +791,57 @@ class ChatToolWindow(private val project: Project) {
     // ---- plan bar（置顶，不随消息滚动）----
     private val planBar = PlanBar().also { it.updatePlan(null) }
 
+    // ---- goal bar（置顶，目标模式时显示）----
+    private val goalLabel = JLabel().apply {
+        font = ChatTheme.metaFont
+        foreground = ChatTheme.textSecondary
+    }
+    private val goalBar = JPanel(BorderLayout()).apply {
+        isOpaque = true
+        background = ChatTheme.toolBg
+        border = BorderFactory.createCompoundBorder(
+            BorderFactory.createMatteBorder(0, 0, 1, 0, ChatTheme.divider),
+            JBUI.Borders.empty(6, 12, 6, 12)
+        )
+        isVisible = false
+        add(goalLabel, BorderLayout.CENTER)
+        val cancelBtn = JLabel("✕").apply {
+            font = ChatTheme.metaFont
+            foreground = ChatTheme.textMuted
+            cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+            addMouseListener(object : MouseAdapter() {
+                override fun mouseClicked(e: MouseEvent) { viewModel.clearGoal(); updateGoalBar() }
+                override fun mouseEntered(e: MouseEvent) { foreground = ChatTheme.danger }
+                override fun mouseExited(e: MouseEvent) { foreground = ChatTheme.textMuted }
+            })
+        }
+        add(cancelBtn, BorderLayout.EAST)
+    }
+    private fun updateGoalBar() {
+        val goal = viewModel.currentGoal
+        if (goal != null) {
+            goalLabel.text = "🎯 ${goal.take(80)}${if (goal.length > 80) "…" else ""} · 第 ${viewModel.goalRound} 轮"
+            goalBar.isVisible = true
+        } else {
+            goalBar.isVisible = false
+        }
+        northStack.revalidate()
+        northStack.repaint()
+    }
+
     /**
      * conversationPanel 布局：
-     *   NORTH  → northStack（conversationHeader + planBar，纵向堆叠）
+     *   NORTH  → northStack（conversationHeader + planBar + goalBar，纵向堆叠）
      *   CENTER → conversationScrollPane（消息列表，可滚动）
      *
-     * planBar 位于 northStack 内，因此它固定在滚动区域之上，不会随消息滚动。
+     * planBar/goalBar 位于 northStack 内，因此它固定在滚动区域之上，不会随消息滚动。
      */
     private val northStack = JPanel().apply {
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
         isOpaque = false
         add(conversationHeader)
         add(planBar)
+        add(goalBar)
     }
 
     private val conversationPanel = JPanel(BorderLayout()).apply {
@@ -997,6 +1034,8 @@ class ChatToolWindow(private val project: Project) {
         viewModel.onToolResult = { name, _ ->
             // 前台工具完成：运行行原地更新为完成态（spinner→✓，内容填入结果），不删除
             completeStreamingToolRow(name)
+            // 写文件后清除 @ 文件缓存，确保新建/修改的文件在下次菜单中可见
+            if (name == "write_file" || name == "edit_file") invalidateFileCache()
         }
         viewModel.onToolStreaming = { name, content ->
             updateStreamingToolContent(content)
@@ -1005,6 +1044,7 @@ class ChatToolWindow(private val project: Project) {
             ApplicationManager.getApplication().invokeLater { rebuildConversation() }
         }
         viewModel.onPlanUpdate = { plan -> planBar.updatePlan(plan) }
+        viewModel.onGoalUpdate = { _, _ -> updateGoalBar() }
     }
 
     /**
@@ -1582,23 +1622,34 @@ class ChatToolWindow(private val project: Project) {
             }
         }
 
+        var commandText = ""  // executeCommand 中写入，供 /goal 等命令读取清空前的内容
         val commands = listOf(
-            Cmd("/new",   "新会话") { needFullRebuild = true; viewModel.clearConversation(); viewModel.messageRefChips.clear(); refChips.clear(); selectionRefChip = null; rebuildChips(); planBar.updatePlan(null); rebuildConversation() },
+            Cmd("/new",   "新会话") { needFullRebuild = true; viewModel.clearConversation(); viewModel.messageRefChips.clear(); refChips.clear(); selectionRefChip = null; rebuildChips(); planBar.updatePlan(null); updateGoalBar(); rebuildConversation() },
             Cmd("/plan",  "创建执行计划") { sendQuick("请为当前任务创建执行计划。先分析需求，然后调用 create_plan 工具。") },
+            Cmd("/goal",  "设置目标自动执行") {
+                val goal = commandText.substringAfter("/goal").trim()
+                if (goal.isBlank()) { showWarning("请输入目标描述，如：/goal 所有测试通过") }
+                else {
+                    viewModel.setGoal(goal)
+                    updateGoalBar()
+                    sendQuick("目标：$goal。请持续工作直到达成目标，不要提前结束。如果目标已达成，请明确告知。")
+                }
+            },
             Cmd("/init",  "初始化项目文档") { sendQuick("请分析当前项目结构，创建 CLAUDE.md 文档，包含项目概述、常用命令、架构说明和关键约定。") },
             Cmd("/review","审查当前改动") { sendQuick("请审查当前分支的代码改动，分析潜在问题并给出修复建议。") },
-            Cmd("/test",  "运行测试") { sendQuick("请运行 ./gradlew test，分析测试结果并修复失败的测试。") },
+            Cmd("/test",  "运行测试") { sendQuick("分析测试结果并修复失败的测试。") },
             Cmd("/stop",    "停止生成") { viewModel.stopGeneration() },
             Cmd("/compact", "压缩对话释放 token") {
                 val apiKey = try { AppSettingsService.getInstance().getApiKey() } catch (_: Exception) { null }
-                if (apiKey.isNullOrBlank()) { showWarning("请先配置 API Key"); return@Cmd }
-                viewModel.compactConversation(apiKey)
+                if (apiKey.isNullOrBlank()) { showWarning("请先配置 API Key") }
+                else { viewModel.compactConversation(apiKey) }
             },
             Cmd("/clear",   "清空输入") { /* 已在 executeCommand 中清空 */ }
         )
 
         fun executeCommand(cmd: Cmd) {
             popup.isVisible = false
+            commandText = inputArea.text  // 先保存，/goal 等命令需要读取清空前的内容
             inputListenerGuard.set(true)
             try { inputArea.text = "" } finally { inputListenerGuard.set(false) }
             cmd.action()
@@ -1682,10 +1733,22 @@ class ChatToolWindow(private val project: Project) {
      * - 目录（以 / 结尾）：生成目录列表，不读取文件内容
      */
     private fun showFileRefPopup() {
-        // 每次都重新扫描，确保新建/删除的文件能反映在列表中
-        projectFilesCache = collectProjectFiles()
         val popup = JPopupMenu()
         var selectedIndex = 0
+        // 如果缓存为空且未在加载中，先展示 loading 提示，后台扫描后再刷新
+        if (projectFilesCache.isEmpty() && !fileRefLoading) {
+            fileRefLoading = true
+            ApplicationManager.getApplication().executeOnPooledThread {
+                projectFilesCache = collectProjectFiles()
+                fileRefLoading = false
+                ApplicationManager.getApplication().invokeLater {
+                    if (fileRefPopup?.isShowing == true) {
+                        fileRefPopup?.isVisible = false
+                        showFileRefPopup()
+                    }
+                }
+            }
+        }
 
         fun closePopup() { popup.isVisible = false; fileRefFilter = null; fileRefMoveSelection = null; fileRefDoSelect = null }
 

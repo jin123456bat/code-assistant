@@ -49,9 +49,11 @@ class AnthropicSdkClient(
         for (td in tools) {
             val propsBuilder = Tool.InputSchema.Properties.builder()
             td.properties?.forEach { (name, prop) ->
-                propsBuilder.putAdditionalProperty(name, com.anthropic.core.JsonValue.from(
-                    mapOf("type" to prop.type, "description" to prop.description)
-                ))
+                val propMap = mutableMapOf<String, Any>("type" to prop.type, "description" to prop.description)
+                if (prop.enum != null) {
+                    propMap["enum"] = prop.enum
+                }
+                propsBuilder.putAdditionalProperty(name, com.anthropic.core.JsonValue.from(propMap))
             }
             val schemaBuilder = Tool.InputSchema.builder()
                 .properties(propsBuilder.build())
@@ -332,5 +334,6 @@ data class AnthropicToolDef(
 
 data class PropertyDef(
     val type: String,
-    val description: String
+    val description: String,
+    val enum: List<String>? = null
 )
