@@ -28,16 +28,29 @@ object CompletionStats {
     fun getShownCount(): Int = totalShown.get()
     fun getAcceptedCount(): Int = totalAccepted.get()
 
+    data class StatsSnapshot(
+        val shown: Int,
+        val accepted: Int,
+        val totalLatencyMs: Long
+    )
+
+    @Synchronized
+    fun getSnapshot(): StatsSnapshot = StatsSnapshot(
+        shown = totalShown.get(),
+        accepted = totalAccepted.get(),
+        totalLatencyMs = totalLatencyMs.get()
+    )
+
     fun getAcceptRate(): Double {
-        val shown = totalShown.get()
-        if (shown == 0) return 0.0
-        return totalAccepted.get().toDouble() / shown * 100.0
+        val snap = getSnapshot()
+        if (snap.shown == 0) return 0.0
+        return snap.accepted.toDouble() / snap.shown * 100.0
     }
 
     fun getAverageLatencyMs(): Long {
-        val shown = totalShown.get()
-        if (shown == 0) return 0L
-        return totalLatencyMs.get() / shown
+        val snap = getSnapshot()
+        if (snap.shown == 0) return 0L
+        return snap.totalLatencyMs / snap.shown
     }
 
     fun reset() {

@@ -10,9 +10,11 @@ class CompletionCache(
     private val ttlMs: Long = 60_000,
     private val maxSize: Int = 20
 ) {
+    private val ttlNanos: Long = ttlMs * 1_000_000L
+
     data class CacheEntry(
         val candidates: List<String>,
-        val createdAt: Long = System.currentTimeMillis()
+        val createdAtNano: Long = System.nanoTime()
     )
 
     /** 复用的 SHA-256 MessageDigest 实例，synchronized 保护 */
@@ -29,7 +31,7 @@ class CompletionCache(
     fun get(prefix: String, suffix: String): List<String>? {
         val key = makeKey(prefix, suffix)
         val entry = cache[key] ?: return null
-        if (System.currentTimeMillis() - entry.createdAt > ttlMs) {
+        if (System.nanoTime() - entry.createdAtNano > ttlNanos) {
             cache.remove(key)
             return null
         }

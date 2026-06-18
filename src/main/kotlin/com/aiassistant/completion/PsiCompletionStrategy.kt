@@ -59,18 +59,18 @@ class PhpPsiStrategy : PsiCompletionStrategy {
     private fun getPhpHeaderEnd(text: String): Int {
         var pos = text.indexOf("<?php")
         if (pos < 0) pos = 0
-        var lastNewline = pos
+        var current = pos
         for (line in text.substring(pos).lines()) {
             val trimmed = line.trim()
             if (trimmed.startsWith("namespace ") || trimmed.startsWith("use ") ||
                 trimmed.isEmpty() || trimmed.startsWith("//") || trimmed.startsWith("/*") || trimmed.startsWith("*")
             ) {
-                lastNewline += line.length + 1
+                current += line.length + 1  // +1 for \n
             } else {
                 break
             }
         }
-        return lastNewline
+        return current.coerceAtMost(text.length)
     }
 }
 

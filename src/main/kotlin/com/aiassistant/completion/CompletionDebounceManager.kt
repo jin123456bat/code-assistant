@@ -41,10 +41,17 @@ class CompletionDebounceManager(
     private fun cancelPending() {
         pendingFuture?.cancel(false)
         pendingFuture = null
-        onCancelPending()
+        // 不再调用 onCancelPending()，由调用方按场景自行调用
     }
 
     fun dispose() {
-        scheduler.shutdownNow()
+        scheduler.shutdown()
+        try {
+            if (!scheduler.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS)) {
+                scheduler.shutdownNow()
+            }
+        } catch (_: InterruptedException) {
+            scheduler.shutdownNow()
+        }
     }
 }
