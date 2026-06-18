@@ -15,8 +15,8 @@
 
 ## 核心能力
 
-- **Agent 自主循环**：AI 自动规划并执行多步骤任务，最大 100 轮推理，连续失败 3 次自动中止
-- **18 个内置工具**：代码搜索、文件读写、Edit 精确替换、Workflow 编排、Git 操作、网页抓取、PSI 代码智能等
+- **Agent 自主循环**：AI 自动规划并执行多步骤任务，不限制主 Agent 轮次（对齐 Claude Code），连续失败 3 次自动中止
+- **17 个内置工具**：代码搜索、文件读写、Edit 精确替换、Workflow 编排、Git 操作、网页抓取、PSI 代码智能等
 - **MCP 协议**：连接外部 Model Context Protocol 服务器扩展工具集
 - **Skills 引擎**：从 `.claude/skills/**/SKILL.md` 加载自定义技能，支持 `allowed-tools`/`invoke-for`
 - **Rules 系统**：`.claude/rules/*.md` 按文件路径条件注入规则

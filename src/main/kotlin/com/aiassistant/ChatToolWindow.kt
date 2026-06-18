@@ -2149,10 +2149,14 @@ class ChatToolWindow(private val project: Project) {
         if (atBottom) bar.value = bar.maximum
     }
 
-    /** 强制立即滚动到底部，用于 rebuildConversation、首次创建流式组件、showSelectionCard 等场景 */
+    /** 强制立即滚动到底部，用于 rebuildConversation、首次创建流式组件、showSelectionCard 等场景。EDT 上直接执行避免单帧延迟。 */
     private fun scrollToBottom() {
-        SwingUtilities.invokeLater {
+        if (SwingUtilities.isEventDispatchThread()) {
             conversationScrollPane.verticalScrollBar.value = conversationScrollPane.verticalScrollBar.maximum
+        } else {
+            SwingUtilities.invokeLater {
+                conversationScrollPane.verticalScrollBar.value = conversationScrollPane.verticalScrollBar.maximum
+            }
         }
     }
 }

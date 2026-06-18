@@ -120,7 +120,7 @@ msgIdToComponent:    Map<msgId → Component>  ← 已渲染组件引用
 
 **适配器：`AnthropicAdapter` 是唯一的适配器**（Anthropic Messages 格式 + `input_schema` 工具）。
 
-**工具系统**：`tools/` 下每个工具实现 `agent.AgentTool` 接口（`name` / `description` / `parameters` / `execute()`）。18 个内置工具由 `ToolRegistryV3.registerBuiltIn()` 注册：`search_code`、`read_file`（支持 `resource://` URI 读取 MCP 资源）、`write_file`、`edit_file`、`list_directory`、`execute_command`、`git_diff`、`git_log`、`git_status`、`ask_user`、`web_search`、`web_fetch`、`notebook_edit`、`task`、`code_intelligence`、`mcp_get_prompt`、`workflow`。两类工具来源统一管理：内置 / MCP（`registerMcp`）。七个元工具由 `AgentLoop.buildSdkToolDefs()` 硬编码添加：`Skill`（统一 skill 激活）、`EnterPlanMode`/`ExitPlanMode`（Plan Mode 工作流）、`TaskCreate`/`TaskUpdate`/`TaskList`/`TaskGet`（Task 执行追踪）。
+**工具系统**：`tools/` 下每个工具实现 `agent.AgentTool` 接口（`name` / `description` / `parameters` / `execute()`）。17 个内置工具由 `ToolRegistryV3.registerBuiltIn()` 注册：`search_code`、`read_file`（支持 `resource://` URI 读取 MCP 资源）、`write_file`、`edit_file`、`list_directory`、`execute_command`、`git_diff`、`git_log`、`git_status`、`ask_user`、`web_search`、`web_fetch`、`notebook_edit`、`task`、`code_intelligence`、`mcp_get_prompt`、`workflow`。两类工具来源统一管理：内置 / MCP（`registerMcp`）。七个元工具由 `AgentLoop.buildSdkToolDefs()` 硬编码添加：`Skill`（统一 skill 激活）、`EnterPlanMode`/`ExitPlanMode`（Plan Mode 工作流）、`TaskCreate`/`TaskUpdate`/`TaskList`/`TaskGet`（Task 执行追踪）。
 
 **安全模型**：`AgentLoop.SAFE_TOOLS`（只读工具）+ 用户白名单 `AppSettingsService.getToolWhitelist()` 内的工具直接执行；其余工具（`write_file`、`execute_command` 等）触发内联确认——`onConfirmTool` 回调配合 `CountDownLatch`/`AtomicBoolean` 阻塞等待用户通过审批选择卡在 UI 上点确认。`read_file` 额外检查路径安全：项目内免审，项目外触发审批。
 

@@ -390,7 +390,7 @@ class McpClient(private val config: McpServerConfig) {
         initialized = false
         sseRunning = false
         // 先杀进程再清 pendingResponses，防止 reader 线程在清理后写入孤条目（TOCTOU）
-        try { process?.destroyForcibly()?.waitFor(3, TimeUnit.SECONDS) } catch (_: Exception) {}
+        try { process?.destroyForcibly()?.waitFor(10, TimeUnit.SECONDS) } catch (_: Exception) {}
         process = null
         pendingResponses.clear()
         synchronized(responseLock) { responseLock.notifyAll() }
@@ -435,9 +435,8 @@ class McpClient(private val config: McpServerConfig) {
                 }
             } catch (_: InterruptedException) {
                 Thread.currentThread().interrupt()
-                return null
             }
-            return pendingResponses.remove(expectedId)
+            return pendingResponses.remove(expectedId)  // 超时返回 null，同时清理可能的残留条目
         }
     }
 

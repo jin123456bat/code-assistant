@@ -43,6 +43,8 @@ class AgentContext(val project: Project) {
 
     /** 任务列表（线程安全），替换旧 Plan/Step 模型 */
     val tasks: MutableList<Task> = java.util.concurrent.CopyOnWriteArrayList()
+    /** 任务 ID 生成器（线程安全） */
+    val taskIdCounter = java.util.concurrent.atomic.AtomicInteger(0)
 
     /** 目标驱动模式：设置后 Agent 持续工作直到目标达成（用户中断或 MAX_LOOPS） */
     @Volatile var goal: String? = null
@@ -56,8 +58,8 @@ class AgentContext(val project: Project) {
         val content: String
     )
 
-    /** 所有已加载的 skill 定义（名称 → SkillDef），不包括已激活的 skill */
-    val skillDefs = mutableMapOf<String, SkillEngine.SkillDef>()
+    /** 所有已加载的 skill 定义（名称 → SkillDef），不包括已激活的 skill。ConcurrentHashMap 保证 Watcher daemon 线程写入与 Agent/EDT 线程读取之间的安全 */
+    val skillDefs: MutableMap<String, SkillEngine.SkillDef> = java.util.concurrent.ConcurrentHashMap()
     /** 客户端通过 /skill-name 激活的 skill（此 skill 不会作为工具暴露给 LLM，防止重复调用） */
     @Volatile var activatedSkill: String? = null
     /** 激活的 skill 的完整 prompt（注入 system prompt，对齐 Claude Code） */
@@ -75,8 +77,8 @@ data class Task(
     val id: Int,
     val subject: String,
     val description: String = "",
-    var status: TaskStatus = TaskStatus.PENDING,
-    var result: String? = null
+    @Volatile var status: TaskStatus = TaskStatus.PENDING,
+    @Volatile var result: String? = null
 )
 
 enum class TaskStatus { PENDING, IN_PROGRESS, COMPLETED }

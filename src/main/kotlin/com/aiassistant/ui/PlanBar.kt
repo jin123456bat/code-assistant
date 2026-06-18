@@ -109,9 +109,8 @@ class PlanBar : JPanel(BorderLayout()) {
         clearComponentRefs()
 
         when {
-            planMode -> add(buildPlanModeRow(), BorderLayout.NORTH)
-            planTitle != null -> add(buildSummaryRow(), BorderLayout.NORTH)
-            tasks.isNotEmpty() -> add(buildSummaryRow(), BorderLayout.NORTH)
+            planMode && tasks.isEmpty() && planTitle == null -> add(buildPlanModeRow(), BorderLayout.NORTH)
+            else -> add(buildSummaryRow(), BorderLayout.NORTH)
         }
 
         add(object : JPanel() {
@@ -216,6 +215,12 @@ class PlanBar : JPanel(BorderLayout()) {
             }
             leftPanel.add(progLabel)
             summaryProgressLabel = progLabel
+        }
+        if (planMode) {
+            leftPanel.add(JLabel("  规划中").apply {
+                font = ChatTheme.metaFont.deriveFont(Font.PLAIN, ChatTheme.metaFont.size2D - ChatTheme.META_FONT_OFFSET)
+                foreground = ChatTheme.toolBar
+            })
         }
         if (desc.isNotEmpty()) {
             val descLabel = JLabel(desc).apply { font = ChatTheme.metaFont; foreground = ChatTheme.textMuted }

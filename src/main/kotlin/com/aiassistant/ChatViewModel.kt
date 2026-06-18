@@ -422,7 +422,7 @@ class ChatViewModel {
     fun clearConversation() {
         stopGeneration()  // 内部已调用 rateLimitTimer?.stop()
         agent?.ctx?.let { ctx ->
-            ctx.conversationHistory.clear()  // synchronizedList 保护单操作
+            synchronized(ctx.historyLock) { ctx.conversationHistory.clear() }
             ctx.lastInputTokens = 0
             ctx.goal = null  // 清空目标
         }

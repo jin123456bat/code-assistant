@@ -40,14 +40,16 @@ object SessionStore {
         )
         val target = File(dir(projectBasePath), "$id.json")
         val tmp = File(target.path + ".tmp")
-        tmp.writeText(gson.toJson(dto))
         try {
+            tmp.writeText(gson.toJson(dto))
             java.nio.file.Files.move(tmp.toPath(), target.toPath(),
                 java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
         } catch (_: java.nio.file.AtomicMoveNotSupportedException) {
-            java.nio.file.Files.move(tmp.toPath(), target.toPath(),
-                java.nio.file.StandardCopyOption.REPLACE_EXISTING)
-        }
+            try {
+                java.nio.file.Files.move(tmp.toPath(), target.toPath(),
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+            } catch (_: Exception) { tmp.delete() }
+        } catch (_: Exception) { tmp.delete() }
     }
 
     fun load(projectBasePath: String, id: String): SessionData? {

@@ -124,11 +124,9 @@ class AgentLoop(
     private fun reloadSkills() {
         val basePath = project.basePath ?: return
         val skillDefs = SkillEngine.loadProjectSkills(basePath)
-        synchronized(ctx) {
-            ctx.skillDefs.clear()
-            skillDefs.forEach { ctx.skillDefs[it.name] = it }
-            ctx.systemPrompt = buildSystemPrompt()
-        }
+        ctx.skillDefs.clear()
+        skillDefs.forEach { ctx.skillDefs[it.name] = it }
+        ctx.systemPrompt = buildSystemPrompt()
     }
 
     private var forkHistory: List<AnthropicMessage>? = null
@@ -350,13 +348,14 @@ class AgentLoop(
                                 val userChoice = AtomicBoolean(false)
                                 pendingConfirmLatch = latch
                                 if (cancelled) latch.countDown()
-                                onConfirmPlan?.invoke(planText, latch, userChoice)
                                 try {
+                                    onConfirmPlan?.invoke(planText, latch, userChoice)
                                     val confirmed = latch.await(10, java.util.concurrent.TimeUnit.MINUTES)
                                     if (confirmed) approved = userChoice.get()
                                     else consecutiveFailures = MAX_FAILURES
-                                } catch (_: InterruptedException) {
-                                    Thread.currentThread().interrupt()
+                                } catch (e: Exception) {
+                                    if (latch.count > 0) latch.countDown()
+                                    if (e is InterruptedException) Thread.currentThread().interrupt()
                                 } finally { pendingConfirmLatch = null }
                                 if (cancelled) break
                                 val planResult = if (approved) {
@@ -387,7 +386,7 @@ class AgentLoop(
                                 val taskParams = parseParams(tc.arguments)
                                 val subject = taskParams["subject"]?.takeIf { it.isNotBlank() } ?: "未命名任务"
                                 val description = taskParams["description"] ?: ""
-                                val nextId = (ctx.tasks.maxOfOrNull { it.id } ?: 0) + 1
+                                val nextId = ctx.taskIdCounter.incrementAndGet()
                                 val task = Task(id = nextId, subject = subject, description = description)
                                 ctx.tasks.add(task)
                                 edt { onTaskUpdate?.invoke() }
@@ -513,15 +512,16 @@ class AgentLoop(
                                 val userChoice = AtomicBoolean(false)
                                 pendingConfirmLatch = latch
                                 if (cancelled) latch.countDown()
-                                onConfirmTool?.invoke(tc.name, tc.arguments, latch, userChoice)
                                 try {
+                                    onConfirmTool?.invoke(tc.name, tc.arguments, latch, userChoice)
                                     val confirmed = latch.await(10, java.util.concurrent.TimeUnit.MINUTES)
                                     if (!confirmed) {
                                         consecutiveFailures = MAX_FAILURES
                                         break
                                     }
-                                } catch (_: InterruptedException) {
-                                    Thread.currentThread().interrupt()
+                                } catch (e: Exception) {
+                                    if (latch.count > 0) latch.countDown()
+                                    if (e is InterruptedException) Thread.currentThread().interrupt()
                                 } finally { pendingConfirmLatch = null }
                                 if (cancelled) break
                                 userChoice.get()
@@ -677,13 +677,14 @@ class AgentLoop(
         val textBuffer = StringBuilder()
         val thinkingBuffer = StringBuilder()
         val toolCalls = mutableListOf<ToolCallResult>()
-        val done = Object()
+        val doneLatch = java.util.concurrent.CountDownLatch(1)
         var hasResponse = false
         var errorDetail: String? = null
         var thinkingSignature = ""
         var capturedStopReason = "end_turn"
 
         if (sdkClient == null || lastApiKey != apiKey) {
+            sdkClient?.close()
             sdkClient = com.aiassistant.AnthropicSdkClient(apiKey)
             lastApiKey = apiKey
         }
@@ -727,21 +728,17 @@ class AgentLoop(
                         toolCalls.add(ToolCallResult(tc.id, tc.name, tc.arguments))
                     }
                     AppLogger.info("SDK stream complete: textLen=${textContent.length} thinkingLen=${thinking.length} thinkingSigLen=${thinkingSig.length} tools=${toolCalls.size} stopReason=$stopReason")
-                    synchronized(done) { done.notifyAll() }
+                    doneLatch.countDown()
                 }
                 override fun onError(error: Throwable) {
                     errorDetail = error.message?.take(500) ?: "SDK error: ${error.javaClass.simpleName}"
                     AppLogger.error("SDK streaming error: ${error.message}\n${error.stackTraceToString().take(1000)}")
-                    synchronized(done) { done.notifyAll() }
+                    doneLatch.countDown()
                 }
             }
         )
 
-        synchronized(done) {
-            if (!hasResponse && errorDetail == null) {
-                try { done.wait(120_000) } catch (_: InterruptedException) {}
-            }
-        }
+        try { doneLatch.await(120, java.util.concurrent.TimeUnit.SECONDS) } catch (_: InterruptedException) {}
         if (!hasResponse) {
             val detail = errorDetail ?: "无响应 — 请检查 API Key 和网络连接"
             AppLogger.requestFailed(-1, detail)
@@ -764,6 +761,7 @@ class AgentLoop(
     }
 
     /** Plan Mode + Task 元工具名称集合（这些元工具在 Plan Mode 中仍然可用） */
+    /** Plan Mode + Task 元工具名称（与 buildSdkToolDefs() 共用，单一来源） */
     private val META_TOOL_NAMES = setOf("Skill", "EnterPlanMode", "ExitPlanMode", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet")
 
     fun compactHistory(keepCount: Int, apiKey: String): String? {
@@ -792,6 +790,7 @@ class AgentLoop(
     private fun compact(messages: List<AnthropicMessage>, apiKey: String): String? {
         if (messages.isEmpty()) return null
         if (sdkClient == null || lastApiKey != apiKey) {
+            sdkClient?.close()
             sdkClient = com.aiassistant.AnthropicSdkClient(apiKey)
             lastApiKey = apiKey
         }
@@ -824,7 +823,7 @@ class AgentLoop(
         val summaryHistory = listOf(AnthropicMessage("user", compactPrompt))
 
         val result = try {
-            val done = Object()
+            val compactLatch = java.util.concurrent.CountDownLatch(1)
             var summaryText = ""
             var hasError = false
             sdkClient.createStreaming(
@@ -840,18 +839,16 @@ class AgentLoop(
                     override fun onToolInputDelta(partial: String) {}
                     override fun onStreamComplete(textContent: String, thinking: String, thinkingSignature: String, toolCalls: List<com.aiassistant.AnthropicSdkClient.StreamToolCall>, inputTokens: Int, outputTokens: Int, stopReason: String) {
                         summaryText = textContent
-                        synchronized(done) { done.notifyAll() }
+                        compactLatch.countDown()
                     }
                     override fun onError(error: Throwable) {
                         hasError = true
-                        synchronized(done) { done.notifyAll() }
+                        compactLatch.countDown()
                     }
                 }
             )
-            synchronized(done) {
-                if (summaryText.isEmpty() && !hasError) {
-                    try { done.wait(60_000) } catch (_: InterruptedException) {}
-                }
+            if (summaryText.isEmpty() && !hasError) {
+                try { compactLatch.await(60, java.util.concurrent.TimeUnit.SECONDS) } catch (_: InterruptedException) {}
             }
             if (hasError || summaryText.isBlank()) null else summaryText.trim()
         } catch (e: Exception) {

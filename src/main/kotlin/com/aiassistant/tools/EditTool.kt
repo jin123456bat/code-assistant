@@ -43,6 +43,11 @@ class EditTool : AgentTool {
             if (!targetFile.isFile) {
                 return ToolResult.err("文件不存在: $relativePath")
             }
+            // 检测二进制文件（含 NULL 字节），拒绝编辑防止破坏
+            val head = targetFile.inputStream().use { it.readNBytes(4096) }
+            if (head.any { it.toInt() == 0 }) {
+                return ToolResult.err("无法编辑二进制文件: $relativePath")
+            }
 
             val originalContent = targetFile.readText(Charsets.UTF_8)
 

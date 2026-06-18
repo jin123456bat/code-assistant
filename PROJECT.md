@@ -144,7 +144,7 @@ AgentLoop 是核心调度器，在后台 `Thread` 上运行 `while` 循环：
 
 三类工具来源统一由 `ToolRegistryV3` 管理：
 
-1. **内置工具**（15 个）：`search_code`、`read_file`、`write_file`、`list_directory`、`execute_command`、`git_diff`、`git_log`、`git_status`、`ask_user`、`web_search`、`web_fetch`、`notebook_edit`、`task`、`code_intelligence`、`mcp_get_prompt`
+1. **内置工具**（17 个）：`search_code`、`read_file`、`write_file`、`edit_file`、`list_directory`、`execute_command`、`git_diff`、`git_log`、`git_status`、`ask_user`、`web_search`、`web_fetch`、`notebook_edit`、`task`、`code_intelligence`、`mcp_get_prompt`、`workflow`
 2. **MCP 工具**：通过 `registerMcp()` 注册，来自 MCP 服务器的工具发现
 ### 元工具（Meta-Tools）
 

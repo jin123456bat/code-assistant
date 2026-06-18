@@ -327,6 +327,11 @@ class AnthropicSdkClient(
 
         return null
     }
+
+    /** 关闭底层 OkHttp 客户端，释放连接池和线程池 */
+    fun close() {
+        try { client.close() } catch (_: Exception) {}
+    }
 }
 
 data class AnthropicToolDef(
