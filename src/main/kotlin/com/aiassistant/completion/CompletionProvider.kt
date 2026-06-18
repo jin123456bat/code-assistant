@@ -154,8 +154,11 @@ class AiCompletionProvider : InlineCompletionProvider {
             candidates = cachedCandidates
             CompletionStats.recordShown(0)
         } else {
-            // 构建 FIM prompt：smartContext（PSI 增强） + prefix
+            // 构建 FIM prompt：文件路径 + 语言 + smartContext（PSI 增强） + prefix
             val prompt = buildString {
+                append("// File: ${context.fileName}\n")
+                append("// Language: ${context.language}\n")
+                append("\n")
                 if (!context.smartContext.isNullOrBlank()) {
                     append(context.smartContext)
                     append("\n")

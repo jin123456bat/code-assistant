@@ -5,7 +5,6 @@ import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.project.Project
 import com.intellij.psi.PsiDocumentManager
 import com.intellij.psi.PsiFile
-import java.io.File
 
 /**
  * 补全上下文数据结构。
@@ -48,12 +47,19 @@ class CompletionContextCollector {
         // 2. suffix：光标后全部内容
         var suffix = text.subSequence(caretOffset, text.length).toString()
 
-        // 3. 如果不够 16K，加同目录同扩展名文件（最多 1 个）
+        // 3. 如果不够 16K，加兄弟文件（Jaccard 相似度排序，标签页优先）
         var smartContext: String? = null
         if (prefix.length + suffix.length < MAX_CHARS && virtualFile != null) {
-            smartContext = findSiblingFile(virtualFile, language)?.let { siblingPath ->
-                try {
-                    File(siblingPath).readText().take(
+            val currentImports = ContextEnhancer.extractImportLinesFromText(prefix, language)
+            val siblingPaths = ContextEnhancer.findBestSiblingFiles(
+                virtualFile,
+                virtualFile.extension ?: "",
+                currentImports,
+                project
+            )
+            if (siblingPaths.isNotEmpty()) {
+                smartContext = try {
+                    java.io.File(siblingPaths.first()).readText().take(
                         MAX_CHARS - prefix.length - suffix.length
                     )
                 } catch (_: Exception) { null }
@@ -87,19 +93,6 @@ class CompletionContextCollector {
             fileName = fileName,
             smartContext = smartContext ?: psiContext
         )
-    }
-
-    private fun findSiblingFile(
-        currentFile: com.intellij.openapi.vfs.VirtualFile,
-        language: String
-    ): String? {
-        val parent = currentFile.parent ?: return null
-        val currentName = currentFile.name
-        val ext = currentFile.extension ?: return null
-        val sibling = parent.children.firstOrNull {
-            it.extension == ext && it.name != currentName && !it.isDirectory
-        } ?: return null
-        return sibling.path
     }
 
     private fun getLanguageFromExtension(ext: String): String = when (ext.lowercase()) {
