@@ -111,8 +111,26 @@ class AgentLoop(
             val loadedRules = if (basePath != null) RulesEngine.loadAll(basePath) else emptyList()
             ctx.rules.clear()
             ctx.rules.addAll(loadedRules)
+            // 启动 skills 文件实时监听（新增/修改/删除 SKILL.md 后自动重载）
+            if (basePath != null) {
+                SkillEngine.startWatching(basePath) { reloadSkills() }
+            }
         }
         ctx.systemPrompt = buildSystemPrompt()
+    }
+
+    /**
+     * 重载 skills 列表并更新 system prompt（文件监听回调）。
+     * 始终更新 systemPrompt——running 中时下一轮 run() 会自行重建，无副作用。
+     */
+    private fun reloadSkills() {
+        val basePath = project.basePath ?: return
+        val skillDefs = SkillEngine.loadProjectSkills(basePath)
+        synchronized(ctx) {
+            ctx.skillDefs.clear()
+            skillDefs.forEach { ctx.skillDefs[it.name] = it }
+            ctx.systemPrompt = buildSystemPrompt()
+        }
     }
 
     // Fork 上下文继承：子 Agent 继承父对话历史（复用 prompt cache 省 token）
@@ -595,6 +613,8 @@ class AgentLoop(
         pendingConfirmLatch?.countDown()
         // 停止所有后台子 Agent
         SubAgentRegistry.stopAll()
+        // 停止 skills 文件监听
+        SkillEngine.stopWatching(project.basePath ?: "")
     }
 
     // ---- Anthropic API ----
