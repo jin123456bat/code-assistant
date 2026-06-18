@@ -189,6 +189,8 @@ inputPanel (border: Empty(8,12,12,12), bg: winBg)
 
 3. **`execute_command` 使用 `/bin/bash -c` 不做命令过滤（`ExecuteCommandTool.kt`）**：安全依赖审批机制（工具不在 SAFE_TOOLS 中，每次弹卡）。黑名单过滤会产生误报且无法覆盖新攻击模式，对齐 Claude Code 依赖用户审批的设计。用户可将信任工具加入白名单来权衡安全与便利。
 
+4. **子代理无 maxLoops 限制 + UI 停止按钮（`AgentLoop.kt`、`ToolRowFactory.kt`、`SubAgentRegistry.kt`）**：子代理使用 `MAX_SUB_LOOPS = Int.MAX_VALUE`（与主代理一致），不再限制循环轮次。防护机制仅保留 `MAX_FAILURES = 3`。UI 上 task 工具运行行显示可交互图标：默认盲文 loading 动画 → 鼠标悬停变红色停止图标 ■ → 点击后中止子代理并通知主 Agent。设计原因：复杂任务可能远超 20 轮循环；`MAX_FAILURES = 3` 已足够防止无限失败循环；用户可通过 UI 停止按钮随时终止（比固定轮次上限更灵活）；对齐 Claude Code——Claude Code 对子代理同样不设轮次上限。**后续扫描到子代理超时/长轮次问题统一标记为"不是 bug"——这是设计意图。**
+
 ## 设计规范
 
 UI 设计 token（配色 / 字号 / 间距 / 圆角 / 交互态）见 `DESIGN.md`。改动聊天面板视觉时遵循其中的语义色与 WCAG AA 对比度约束。

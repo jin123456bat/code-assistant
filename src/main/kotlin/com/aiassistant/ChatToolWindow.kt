@@ -2,6 +2,7 @@ package com.aiassistant
 
 import com.aiassistant.agent.AgentMessage
 import com.aiassistant.agent.ImageData
+import com.aiassistant.agent.SubAgentRegistry
 import com.aiassistant.mcp.McpManager
 import com.aiassistant.shared.JsonUtils
 import com.aiassistant.ui.ApprovalActions
@@ -178,7 +179,7 @@ class ChatToolWindow(private val project: Project) {
         toolTipText = "新会话"
         border = JBUI.Borders.empty(2, 6, 2, 6)
         addMouseListener(object : MouseAdapter() {
-            override fun mouseClicked(e: MouseEvent) { needFullRebuild = true; viewModel.clearConversation(); viewModel.messageRefChips.clear(); refChips.clear(); selectionRefChip = null; rebuildChips(); planBar.updateState(false, null, null, emptyList()); rebuildConversation() }
+            override fun mouseClicked(e: MouseEvent) { needFullRebuild = true; viewModel.clearConversation(); viewModel.messageRefChips.clear(); refChips.clear(); selectionRefChip = null; completedStreamingToolNames.clear(); rebuildChips(); planBar.updateState(false, null, null, emptyList()); rebuildConversation() }
             override fun mouseEntered(e: MouseEvent) { foreground = ChatTheme.accentHover }
             override fun mouseExited(e: MouseEvent) { foreground = ChatTheme.codeLangFg }
         })
@@ -393,9 +394,12 @@ class ChatToolWindow(private val project: Project) {
             else -> label
         }
     }
+    /** 带唯一 ID 的粘贴图片包装，用于去重和稳定删除 */
+    private data class PastedImage(val id: Long, val image: ImageData)
     private val refChips = mutableListOf<RefChip>()
     /** 待发送的粘贴图片（Claude 原生 image 块，非 Markdown data URL） */
-    private val pastedImages = mutableListOf<ImageData>()
+    private val pastedImages = mutableListOf<PastedImage>()
+    private var pastedImageIdCounter = 0L
     private val chipPanel = JPanel(WrapLayout(FlowLayout.LEFT, 4, 6)).apply {
         isOpaque = false
         isVisible = false  // 初始无 chip，高度为 0
@@ -404,8 +408,10 @@ class ChatToolWindow(private val project: Project) {
 
     private fun rebuildChips() {
         chipPanel.removeAll()
-        // 图片芯片
-        for ((idx, img) in pastedImages.withIndex()) {
+        // 图片芯片（使用唯一 ID 删除，避免位置索引偏移导致删错）
+        for ((idx, pasted) in pastedImages.withIndex()) {
+            val img = pasted.image
+            val imgId = pasted.id
             val chipComp = object : JPanel(FlowLayout(FlowLayout.LEFT, 2, 0)) {
                 override fun paintComponent(g: java.awt.Graphics) {
                     val g2 = g.create() as java.awt.Graphics2D
@@ -432,7 +438,7 @@ class ChatToolWindow(private val project: Project) {
                 toolTipText = "移除图片"
                 addMouseListener(object : MouseAdapter() {
                     override fun mouseClicked(e: MouseEvent) {
-                        if (idx < pastedImages.size) pastedImages.removeAt(idx)  // 按索引删除避免重复图片混淆，加边界检查防 OOB
+                        pastedImages.removeAll { it.id == imgId }
                         rebuildChips()
                     }
                 })
@@ -790,6 +796,7 @@ class ChatToolWindow(private val project: Project) {
     private var streamingToolCollapsed: AtomicBoolean? = null
     private var streamingToolLeftBar: JPanel? = null
     private var streamingToolChevron: JLabel? = null
+    private var streamingToolStopIcon: JComponent? = null  // task 工具停止按钮引用（StopIconLabel），供清理时置 null
     private var streamingToolName: String? = null
     // 子代理工具行增量跟踪
     private var renderedToolNames = mutableSetOf<String>()
@@ -1327,10 +1334,15 @@ class ChatToolWindow(private val project: Project) {
         lastStreamingTextArea = null
         streamingToolName = toolName
         val isTask = toolName == "task"
-        val ref = toolRowFactory.streamingToolRow(toolName, isTask)
+        // task 工具提供停止按钮回调：点击 → 停止所有运行中的子 Agent 并通知主 Agent
+        val onStop: (() -> Unit)? = if (isTask) {
+            { stopSubAgentsByUser() }
+        } else null
+        val ref = toolRowFactory.streamingToolRow(toolName, isTask, onStop)
         streamingToolRow = ref.outerRow
         streamingToolContentPanel = ref.contentArea
         streamingToolCollapsed = ref.collapsed
+        streamingToolStopIcon = ref.stopIconLabel
         val leftBar = ref.outerRow.components[0] as? JPanel ?: run {
             streamingToolRow = null; streamingToolLeftBar = null; streamingToolChevron = null; return
         }
@@ -1438,6 +1450,7 @@ class ChatToolWindow(private val project: Project) {
         streamingToolCollapsed = null
         streamingToolLeftBar = null
         streamingToolChevron = null
+        streamingToolStopIcon = null
         completedStreamingToolNames.add(toolName)
         streamingToolName = null
         renderedToolNames.clear()
@@ -1458,9 +1471,22 @@ class ChatToolWindow(private val project: Project) {
         streamingToolCollapsed = null
         streamingToolLeftBar = null
         streamingToolChevron = null
+        streamingToolStopIcon = null
         streamingToolName = null
         renderedToolNames.clear()
         lastStreamingTextArea = null
+    }
+
+    /**
+     * 用户通过 UI 停止按钮手动终止运行中的子代理。
+     *
+     * 设计决策（对齐 Claude Code）：
+     * - 不阻塞等待，异步标记失败后由主 Agent 的 drainCompleted() 自然拾取
+     * - 主 Agent 收到 "用户手动终止" 错误后通过 tool_result 注入上下文
+     * - 子代理无限循环（MAX_SUB_LOOPS = Int.MAX_VALUE），依赖用户手动终止 + MAX_FAILURES=3
+     */
+    private fun stopSubAgentsByUser() {
+        SubAgentRegistry.stopAllByUser()
     }
 
     private fun createMessageBubble(message: AgentMessage): JPanel {
@@ -1652,7 +1678,7 @@ class ChatToolWindow(private val project: Project) {
 
         var commandText = ""  // executeCommand 中写入，供 /goal 等命令读取清空前的内容
         val commands = listOf(
-            Cmd("/new",   "新会话") { needFullRebuild = true; viewModel.clearConversation(); viewModel.messageRefChips.clear(); refChips.clear(); selectionRefChip = null; rebuildChips(); planBar.updateState(false, null, null, emptyList()); updateGoalBar(); rebuildConversation() },
+            Cmd("/new",   "新会话") { needFullRebuild = true; viewModel.clearConversation(); viewModel.messageRefChips.clear(); refChips.clear(); selectionRefChip = null; completedStreamingToolNames.clear(); rebuildChips(); planBar.updateState(false, null, null, emptyList()); updateGoalBar(); rebuildConversation() },
             Cmd("/plan",  "创建执行计划") { sendQuick("请先调用 EnterPlanMode 进入规划模式，探索代码库并设计方案，然后调用 ExitPlanMode 提交方案供审批。") },
             Cmd("/goal",  "设置目标自动执行") {
                 val goal = commandText.substringAfter("/goal").trim()
@@ -1909,7 +1935,7 @@ class ChatToolWindow(private val project: Project) {
     private fun sendMessage() {
         val textContent = inputArea.text.trim()
         val refContent = buildRefContent()
-        val images = pastedImages.toList()  // 快照，避免异步清空后丢失
+        val images = pastedImages.map { it.image }.toList()  // 快照，避免异步清空后丢失
         if (textContent.isEmpty() && refContent.isEmpty() && images.isEmpty()) {
             showWarning(AiAssistantBundle.message("chat.error.empty"))
             return
@@ -2063,8 +2089,10 @@ class ChatToolWindow(private val project: Project) {
             val imageBytes = baos.toByteArray()
             val base64 = Base64.getEncoder().encodeToString(imageBytes)
 
+            // 去重：相同内容的图片不重复添加
+            if (pastedImages.any { it.image.data == base64 }) return true
             // 存储为 Claude 原生 image 块（而非 Markdown data URL）
-            pastedImages.add(ImageData("image/png", base64))
+            pastedImages.add(PastedImage(++pastedImageIdCounter, ImageData("image/png", base64)))
             rebuildChips()
             return true
         } catch (_: Exception) {

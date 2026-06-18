@@ -9,7 +9,7 @@ package com.aiassistant.agent
 // 这与 Claude Code 的子代理行为一致。安全边界由以下机制保障：
 // 1. 子 Agent 不暴露元工具（Skill/EnterPlanMode/ExitPlanMode/TaskCreate 等），
 //    防止子 Agent 创建孙 Agent 或进入 Plan Mode
-// 2. 子 Agent 的 maxLoops 受限（MAX_SUB_LOOPS=20），防止无限循环
+// 2. 子 Agent 的连续失败保护 MAX_FAILURES=3 仍生效，防止无限失败循环
 // 3. 子 Agent 结果以 tool_result 返回给主 Agent，不直接呈现给用户
 // 4. 主 Agent 的审批机制和 SAFE_TOOLS 约束仍适用于主 Agent 自身的操作
 // 5. 自定义 Agent 类型（.claude/agents/）可通过 autoApprove=false 覆盖此行为

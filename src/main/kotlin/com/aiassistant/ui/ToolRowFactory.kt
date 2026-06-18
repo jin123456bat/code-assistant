@@ -67,6 +67,85 @@ private class BrailleSpinnerLabel(color: Color) : JLabel() {
 }
 
 /**
+ * 可交互的停止图标标签。
+ *
+ * 默认状态：显示与 BrailleSpinnerLabel 相同的盲文 loading 动画
+ * 鼠标悬停：变为红色停止图标 ■
+ * 点击：触发 onStop 回调，图标变为 ⏹ 并禁用自身防止重复点击
+ *
+ * Timer 生命周期通过 addNotify/removeNotify 管理，与 BrailleSpinnerLabel 一致。
+ */
+private class StopIconLabel(
+    color: Color,
+    private val onStop: () -> Unit
+) : JLabel() {
+
+    private val loadingFrames = arrayOf("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
+    private val stopIcon = "■"
+    private var frameIndex = 0
+    private var isHovered = false
+    private var isStopped = false
+
+    private val timer = Timer(90) {
+        if (!isHovered && !isStopped) {
+            frameIndex = (frameIndex + 1) % loadingFrames.size
+            text = loadingFrames[frameIndex]
+        }
+    }
+
+    init {
+        font = ChatTheme.metaFont
+        foreground = color
+        text = loadingFrames[0]
+        val w = preferredSize.width.coerceAtLeast(ChatTheme.SPINNER_MIN_W)
+        minimumSize = Dimension(w, preferredSize.height)
+        preferredSize = Dimension(w, preferredSize.height)
+        maximumSize = Dimension(w, preferredSize.height)
+        cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+
+        addMouseListener(object : MouseAdapter() {
+            override fun mouseEntered(e: MouseEvent?) {
+                if (isStopped) return
+                isHovered = true
+                text = stopIcon
+                foreground = ChatTheme.error
+            }
+            override fun mouseExited(e: MouseEvent?) {
+                if (isStopped) return
+                isHovered = false
+                foreground = color
+                text = loadingFrames[frameIndex]
+            }
+            override fun mouseClicked(e: MouseEvent?) {
+                if (isStopped) return
+                isStopped = true
+                timer.stop()
+                text = "⏹"
+                foreground = ChatTheme.textMuted
+                cursor = Cursor.getDefaultCursor()
+                onStop()
+            }
+        })
+    }
+
+    override fun updateUI() {
+        super.updateUI()
+        isOpaque = false
+        background = null
+    }
+
+    override fun addNotify() {
+        super.addNotify()
+        if (!timer.isRunning && !isStopped) timer.start()
+    }
+
+    override fun removeNotify() {
+        timer.stop()
+        super.removeNotify()
+    }
+}
+
+/**
  * 工具/思考行工厂 — 单色折叠行，替代彩色气泡。
  *
  * 设计规范：
@@ -394,7 +473,8 @@ class ToolRowFactory(
     data class StreamingToolRow(
         val outerRow: JPanel,
         val contentArea: JPanel,
-        val collapsed: java.util.concurrent.atomic.AtomicBoolean
+        val collapsed: java.util.concurrent.atomic.AtomicBoolean,
+        val stopIconLabel: JComponent? = null  // 仅 task 工具非空（StopIconLabel 实例），供外部清理引用
     )
 
     /** 执行中行：带动态盲文 spinner，不可折叠 */
@@ -420,8 +500,9 @@ class ToolRowFactory(
      * 工具执行期间的流式输出行：可折叠，**默认折叠**。
      * 有实时输出的工具（task、execute_command）内容动态填入，用户点击展开查看。
      * @param isTask 是否为子 Agent（task 用紫色，普通工具用蓝色）
+     * @param onStop task 工具停止回调，isTask=true 时传入以启用可交互停止图标
      */
-    fun streamingToolRow(toolName: String, isTask: Boolean = false): StreamingToolRow {
+    fun streamingToolRow(toolName: String, isTask: Boolean = false, onStop: (() -> Unit)? = null): StreamingToolRow {
         val barColor = if (isTask) ChatTheme.agentBar else ChatTheme.toolBar
         val bgColor = if (isTask) ChatTheme.agentBg else ChatTheme.toolBg
         val collapsed = java.util.concurrent.atomic.AtomicBoolean(true)  // 默认折叠
@@ -431,7 +512,12 @@ class ToolRowFactory(
             foreground = barColor
             border = JBUI.Borders.empty(0, 6, 0, 4)
         }
-        val spinner = BrailleSpinnerLabel(barColor)
+        // task 工具使用可交互停止图标，普通工具使用纯动画 spinner
+        val spinnerOrStop: JComponent = if (isTask && onStop != null) {
+            StopIconLabel(barColor, onStop)
+        } else {
+            BrailleSpinnerLabel(barColor)
+        }
         val label = JLabel("执行中 · $toolName").apply {
             font = toolFont
             foreground = ChatTheme.toolFg
@@ -440,7 +526,7 @@ class ToolRowFactory(
             layout = BoxLayout(this, BoxLayout.X_AXIS)
             isOpaque = false
             add(chevron)
-            add(spinner)
+            add(spinnerOrStop)
             add(hGap(4))
             add(label)
             add(Box.createHorizontalGlue())
@@ -476,7 +562,8 @@ class ToolRowFactory(
             add(Box.createHorizontalGlue())
         }
 
-        return StreamingToolRow(outerRow, contentArea, collapsed)
+        return StreamingToolRow(outerRow, contentArea, collapsed,
+            stopIconLabel = spinnerOrStop as? StopIconLabel)
     }
 
     /** 切换流式工具行的折叠状态 */
@@ -879,5 +966,5 @@ private fun openDiffView(project: Project, oldContent: String, newContent: Strin
     val newContentImpl = DocumentContentImpl(project, newDoc, fileType)
     val request = SimpleDiffRequest("$title — 改动对比", oldContentImpl, newContentImpl, "写入前", "写入后")
     DiffManager.getInstance().showDiff(project, request)
-    // 注意：EditorFactory document 在 diff 窗口关闭后由 IntelliJ 框架管理生命周期，不手动释放
+    // EditorFactory.createDocument() 内部由 WeakHashMap 跟踪，diff 视图关闭后无引用时自动 GC
 }

@@ -66,7 +66,23 @@ class NotebookEditTool : AgentTool {
             }
 
             val gson = Gson()
-            file.writeText(gson.toJson(nb))
+            // 原子写入：先写临时文件再 rename，防止写入中途崩溃损坏原文件
+            val tmp = File(file.path + ".tmp")
+            val bak = File(file.path + ".bak")
+            try {
+                tmp.writeText(gson.toJson(nb))
+                try {
+                    java.nio.file.Files.move(tmp.toPath(), file.toPath(),
+                        java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+                } catch (_: java.nio.file.AtomicMoveNotSupportedException) {
+                    if (file.exists()) java.nio.file.Files.move(file.toPath(), bak.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+                    java.nio.file.Files.move(tmp.toPath(), file.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+                    bak.delete()
+                }
+            } finally {
+                if (tmp.exists() && !tmp.delete()) tmp.deleteOnExit()
+            }
             ToolResult.ok("notebook 已更新: $notebookPath (${editMode})")
         } catch (e: Exception) {
             ToolResult.err("notebook 编辑失败: ${e.message}")

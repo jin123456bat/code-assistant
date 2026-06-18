@@ -14,7 +14,7 @@ class AgentLoop(
 ) {
     companion object {
         const val MAX_LOOPS = Int.MAX_VALUE  // 主 Agent 不限制轮次（对齐 Claude Code）
-        const val MAX_SUB_LOOPS = 20         // 子 Agent 默认最大轮次（对齐 Claude Code maxTurns）
+        const val MAX_SUB_LOOPS = Int.MAX_VALUE  // 子 Agent 不限制轮次（对齐 Claude Code，连续失败 MAX_FAILURES=3 仍生效）
         const val MAX_FAILURES = 3
         const val MAX_CONTINUATIONS = 5  // max_tokens 续写上限，防止死循环
 
@@ -259,16 +259,18 @@ class AgentLoop(
                             // ---- Plan Mode: 写工具拦截 ----
                             if (ctx.planMode && tc.name !in SAFE_TOOLS && tc.name !in META_TOOL_NAMES) {
                                 val denyMsg = "当前处于规划模式（EnterPlanMode），仅允许只读工具。请先调用 ExitPlanMode 提交方案并获得用户审批后，再执行写操作。"
-                                if (!firstToolCallTextAdded) {
-                                    if (!thinkingBlockAdded && thinking.isNotBlank()) {
-                                        history.add(AnthropicMessage("assistant", "", thinking = thinking, thinkingSignature = thinkingSignature))
-                                        thinkingBlockAdded = true
+                                synchronized(ctx.historyLock) {
+                                    if (!firstToolCallTextAdded) {
+                                        if (!thinkingBlockAdded && thinking.isNotBlank()) {
+                                            history.add(AnthropicMessage("assistant", "", thinking = thinking, thinkingSignature = thinkingSignature))
+                                            thinkingBlockAdded = true
+                                        }
+                                        history.add(AnthropicMessage("assistant", textContent))
+                                        firstToolCallTextAdded = true
                                     }
-                                    history.add(AnthropicMessage("assistant", textContent))
-                                    firstToolCallTextAdded = true
+                                    history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments, thinking = thinking, thinkingSignature = thinkingSignature))
+                                    history.add(AnthropicMessage("user", denyMsg, toolCallId = tc.id, groupId = roundGroupId))
                                 }
-                                history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments, thinking = thinking, thinkingSignature = thinkingSignature))
-                                history.add(AnthropicMessage("user", denyMsg, toolCallId = tc.id, groupId = roundGroupId))
                                 edt { onToolResult?.invoke(tc.name, denyMsg) }
                                 continue
                             }
@@ -280,16 +282,18 @@ class AgentLoop(
                                 val skillArgs = skillParams["args"]
                                 if (skillName == null) {
                                     val errMsg = "Skill 调用失败：缺少 skill 参数。可用 skill: ${ctx.skillDefs.keys.joinToString(", ")}"
-                                    if (!firstToolCallTextAdded) {
-                                        if (!thinkingBlockAdded && thinking.isNotBlank()) {
-                                            history.add(AnthropicMessage("assistant", "", thinking = thinking, thinkingSignature = thinkingSignature))
-                                            thinkingBlockAdded = true
+                                    synchronized(ctx.historyLock) {
+                                        if (!firstToolCallTextAdded) {
+                                            if (!thinkingBlockAdded && thinking.isNotBlank()) {
+                                                history.add(AnthropicMessage("assistant", "", thinking = thinking, thinkingSignature = thinkingSignature))
+                                                thinkingBlockAdded = true
+                                            }
+                                            history.add(AnthropicMessage("assistant", textContent))
+                                            firstToolCallTextAdded = true
                                         }
-                                        history.add(AnthropicMessage("assistant", textContent))
-                                        firstToolCallTextAdded = true
+                                        history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments, thinking = thinking, thinkingSignature = thinkingSignature))
+                                        history.add(AnthropicMessage("user", errMsg, toolCallId = tc.id, groupId = roundGroupId))
                                     }
-                                    history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments, thinking = thinking, thinkingSignature = thinkingSignature))
-                                    history.add(AnthropicMessage("user", errMsg, toolCallId = tc.id, groupId = roundGroupId))
                                     edt { onToolResult?.invoke(tc.name, errMsg) }
                                     continue
                                 }
@@ -308,16 +312,18 @@ class AgentLoop(
                                     ctx.activatedSkill = null
                                     "未知 Skill: $skillName。可用 skill: ${ctx.skillDefs.keys.joinToString(", ")}"
                                 }
-                                if (!firstToolCallTextAdded) {
-                                    if (!thinkingBlockAdded && thinking.isNotBlank()) {
-                                        history.add(AnthropicMessage("assistant", "", thinking = thinking, thinkingSignature = thinkingSignature))
-                                        thinkingBlockAdded = true
+                                synchronized(ctx.historyLock) {
+                                    if (!firstToolCallTextAdded) {
+                                        if (!thinkingBlockAdded && thinking.isNotBlank()) {
+                                            history.add(AnthropicMessage("assistant", "", thinking = thinking, thinkingSignature = thinkingSignature))
+                                            thinkingBlockAdded = true
+                                        }
+                                        history.add(AnthropicMessage("assistant", textContent))
+                                        firstToolCallTextAdded = true
                                     }
-                                    history.add(AnthropicMessage("assistant", textContent))
-                                    firstToolCallTextAdded = true
+                                    history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments, thinking = thinking, thinkingSignature = thinkingSignature))
+                                    history.add(AnthropicMessage("user", skillResult, toolCallId = tc.id, groupId = roundGroupId))
                                 }
-                                history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments, thinking = thinking, thinkingSignature = thinkingSignature))
-                                history.add(AnthropicMessage("user", skillResult, toolCallId = tc.id, groupId = roundGroupId))
                                 edt { onToolResult?.invoke(tc.name, skillResult) }
                                 continue
                             }
@@ -326,16 +332,18 @@ class AgentLoop(
                             if (tc.name == "EnterPlanMode") {
                                 ctx.planMode = true
                                 val msg = "已进入规划模式。现在只能使用只读工具（search_code、read_file、list_directory 等）探索代码库和设计方案。完成后调用 ExitPlanMode 提交方案。"
-                                if (!firstToolCallTextAdded) {
-                                    if (!thinkingBlockAdded && thinking.isNotBlank()) {
-                                        history.add(AnthropicMessage("assistant", "", thinking = thinking, thinkingSignature = thinkingSignature))
-                                        thinkingBlockAdded = true
+                                synchronized(ctx.historyLock) {
+                                    if (!firstToolCallTextAdded) {
+                                        if (!thinkingBlockAdded && thinking.isNotBlank()) {
+                                            history.add(AnthropicMessage("assistant", "", thinking = thinking, thinkingSignature = thinkingSignature))
+                                            thinkingBlockAdded = true
+                                        }
+                                        history.add(AnthropicMessage("assistant", textContent))
+                                        firstToolCallTextAdded = true
                                     }
-                                    history.add(AnthropicMessage("assistant", textContent))
-                                    firstToolCallTextAdded = true
+                                    history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments, thinking = thinking, thinkingSignature = thinkingSignature))
+                                    history.add(AnthropicMessage("user", msg, toolCallId = tc.id, groupId = roundGroupId))
                                 }
-                                history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments, thinking = thinking, thinkingSignature = thinkingSignature))
-                                history.add(AnthropicMessage("user", msg, toolCallId = tc.id, groupId = roundGroupId))
                                 edt { onToolResult?.invoke(tc.name, msg); onTaskUpdate?.invoke() }
                                 continue
                             }
@@ -370,16 +378,18 @@ class AgentLoop(
                                 } else {
                                     "方案被用户拒绝。请根据反馈调整方案，或回到规划模式继续研究。"
                                 }
-                                if (!firstToolCallTextAdded) {
-                                    if (!thinkingBlockAdded && thinking.isNotBlank()) {
-                                        history.add(AnthropicMessage("assistant", "", thinking = thinking, thinkingSignature = thinkingSignature))
-                                        thinkingBlockAdded = true
+                                synchronized(ctx.historyLock) {
+                                    if (!firstToolCallTextAdded) {
+                                        if (!thinkingBlockAdded && thinking.isNotBlank()) {
+                                            history.add(AnthropicMessage("assistant", "", thinking = thinking, thinkingSignature = thinkingSignature))
+                                            thinkingBlockAdded = true
+                                        }
+                                        history.add(AnthropicMessage("assistant", textContent))
+                                        firstToolCallTextAdded = true
                                     }
-                                    history.add(AnthropicMessage("assistant", textContent))
-                                    firstToolCallTextAdded = true
+                                    history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments, thinking = thinking, thinkingSignature = thinkingSignature))
+                                    history.add(AnthropicMessage("user", planResult, toolCallId = tc.id, groupId = roundGroupId))
                                 }
-                                history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments, thinking = thinking, thinkingSignature = thinkingSignature))
-                                history.add(AnthropicMessage("user", planResult, toolCallId = tc.id, groupId = roundGroupId))
                                 edt { onToolResult?.invoke(tc.name, planResult) }
                                 continue
                             }
@@ -394,16 +404,18 @@ class AgentLoop(
                                 ctx.tasks.add(task)
                                 edt { onTaskUpdate?.invoke() }
                                 val msg = "任务 #$nextId 已创建: $subject"
-                                if (!firstToolCallTextAdded) {
-                                    if (!thinkingBlockAdded && thinking.isNotBlank()) {
-                                        history.add(AnthropicMessage("assistant", "", thinking = thinking, thinkingSignature = thinkingSignature))
-                                        thinkingBlockAdded = true
+                                synchronized(ctx.historyLock) {
+                                    if (!firstToolCallTextAdded) {
+                                        if (!thinkingBlockAdded && thinking.isNotBlank()) {
+                                            history.add(AnthropicMessage("assistant", "", thinking = thinking, thinkingSignature = thinkingSignature))
+                                            thinkingBlockAdded = true
+                                        }
+                                        history.add(AnthropicMessage("assistant", textContent))
+                                        firstToolCallTextAdded = true
                                     }
-                                    history.add(AnthropicMessage("assistant", textContent))
-                                    firstToolCallTextAdded = true
+                                    history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments, thinking = thinking, thinkingSignature = thinkingSignature))
+                                    history.add(AnthropicMessage("user", msg, toolCallId = tc.id, groupId = roundGroupId))
                                 }
-                                history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments, thinking = thinking, thinkingSignature = thinkingSignature))
-                                history.add(AnthropicMessage("user", msg, toolCallId = tc.id, groupId = roundGroupId))
                                 edt { onToolResult?.invoke(tc.name, msg) }
                                 continue
                             }
@@ -430,16 +442,18 @@ class AgentLoop(
                                         }
                                     }
                                 }
-                                if (!firstToolCallTextAdded) {
-                                    if (!thinkingBlockAdded && thinking.isNotBlank()) {
-                                        history.add(AnthropicMessage("assistant", "", thinking = thinking, thinkingSignature = thinkingSignature))
-                                        thinkingBlockAdded = true
+                                synchronized(ctx.historyLock) {
+                                    if (!firstToolCallTextAdded) {
+                                        if (!thinkingBlockAdded && thinking.isNotBlank()) {
+                                            history.add(AnthropicMessage("assistant", "", thinking = thinking, thinkingSignature = thinkingSignature))
+                                            thinkingBlockAdded = true
+                                        }
+                                        history.add(AnthropicMessage("assistant", textContent))
+                                        firstToolCallTextAdded = true
                                     }
-                                    history.add(AnthropicMessage("assistant", textContent))
-                                    firstToolCallTextAdded = true
+                                    history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments, thinking = thinking, thinkingSignature = thinkingSignature))
+                                    history.add(AnthropicMessage("user", msg, toolCallId = tc.id, groupId = roundGroupId))
                                 }
-                                history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments, thinking = thinking, thinkingSignature = thinkingSignature))
-                                history.add(AnthropicMessage("user", msg, toolCallId = tc.id, groupId = roundGroupId))
                                 edt { onToolResult?.invoke(tc.name, msg) }
                                 continue
                             }
@@ -456,16 +470,18 @@ class AgentLoop(
                                         "#${t.id} $mark ${t.subject}${if (t.result != null) " — ${t.result}" else ""}"
                                     }
                                 }
-                                if (!firstToolCallTextAdded) {
-                                    if (!thinkingBlockAdded && thinking.isNotBlank()) {
-                                        history.add(AnthropicMessage("assistant", "", thinking = thinking, thinkingSignature = thinkingSignature))
-                                        thinkingBlockAdded = true
+                                synchronized(ctx.historyLock) {
+                                    if (!firstToolCallTextAdded) {
+                                        if (!thinkingBlockAdded && thinking.isNotBlank()) {
+                                            history.add(AnthropicMessage("assistant", "", thinking = thinking, thinkingSignature = thinkingSignature))
+                                            thinkingBlockAdded = true
+                                        }
+                                        history.add(AnthropicMessage("assistant", textContent))
+                                        firstToolCallTextAdded = true
                                     }
-                                    history.add(AnthropicMessage("assistant", textContent))
-                                    firstToolCallTextAdded = true
+                                    history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments, thinking = thinking, thinkingSignature = thinkingSignature))
+                                    history.add(AnthropicMessage("user", msg, toolCallId = tc.id, groupId = roundGroupId))
                                 }
-                                history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments, thinking = thinking, thinkingSignature = thinkingSignature))
-                                history.add(AnthropicMessage("user", msg, toolCallId = tc.id, groupId = roundGroupId))
                                 edt { onToolResult?.invoke(tc.name, msg) }
                                 continue
                             }
@@ -485,16 +501,18 @@ class AgentLoop(
                                         }
                                     }
                                 }
-                                if (!firstToolCallTextAdded) {
-                                    if (!thinkingBlockAdded && thinking.isNotBlank()) {
-                                        history.add(AnthropicMessage("assistant", "", thinking = thinking, thinkingSignature = thinkingSignature))
-                                        thinkingBlockAdded = true
+                                synchronized(ctx.historyLock) {
+                                    if (!firstToolCallTextAdded) {
+                                        if (!thinkingBlockAdded && thinking.isNotBlank()) {
+                                            history.add(AnthropicMessage("assistant", "", thinking = thinking, thinkingSignature = thinkingSignature))
+                                            thinkingBlockAdded = true
+                                        }
+                                        history.add(AnthropicMessage("assistant", textContent))
+                                        firstToolCallTextAdded = true
                                     }
-                                    history.add(AnthropicMessage("assistant", textContent))
-                                    firstToolCallTextAdded = true
+                                    history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments, thinking = thinking, thinkingSignature = thinkingSignature))
+                                    history.add(AnthropicMessage("user", msg, toolCallId = tc.id, groupId = roundGroupId))
                                 }
-                                history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments, thinking = thinking, thinkingSignature = thinkingSignature))
-                                history.add(AnthropicMessage("user", msg, toolCallId = tc.id, groupId = roundGroupId))
                                 edt { onToolResult?.invoke(tc.name, msg) }
                                 continue
                             }

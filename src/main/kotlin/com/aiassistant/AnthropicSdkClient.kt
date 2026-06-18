@@ -161,10 +161,17 @@ class AnthropicSdkClient(
                         latch.countDown()
                     }
                 }
+                // forEach 正常退出但未收到 message_stop（服务器优雅关闭 SSE 流）：
+                // 通知上层释放 doneLatch（AgentLoop 层），避免 120 秒二次等待。
+                // callAnthropic() 有 hasResponse 标志保护——若已收到部分数据则使用之，不会丢失。
+                if (latch.count > 0) {
+                    callback.onError(RuntimeException("SSE stream ended without message_stop"))
+                }
             }
         } catch (e: Exception) {
             callback.onError(e)
-            latch.countDown()
+        } finally {
+            latch.countDown()  // 无论何种退出路径都释放，防止 Agent 线程永久阻塞
         }
 
         latch.await(10, TimeUnit.MINUTES)

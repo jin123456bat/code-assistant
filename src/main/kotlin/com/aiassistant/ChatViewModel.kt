@@ -30,8 +30,8 @@ class ChatViewModel {
     /** 限流恢复 Timer 引用，供 stopGeneration/clearConversation 取消 */
     private var rateLimitTimer: javax.swing.Timer? = null
     @Volatile var currentToolName: String? = null
-    /** 待审批工具: toolName → ApprovalState */
-    @Volatile var pendingApprovals = mutableMapOf<String, ApprovalState>()
+    /** 待审批工具: toolName → ApprovalState（ConcurrentHashMap 线程安全） */
+    val pendingApprovals = java.util.concurrent.ConcurrentHashMap<String, ApprovalState>()
     /** 消息关联的引用 chips，key=msgId。sendMessage 时在 onMessagesChanged 之前写入 */
     val messageRefChips = mutableMapOf<Long, List<com.aiassistant.ChatToolWindow.RefChip>>()
     /**
@@ -149,7 +149,9 @@ class ChatViewModel {
 
     private fun setupCallbacks(a: AgentLoop) {
         a.onMessage = { msg ->
+            val currentGen = generationId
             runOnEdt {
+                if (generationId != currentGen) return@runOnEdt  // 已被 stop/新请求覆盖
                 AppLogger.info("EDT onMessage role=${msg.role} contentLen=${msg.content.length} streamingThinking.len=${streamingThinking.length} streamingContent.len=${streamingContent.length}")
                 if (msg.role == "thinking") {
                     addThinkingMessage(msg.content)
@@ -180,12 +182,16 @@ class ChatViewModel {
             }
         }
         a.onToolStreaming = { name, partial ->
+            val currentGen = generationId
             runOnEdt {
+                if (generationId != currentGen) return@runOnEdt
                 onToolStreaming?.invoke(name, partial)
             }
         }
         a.onToolExecute = { name, args ->
+            val currentGen = generationId
             runOnEdt {
+                if (generationId != currentGen) return@runOnEdt
                 activity = Activity.RunningTool(name)
                 currentToolName = name
                 messages.add(AgentMessage("tool", args, toolName = name))
@@ -193,7 +199,9 @@ class ChatViewModel {
             }
         }
         a.onToolResult = { name, result ->
+            val currentGen = generationId
             runOnEdt {
+                if (generationId != currentGen) return@runOnEdt
                 // 工具结束后 agent 仍在循环 → 回到"思考中"而非 Idle，避免指示器消失再出现的闪烁
                 activity = Activity.Thinking
                 currentToolName = null
@@ -230,7 +238,10 @@ class ChatViewModel {
                     onError?.invoke(msg)
                     // 60 秒后用 javax.swing.Timer 在 EDT 上自动重置限流状态
                     rateLimitTimer?.stop()
-                    rateLimitTimer = javax.swing.Timer(60_000) { isRateLimited = false }.apply {
+                    rateLimitTimer = javax.swing.Timer(60_000) {
+                        isRateLimited = false
+                        onError?.invoke(null)  // 限流到期后清除错误横幅
+                    }.apply {
                         isRepeats = false
                         start()
                     }

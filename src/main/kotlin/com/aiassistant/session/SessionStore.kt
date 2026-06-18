@@ -15,8 +15,12 @@ object SessionStore {
                            val tokenStats: TokenStatsDTO? = null)
     data class MessageDTO(val role: String, val content: String, val toolName: String? = null,
                           val toolCallId: String? = null, val toolCalls: List<ToolCallDTO>? = null,
-                          val timestamp: Long = System.currentTimeMillis())
+                          val timestamp: Long = System.currentTimeMillis(),
+                          val id: Long = 0, val version: Int = 0,
+                          val inputTokens: Int = 0, val outputTokens: Int = 0,
+                          val images: List<ImageDTO>? = null)
     data class ToolCallDTO(val id: String, val name: String, val arguments: String)
+    data class ImageDTO(val mediaType: String, val data: String)
     data class TokenStatsDTO(val totalInput: Long, val totalOutput: Long, val roundCount: Int,
                              val perRound: List<RoundTokenDTO>)
     data class RoundTokenDTO(val inputTokens: Int, val outputTokens: Int, val timestamp: Long)
@@ -33,6 +37,7 @@ object SessionStore {
             ?.sortedByDescending { it.updatedAt } ?: emptyList()
     }
 
+    @Synchronized
     fun save(projectBasePath: String, id: String, name: String, messages: List<AgentMessage>,
              tokenStats: TokenStatsDTO? = null) {
         val target = File(dir(projectBasePath), "$id.json")
@@ -50,7 +55,12 @@ object SessionStore {
                     content = msg.content.take(5000),
                     toolName = msg.toolName,
                     toolCallId = msg.toolCallId,
-                    toolCalls = msg.toolCalls?.map { ToolCallDTO(it.id, it.name, it.arguments) }
+                    toolCalls = msg.toolCalls?.map { ToolCallDTO(it.id, it.name, it.arguments) },
+                    id = msg.id,
+                    version = msg.version,
+                    inputTokens = msg.inputTokens,
+                    outputTokens = msg.outputTokens,
+                    images = msg.images?.map { ImageDTO(it.mediaType, it.data) }
                 )
             },
             tokenStats = tokenStats

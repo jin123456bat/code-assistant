@@ -129,7 +129,7 @@ class EditTool : AgentTool {
         }
     }
 
-    /** 查找所有出现位置（最多 6 处，用于不唯一检测和上下文展示） */
+    /** 查找所有出现位置（最多 100 处，用于不唯一检测和上下文展示） */
     private fun findAllOccurrences(content: String, target: String): List<Occurrence> {
         val results = mutableListOf<Occurrence>()
         var startIndex = 0
@@ -137,7 +137,9 @@ class EditTool : AgentTool {
             val idx = content.indexOf(target, startIndex)
             if (idx < 0) break
             val line = content.substring(0, idx).count { it == '\n' } + 1
-            results.add(Occurrence(line, 0))
+            val lineStart = content.lastIndexOf('\n', idx.coerceAtLeast(1) - 1) + 1
+            val col = idx - lineStart + 1  // 1-based 列号
+            results.add(Occurrence(line, col))
             startIndex = idx + 1
         }
         return results

@@ -57,6 +57,31 @@ object SubAgentRegistry {
         }
     }
 
+    /** 停止单个子 Agent。 */
+    fun stop(id: String) {
+        loops.remove(id)?.stop()
+    }
+
+    /**
+     * 停止所有运行中的子 Agent（UI 停止按钮专用）。
+     * 与 stopAll() 的区别：失败原因标注为"用户手动终止"而非"主对话停止"。
+     */
+    fun stopAllByUser() {
+        if (stopping) return
+        stopping = true
+        try {
+            loops.values.forEach { it.stop() }
+            loops.clear()
+            entries.forEach { (id, entry) ->
+                if (entry.status == Status.RUNNING) {
+                    entries[id] = entry.copy(status = Status.FAILED, error = "用户手动终止")
+                }
+            }
+        } finally {
+            stopping = false
+        }
+    }
+
     fun complete(id: String, result: String) {
         synchronized(drainLock) {
             entries[id]?.let {

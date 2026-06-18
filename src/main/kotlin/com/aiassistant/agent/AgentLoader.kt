@@ -8,7 +8,7 @@ import java.io.File
 object AgentLoader {
 
     // YAML frontmatter 分隔符
-    private val FRONTMATTER = Regex("^---\\s*\\n(.*?)\\n---\\s*\\n(.*)", setOf(RegexOption.DOT_MATCHES_ALL))
+    private val FRONTMATTER = Regex("^---\\s*\\R(.*?)\\R---\\s*\\R(.*)", setOf(RegexOption.DOT_MATCHES_ALL))
 
     data class CustomAgentDef(
         val name: String,

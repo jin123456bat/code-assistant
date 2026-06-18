@@ -51,18 +51,18 @@ class ChatBubble(
         isOpaque = false
         border = JBUI.Borders.empty(ChatTheme.PAD_BUBBLE_V, ChatTheme.PAD_BUBBLE_H)
         add(content, BorderLayout.CENTER)
-        // 悬停显示 token 消耗量（200ms 延迟隐藏，防抖）
+        // 悬停显示 token 消耗量（200ms 延迟隐藏，防抖，复用单个 Timer）
+        val hideTimer = javax.swing.Timer(200) { tokenLabel?.isVisible = false }.apply {
+            isRepeats = false
+        }
         addMouseListener(object : MouseAdapter() {
-            private var hideTimer: javax.swing.Timer? = null
             override fun mouseEntered(e: MouseEvent) {
-                hideTimer?.stop()
+                hideTimer.stop()
                 tokenLabel?.isVisible = true
             }
             override fun mouseExited(e: MouseEvent) {
-                hideTimer?.stop()
-                hideTimer = javax.swing.Timer(200) { tokenLabel?.isVisible = false }.apply {
-                    isRepeats = false; start()
-                }
+                hideTimer.stop()
+                hideTimer.start()  // 复用同一个 Timer，不每次创建新实例
             }
         })
     }
