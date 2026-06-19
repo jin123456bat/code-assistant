@@ -103,5 +103,20 @@
             <keyboard-shortcut keymap="Mac OS X 10.5+" first-keystroke="UP"/>
             <keyboard-shortcut keymap="$default" first-keystroke="UP"/>
         </action>
+
+        <action
+            id="CodeAssistant.ReviewSelectedCode"
+            class="com.aiassistant.ui.ReviewSelectedCodeAction"
+            text="审查选中代码"
+            description="将选中代码发送给 AI 审查">
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+        </action>
+        <action
+            id="CodeAssistant.SecurityReviewFile"
+            class="com.aiassistant.ui.SecurityReviewFileAction"
+            text="安全审查此文件"
+            description="对当前文件进行安全五维度审查">
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+        </action>
     </actions>
 </idea-plugin>
