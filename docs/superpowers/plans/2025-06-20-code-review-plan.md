@@ -29,8 +29,11 @@
 | `src/main/kotlin/com/aiassistant/ui/ReviewResultPanel.kt` | 创建 | 审查结果面板 |
 | `src/main/kotlin/com/aiassistant/ui/ReviewContextMenu.kt` | 创建 | 右键菜单 |
 | `src/main/kotlin/com/aiassistant/ChatToolWindow.kt` | 修改 | 注册 5 个新命令 + 集成面板 |
-| `src/main/kotlin/com/aiassistant/ChatViewModel.kt` | 修改 | lastTestOutput 缓存（/fix 读取） |
-| `src/main/resources/META-INF/plugin.xml` | 修改 | 注册 EP 扩展（gutter/context menu） |
+| `src/main/kotlin/com/aiassistant/ui/ReviewResultPanel.kt` | 创建 | 审查结果面板（可折叠/展开/修复/忽略） |
+| `src/main/kotlin/com/aiassistant/ui/ReviewContextMenu.kt` | 创建 | 右键菜单 Action（审查选中代码/安全审查文件） |
+| `src/main/kotlin/com/aiassistant/actions/ReviewSelectedCodeAction.kt` | 创建 | 选中代码审查 Action |
+| `src/main/kotlin/com/aiassistant/ChatViewModel.kt` | 修改 | lastTestOutput 缓存 + getApiKey + addSystemMessage |
+| `src/main/resources/META-INF/plugin.xml` | 修改 | 注册 EP 扩展（右键菜单 Action） |
 
 ---
 
@@ -1053,7 +1056,199 @@ git commit -m "feat(commands): 集成 5 个斜杠命令到 ChatToolWindow"
 
 ---
 
-### Task 6: 最终验证
+### Task 6: IDE 集成（ReviewResultPanel + ContextMenu）
+
+**Files:**
+- Create: `src/main/kotlin/com/aiassistant/ui/ReviewResultPanel.kt`
+- Create: `src/main/kotlin/com/aiassistant/ui/ReviewContextMenu.kt`
+- Create: `src/main/kotlin/com/aiassistant/actions/ReviewSelectedCodeAction.kt`
+- Modify: `src/main/kotlin/com/aiassistant/ChatToolWindow.kt`
+- Modify: `src/main/resources/META-INF/plugin.xml`
+
+- [ ] **Step 1: ReviewResultPanel — 审查结果面板**
+
+位于聊天区下方，展示 Findings 列表，每条可展开/修复/忽略。
+
+```kotlin
+package com.aiassistant.ui
+
+import com.aiassistant.review.Finding
+import com.aiassistant.review.Severity
+import java.awt.BorderLayout
+import java.awt.Dimension
+import javax.swing.*
+import javax.swing.border.EmptyBorder
+
+class ReviewResultPanel : JPanel(BorderLayout()) {
+
+    private val titleLabel = JLabel("📋 审查结果").apply {
+        font = ChatTheme.metaFont.deriveFont(14f)
+        border = EmptyBorder(6, 10, 4, 10)
+    }
+    private val findingsList = JPanel().apply { layout = BoxLayout(this, BoxLayout.Y_AXIS) }
+    private val scrollPane = JScrollPane(findingsList).apply {
+        border = null
+        preferredSize = Dimension(Int.MAX_VALUE, 200)
+    }
+
+    var onNavigateToFile: ((String, Int) -> Unit)? = null  // 跳转到文件:行号
+    var onFixRequest: ((Finding) -> Unit)? = null             // 请求修复
+
+    init {
+        add(titleLabel, BorderLayout.NORTH)
+        add(scrollPane, BorderLayout.CENTER)
+        isVisible = false
+    }
+
+    fun showResults(findings: List<Finding>, score: Int) {
+        findingsList.removeAll()
+        titleLabel.text = "📋 审查结果 — $score/100 (${findings.size} 个问题)"
+
+        for (f in findings) {
+            val icon = when (f.severity) { Severity.CRITICAL -> "🔴"; Severity.WARNING -> "🟡"; else -> "🔵" }
+            val row = JPanel(BorderLayout()).apply {
+                border = EmptyBorder(3, 10, 3, 10)
+                maximumSize = Dimension(Int.MAX_VALUE, 24)
+            }
+            val label = JLabel("$icon ${f.title}  ${f.file}:${f.line}")
+            label.font = ChatTheme.metaFont
+            label.cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
+            label.addMouseListener(object : java.awt.event.MouseAdapter() {
+                override fun mouseClicked(e: java.awt.event.MouseEvent) {
+                    onNavigateToFile?.invoke(f.file, f.line)
+                }
+            })
+            row.add(label, BorderLayout.CENTER)
+            if (f.suggestion.isNotBlank()) {
+                val fixBtn = JButton("修复").apply {
+                    font = ChatTheme.metaFont; margin = Insets(0, 6, 0, 6)
+                }
+                fixBtn.addActionListener { onFixRequest?.invoke(f) }
+                row.add(fixBtn, BorderLayout.EAST)
+            }
+            findingsList.add(row)
+        }
+        findingsList.revalidate()
+        findingsList.repaint()
+        isVisible = true
+    }
+
+    fun hide() { isVisible = false }
+}
+```
+
+- [ ] **Step 2: ReviewContextMenu — 右键菜单**
+
+```kotlin
+package com.aiassistant.ui
+
+import com.intellij.openapi.actionSystem.AnAction
+import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.CommonDataKeys
+import com.intellij.openapi.editor.Editor
+
+/** 右键菜单：审查选中代码 */
+class ReviewSelectedCodeAction : AnAction("审查选中代码", "将选中代码发送给 AI 审查", null) {
+    override fun actionPerformed(e: AnActionEvent) {
+        val editor = e.getData(CommonDataKeys.EDITOR) ?: return
+        val selection = editor.selectionModel.selectedText
+        if (selection.isNullOrBlank()) {
+            // 无选中 → 审查整个文件
+            val doc = editor.document
+            val filePath = e.getData(CommonDataKeys.PSI_FILE)?.virtualFile?.path ?: return
+            // 交由 ReviewEngine 处理（通过 ApplicationManager 获取服务）
+        }
+    }
+
+    override fun update(e: AnActionEvent) {
+        e.presentation.isEnabled = e.getData(CommonDataKeys.EDITOR) != null
+    }
+}
+
+/** 右键菜单：安全审查当前文件 */
+class SecurityReviewFileAction : AnAction("安全审查此文件", "对当前文件进行安全五维度审查", null) {
+    override fun actionPerformed(e: AnActionEvent) {
+        val filePath = e.getData(CommonDataKeys.PSI_FILE)?.virtualFile?.path ?: return
+        // 交由 SecurityReviewEngine 处理
+    }
+
+    override fun update(e: AnActionEvent) {
+        e.presentation.isEnabled = e.getData(CommonDataKeys.PSI_FILE) != null
+    }
+}
+```
+
+- [ ] **Step 3: ChatToolWindow 集成 ReviewResultPanel**
+
+在 `northStack` 和 `conversationScrollPane` 之间添加 ReviewResultPanel：
+
+```kotlin
+// ChatToolWindow 中添加字段
+private val reviewResultPanel = ReviewResultPanel()
+
+// 在 contentPanel 的 CENTER 容器中添加（northStack 下方，conversationScrollPane 上方）
+// 修改 conversationPanel 的 CENTER 容器：
+// 原来：
+//   conversationPanel.add(northStack, BorderLayout.NORTH)
+//   conversationPanel.add(conversationScrollPane, BorderLayout.CENTER)
+// 改为：
+//   val centerPanel = JPanel(BorderLayout())
+//   centerPanel.add(reviewResultPanel, BorderLayout.NORTH)    // 审查结果面板在上
+//   centerPanel.add(conversationScrollPane, BorderLayout.CENTER) // 聊天区在下
+//   conversationPanel.add(northStack, BorderLayout.NORTH)
+//   conversationPanel.add(centerPanel, BorderLayout.CENTER)
+
+// 设置回调
+reviewResultPanel.onNavigateToFile = { file, line ->
+    val vf = com.intellij.openapi.vfs.LocalFileSystem.getInstance().findFileByPath("${project.basePath}/$file")
+    if (vf != null) {
+        com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project).openFile(vf, true)
+        // 跳转到指定行
+        val editor = com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project).selectedTextEditor
+        if (editor != null && line > 0) {
+            val doc = editor.document
+            if (line <= doc.lineCount) {
+                val offset = doc.getLineStartOffset(line - 1)
+                editor.caretModel.moveToOffset(offset)
+            }
+        }
+    }
+}
+reviewResultPanel.onFixRequest = { finding ->
+    sendQuick("请修复以下问题：\n文件: ${finding.file}\n行号: ${finding.line}\n问题: ${finding.title}\n描述: ${finding.description}")
+    reviewResultPanel.hide()
+}
+```
+
+- [ ] **Step 4: plugin.xml 注册 Action**
+
+```xml
+<actions>
+    <action id="CodeAssistant.ReviewSelectedCode"
+            class="com.aiassistant.ui.ReviewSelectedCodeAction"
+            text="审查选中代码"
+            description="将选中代码发送给 AI 审查">
+        <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+    </action>
+    <action id="CodeAssistant.SecurityReviewFile"
+            class="com.aiassistant.ui.SecurityReviewFileAction"
+            text="安全审查此文件"
+            description="对当前文件进行安全五维度审查">
+        <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+    </action>
+</actions>
+```
+
+- [ ] **Step 5: 提交**
+
+```bash
+git add src/main/kotlin/com/aiassistant/ui/ReviewResultPanel.kt src/main/kotlin/com/aiassistant/ui/ReviewContextMenu.kt src/main/kotlin/com/aiassistant/actions/ReviewSelectedCodeAction.kt src/main/kotlin/com/aiassistant/ChatToolWindow.kt src/main/resources/META-INF/plugin.xml
+git commit -m "feat(ui): 添加 ReviewResultPanel + 右键菜单 IDE 集成"
+```
+
+---
+
+### Task 7: 最终验证
 
 - [ ] **Step 1: 编译验证**
 
@@ -1093,14 +1288,15 @@ git commit -m "chore(review): 最终验证——编译+测试全部通过" --all
 | T3 Security | 6 | 0 |
 | T4 TestRunner | 1 | 0 |
 | T5 命令集成 | 1 | 2 |
-| T6 验证 | 0 | 0 |
-| **合计** | **14 新文件** | **2 改文件** |
+| T6 IDE 集成 | 3 | 2 |
+| T7 验证 | 0 | 0 |
+| **合计** | **17 新文件** | **4 改文件** |
 
 ## 并行执行建议
 
 - **Lane A**: T1 (DiffCollector) → T2 (ReviewEngine)
 - **Lane B**: T3 (SecurityReviewEngine)
 - **Lane C**: T4 (TestRunner)
-- **A+B+C 合流后**: T5 (命令集成) → T6 (验证)
+- **A+B+C 合流后**: T5 (命令集成) → T6 (IDE 集成) → T7 (验证)
 
 T1/T2、T3、T4 三路可并行执行（无共享模块）
