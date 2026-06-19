@@ -11,8 +11,8 @@
 
 ## P1 — 交互增强
 
-- [ ] **更多斜杠命令**
-  `/review` 代码审查、`/test` 运行测试、`/diff` 查看变更、`/security-review` 安全审查
+- [x] **更多斜杠命令** ✅ 已完成
+  `/review`(审查+--fix+--comment)、`/test`(执行+解析)、`/diff`(变更摘要)、`/security-review`(安全五维度)、`/fix`(修复测试)
 
 - [x] **会话管理** ✅ 已完成
   自动保存 + `/resume` 恢复 + `/export` 导出 Markdown
@@ -20,30 +20,30 @@
 - [x] **Token 精细化追踪** ✅ 已完成
   气泡悬停显示 token 消耗，📊 Dashboard 天/周统计，设置中可关闭
 
-- [ ] **Memory 记忆系统**
-  跨会话自动记忆，用户/项目/本地三层存储，`/memory` 命令管理
+- [x] **Memory 记忆系统** ✅ 已完成
+  跨会话自动记忆(MemoryStore+Engine+Relevance+AutoExtract)，`/memory` 命令管理，对齐 Claude Code 文件格式
 
 ## P2 — 代码智能增强
 
-- [ ] **快速诊断反馈**
-  每次 `Write`/`Edit` 后自动注入 IDE Inspection 结果到 Agent 上下文（类似 Claude Code LSP 自动诊断）
+- [x] **快速诊断反馈** ✅ 已完成
+  每次 `Write`/`Edit` 后自动注入 IDE Inspection 结果（DaemonCodeAnalyzer→Agent 上下文 `## 代码诊断`）
 
-- [ ] **调用层级 Call Hierarchy**
-  `incomingCalls` / `outgoingCalls` 操作（需 `CallHierarchyProvider` EP，per-language 实现）
+- [x] **调用层级 Call Hierarchy** ✅ 已完成
+  `code_intelligence` 新增 `incoming_calls`(ReferencesSearch) / `outgoing_calls`(PsiRecursiveElementVisitor)，不需额外 EP
 
-- [ ] **代码审查 Review**
-  集成 IDE diff 视图，多维度审查（正确性/安全/性能/可读性），支持 `--fix` 自动修复
+- [x] **代码审查 Review** ✅ 已完成
+  四维度审查引擎(正确性/简化/效率/安全)+ReviewResultPanel IDE集成+右键菜单+`--fix`+`--comment`
 
 ## P3 — 自动化
 
-- [ ] **Hooks 事件系统**
-  30+ 事件（`PreToolUse` / `PostToolUse` / `SessionStart` / `SessionEnd` 等），Command/HTTP/MCP/Prompt 多种 hook 类型
+- [x] **Hooks 事件系统** ✅ 已完成
+  13 事件(PreToolUse/PostToolUse/SessionStart/End/Stop…) + Command/HTTP/MCP/Prompt 4 种 hook 类型，对齐 Claude Code
 
-- [ ] **Loop 循环模式**
-  `/loop [interval] [prompt]` 定时或自适应间隔循环执行
+- [x] **Loop 循环模式** ⛔ wontfix
+  CLI 场景特有（终端定时轮询），IDE 插件用户无此场景
 
-- [ ] **后台代理**
-  Agent 后台运行不阻塞编辑，`/background` 启动，`/tasks` 查看进度
+- [x] **后台代理** ⛔ wontfix
+  Agent 已在后台 Thread 运行，子 Agent（task/workflow 工具）满足并行需求。IDE 环境下独立多会话场景不存在。
 
 - [x] **Workflow 工作流编排** ✅ 已完成
   `workflow` 工具：并行/串行多子 Agent + 自动结果合并
@@ -81,4 +81,8 @@
 
 ---
 
-共 22 项：P0 × 2、P1 × 4、P2 × 3、P3 × 4、P4 × 4、P5 × 5
+共 22 项：已完成 13、wontfix 2、待做 7
+
+| P0 | P1 | P2 | P3 | P4 | P5 |
+|----|----|----|----|----|----|
+| 2/2 ✅ | 4/4 ✅ | 3/3 ✅ | 2/2 ✅ + 2 wontfix | 0/4 | 0/5 |
