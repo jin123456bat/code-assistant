@@ -943,6 +943,12 @@ class ChatToolWindow(private val project: Project) {
         // v3: 注册内置工具+Skills（同步安全），首条消息即可调用
         viewModel.initialize(project)
 
+        // 初始化 Hooks 系统
+        val hookConfig = com.aiassistant.hooks.HookConfigLoader.load(project.basePath)
+        val hookExecutor = com.aiassistant.hooks.HookExecutor(mcpManager)
+        val hookBus = com.aiassistant.hooks.HookEventBus(hookConfig, hookExecutor)
+        viewModel.setHookEventBus(hookBus)
+
         // M5-A: 注册 ask_user 选择卡 handler（EDT 上执行；multiple=true 时多选模式）。
         // 保存引用，dispose() 时仅在仍是自己注册的 handler 时清空，避免泄露到失效 UI。
         val myAskUserHandler: (String, List<String>, Boolean, CountDownLatch, AtomicReference<String>) -> Unit =

@@ -61,6 +61,9 @@ class AgentContext(val project: Project) {
     /** 待注入的 IDE Inspection 诊断结果（write/edit 后由 DiagnosticFeedback 写入，下一轮 send 前注入） */
     @Volatile var pendingDiagnostics: String? = null
 
+    /** Hooks 事件总线（PreToolUse/PostToolUse/SessionStart 等事件分发） */
+    @Volatile var hookEventBus: com.aiassistant.hooks.HookEventBus? = null
+
     val rules = mutableListOf<RuleDef>()
 
     data class RuleDef(

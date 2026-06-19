@@ -83,12 +83,22 @@ class ChatViewModel {
     private var agent: AgentLoop? = null
     private var project: Project? = null
 
+    fun setHookEventBus(bus: com.aiassistant.hooks.HookEventBus) {
+        agent?.ctx?.hookEventBus = bus
+    }
+
     fun initialize(project: Project, mcpTools: List<com.aiassistant.agent.AgentTool> = emptyList()) {
         this.project = project
         val a = AgentLoop(project)
         a.initialize(mcpTools)
         setupCallbacks(a)
         agent = a
+
+        // SessionStart hook
+        val hookBus = a.ctx.hookEventBus
+        if (hookBus != null) {
+            hookBus.fire("SessionStart", mapOf("project_dir" to project.basePath))
+        }
     }
 
     data class SkillInfo(val name: String, val description: String)
@@ -445,6 +455,8 @@ class ChatViewModel {
         streamingContent = ""
         streamingThinking = ""
         runOnEdt { onStreamingStateChanged?.invoke(false) }
+        // Stop hook
+        agent?.ctx?.hookEventBus?.fire("Stop", mapOf("project_dir" to project?.basePath))
     }
 
     fun clearConversation() {
@@ -501,6 +513,15 @@ class ChatViewModel {
             } else {
                 extractingMemory.set(false)
             }
+        }
+
+        // SessionEnd hook
+        val hookBus = agent?.ctx?.hookEventBus
+        if (hookBus != null) {
+            hookBus.fire("SessionEnd", mapOf(
+                "project_dir" to project?.basePath,
+                "transcript_path" to "sessions/$autoSaveSessionId"
+            ))
         }
 
         runOnEdt { onMessagesChanged?.invoke() }

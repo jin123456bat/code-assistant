@@ -537,6 +537,30 @@ class AgentLoop(
                             }
 
                             // ---- 常规工具执行 ----
+
+                            // PreToolUse hook: 可阻止工具执行
+                            val hookBus = ctx.hookEventBus
+                            if (hookBus != null) {
+                                val hookDecision = hookBus.fire("PreToolUse", mapOf(
+                                    "tool_name" to tc.name,
+                                    "tool_input" to try { gson.fromJson(tc.arguments, Map::class.java) as? Map<String, Any> } catch (_: Exception) { null },
+                                    "project_dir" to project.basePath
+                                ))
+                                if (hookDecision.permissionDecision == "deny") {
+                                    AppLogger.info("HookBus: PreToolUse 阻止执行 ${tc.name}")
+                                    synchronized(ctx.historyLock) {
+                                        history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments))
+                                        history.add(AnthropicMessage("user", "Hook 阻止执行: ${hookDecision.content ?: "无原因"} (使用 /permissions 可添加白名单)", toolCallId = tc.id, groupId = roundGroupId))
+                                    }
+                                    edt { onToolResult?.invoke(tc.name, "Hook 阻止") }
+                                    continue  // 跳过此工具
+                                }
+                                // PreToolUse 可能返回额外上下文内容
+                                if (!hookDecision.content.isNullOrBlank()) {
+                                    ctx.pendingDiagnostics = "${ctx.pendingDiagnostics ?: ""}\n${hookDecision.content}"
+                                }
+                            }
+
                             val params = parseParams(tc.arguments).toMutableMap()
                             // 将 tool_use_id 注入参数，供 task/workflow 工具传给 SubAgentRegistry。
                             // 子 Agent 结果通过此 ID 关联到工具调用，对齐 Claude Code 的 tool_result 模式。
@@ -635,6 +659,14 @@ class AgentLoop(
                                 onToolResult?.invoke(tc.name, resultText)
                                 onThinking?.invoke(null)
                             }
+
+                            // PostToolUse hook（通知，不阻断）
+                            ctx.hookEventBus?.fire("PostToolUse", mapOf(
+                                "tool_name" to tc.name,
+                                "tool_input" to try { gson.fromJson(tc.arguments, Map::class.java) as? Map<String, Any> } catch (_: Exception) { null },
+                                "tool_result" to resultText,
+                                "project_dir" to project.basePath
+                            ))
                         }
 
                         if (consecutiveFailures >= MAX_FAILURES) {
