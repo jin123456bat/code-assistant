@@ -136,5 +136,26 @@
             description="让 AI 解释选中的代码">
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
         </action>
+        <action
+            id="CodeAssistant.OptimizeSelectedCode"
+            class="com.aiassistant.ui.OptimizeSelectedCodeAction"
+            text="优化此代码"
+            description="让 AI 优化选中的代码">
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+        </action>
+        <action
+            id="CodeAssistant.GenerateComment"
+            class="com.aiassistant.ui.GenerateCommentAction"
+            text="生成注释"
+            description="让 AI 为选中代码生成注释">
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+        </action>
+        <action
+            id="CodeAssistant.GenerateTest"
+            class="com.aiassistant.ui.GenerateTestAction"
+            text="生成单元测试"
+            description="让 AI 为选中代码生成单元测试">
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+        </action>
     </actions>
 </idea-plugin>

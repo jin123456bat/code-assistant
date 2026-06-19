@@ -16,17 +16,23 @@ object ReviewActionBridge {
         val onReviewSelectedCode: ((String, String) -> Unit)?,
         val onSecurityReviewFile: ((String) -> Unit)?,
         val onFixSelectedCode: ((String, String) -> Unit)?,
-        val onExplainSelectedCode: ((String, String) -> Unit)?
+        val onExplainSelectedCode: ((String, String) -> Unit)?,
+        val onOptimizeSelectedCode: ((String, String) -> Unit)?,
+        val onGenerateComment: ((String, String) -> Unit)?,
+        val onGenerateTest: ((String, String) -> Unit)?
     )
 
     fun register(projectBasePath: String?,
                  onReviewSelectedCode: ((String, String) -> Unit)?,
                  onSecurityReviewFile: ((String) -> Unit)?,
                  onFixSelectedCode: ((String, String) -> Unit)? = null,
-                 onExplainSelectedCode: ((String, String) -> Unit)? = null
+                 onExplainSelectedCode: ((String, String) -> Unit)? = null,
+                 onOptimizeSelectedCode: ((String, String) -> Unit)? = null,
+                 onGenerateComment: ((String, String) -> Unit)? = null,
+                 onGenerateTest: ((String, String) -> Unit)? = null
     ) {
         val key = projectBasePath ?: return
-        handlers[key] = Handler(onReviewSelectedCode, onSecurityReviewFile, onFixSelectedCode, onExplainSelectedCode)
+        handlers[key] = Handler(onReviewSelectedCode, onSecurityReviewFile, onFixSelectedCode, onExplainSelectedCode, onOptimizeSelectedCode, onGenerateComment, onGenerateTest)
     }
 
     fun unregister(projectBasePath: String?) {
@@ -53,6 +59,18 @@ object ReviewActionBridge {
 
     fun getOnExplainSelectedCode(projectBasePath: String?): ((String, String) -> Unit)? {
         return getHandler(projectBasePath)?.onExplainSelectedCode
+    }
+
+    fun getOnOptimizeSelectedCode(projectBasePath: String?): ((String, String) -> Unit)? {
+        return getHandler(projectBasePath)?.onOptimizeSelectedCode
+    }
+
+    fun getOnGenerateComment(projectBasePath: String?): ((String, String) -> Unit)? {
+        return getHandler(projectBasePath)?.onGenerateComment
+    }
+
+    fun getOnGenerateTest(projectBasePath: String?): ((String, String) -> Unit)? {
+        return getHandler(projectBasePath)?.onGenerateTest
     }
 
     /** 兼容旧接口 */
@@ -138,6 +156,72 @@ class ExplainSelectedCodeAction : AnAction() {
             val msg = if (code.isNotBlank())
                 "请解释以下代码（${file.name}）：\n```\n${code.take(3000)}\n```"
             else "请解释 ${file.name} 的功能和设计思路"
+            com.aiassistant.ChatToolWindow.sendMessageToChat(project, msg)
+        }
+    }
+
+    override fun update(e: AnActionEvent) {
+        e.presentation.isEnabled = e.getData(CommonDataKeys.PROJECT) != null
+    }
+}
+
+class OptimizeSelectedCodeAction : AnAction() {
+    override fun actionPerformed(e: AnActionEvent) {
+        val project = e.getData(CommonDataKeys.PROJECT) ?: return
+        val file = e.getData(CommonDataKeys.PSI_FILE)?.virtualFile ?: return
+        val code = e.getData(CommonDataKeys.EDITOR)?.selectionModel?.selectedText ?: ""
+
+        val handler = ReviewActionBridge.getOnOptimizeSelectedCode(project.basePath)
+        if (handler != null) {
+            handler(file.path, code)
+        } else {
+            val msg = if (code.isNotBlank())
+                "请优化以下代码，提升可读性和性能（${file.name}）：\n```\n${code.take(3000)}\n```"
+            else "请分析 ${file.name} 并给出优化建议"
+            com.aiassistant.ChatToolWindow.sendMessageToChat(project, msg)
+        }
+    }
+
+    override fun update(e: AnActionEvent) {
+        e.presentation.isEnabled = e.getData(CommonDataKeys.PROJECT) != null
+    }
+}
+
+class GenerateCommentAction : AnAction() {
+    override fun actionPerformed(e: AnActionEvent) {
+        val project = e.getData(CommonDataKeys.PROJECT) ?: return
+        val file = e.getData(CommonDataKeys.PSI_FILE)?.virtualFile ?: return
+        val code = e.getData(CommonDataKeys.EDITOR)?.selectionModel?.selectedText ?: ""
+
+        val handler = ReviewActionBridge.getOnGenerateComment(project.basePath)
+        if (handler != null) {
+            handler(file.path, code)
+        } else {
+            val msg = if (code.isNotBlank())
+                "请为以下代码生成中文注释（${file.name}）：\n```\n${code.take(3000)}\n```"
+            else "请为 ${file.name} 生成完整的类/方法注释"
+            com.aiassistant.ChatToolWindow.sendMessageToChat(project, msg)
+        }
+    }
+
+    override fun update(e: AnActionEvent) {
+        e.presentation.isEnabled = e.getData(CommonDataKeys.PROJECT) != null
+    }
+}
+
+class GenerateTestAction : AnAction() {
+    override fun actionPerformed(e: AnActionEvent) {
+        val project = e.getData(CommonDataKeys.PROJECT) ?: return
+        val file = e.getData(CommonDataKeys.PSI_FILE)?.virtualFile ?: return
+        val code = e.getData(CommonDataKeys.EDITOR)?.selectionModel?.selectedText ?: ""
+
+        val handler = ReviewActionBridge.getOnGenerateTest(project.basePath)
+        if (handler != null) {
+            handler(file.path, code)
+        } else {
+            val msg = if (code.isNotBlank())
+                "请为以下代码生成单元测试（${file.name}）：\n```\n${code.take(3000)}\n```"
+            else "请为 ${file.name} 生成完整的单元测试"
             com.aiassistant.ChatToolWindow.sendMessageToChat(project, msg)
         }
     }
