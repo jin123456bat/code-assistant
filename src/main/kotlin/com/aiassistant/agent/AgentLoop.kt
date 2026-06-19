@@ -800,8 +800,10 @@ class AgentLoop(
         var thinkingSignature = ""
         var capturedStopReason = "end_turn"
 
-        if (sdkClient == null || lastApiKey != apiKey) {
-            sdkClient?.close()
+        // 局部快照成员变量，防止 stop() 在 close→new 之间并发读取
+        val currentClient = sdkClient
+        if (currentClient == null || lastApiKey != apiKey) {
+            currentClient?.close()
             sdkClient = com.aiassistant.AnthropicSdkClient(apiKey)
             lastApiKey = apiKey
         }
@@ -991,7 +993,7 @@ class AgentLoop(
         val threshold = (contextWindow * ratio).toLong()
         val tokens = ctx.lastInputTokens
         if (tokens > 0) return tokens > threshold
-        val allText = history.joinToString("") { it.content + it.thinking }
+        val allText = synchronized(ctx.historyLock) { history.joinToString("") { it.content + it.thinking } }
         val cjkCount = allText.count { it in '一'..'鿿' }
         val otherCount = allText.length - cjkCount
         val estimatedTokens = (cjkCount * 1.5 + otherCount * 0.25).toLong()
@@ -1119,7 +1121,7 @@ $claudeMdContent
             // 注入相关记忆
             try {
                 val memEngine = ctx.memoryEngine
-                val recentMessages = ctx.conversationHistory.takeLast(3)
+                val recentMessages = synchronized(ctx.historyLock) { ctx.conversationHistory.takeLast(3) }
                     .joinToString("\n") { "${it.role}: ${it.content.take(200)}" }
                 val relevant = memEngine.getRelevantMemories(recentMessages)
                 if (relevant.isNotEmpty()) {
