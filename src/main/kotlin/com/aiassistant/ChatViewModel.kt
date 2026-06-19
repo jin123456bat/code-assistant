@@ -27,6 +27,8 @@ class ChatViewModel {
     @Volatile var isRateLimited = false
     /** 防止 compact 重复调用（两次 /compact 创建多个后台压缩线程） */
     private val isCompacting = java.util.concurrent.atomic.AtomicBoolean(false)
+    /** 防止并发提取记忆 */
+    private val extractingMemory = java.util.concurrent.atomic.AtomicBoolean(false)
     /** 限流恢复 Timer 引用，供 stopGeneration/clearConversation 取消 */
     private var rateLimitTimer: javax.swing.Timer? = null
     @Volatile var currentToolName: String? = null
@@ -474,18 +476,30 @@ class ChatViewModel {
         activity = Activity.Idle
         isThinking = false
 
-        // 自动提取记忆（异步，不阻塞 EDT 和 clear 流程）
-        val memEngine = agent?.ctx?.memoryEngine
-        val apiKey = try { com.aiassistant.AppSettingsService.getInstance().getApiKey() } catch (_: Exception) { null }
-        if (memEngine != null && apiKey != null && apiKey.isNotBlank() && com.aiassistant.AppSettingsService.isMemoryEnabled()) {
-            val history = agent?.ctx?.conversationHistory?.toList() ?: emptyList()
-            if (history.isNotEmpty()) {
-                Thread({
-                    com.aiassistant.agent.memory.MemoryAutoExtract(memEngine).extract(
-                        history.map { com.aiassistant.AnthropicMessage(it.role, it.content) },
-                        apiKey
-                    )
-                }, "memory-auto-extract").apply { isDaemon = true }.start()
+        // 自动提取记忆（仅当对话足够长时触发，防并发）
+        val MIN_MESSAGES_FOR_EXTRACT = 6
+        if (messages.size >= MIN_MESSAGES_FOR_EXTRACT && extractingMemory.compareAndSet(false, true)) {
+            val memEngine = agent?.ctx?.memoryEngine
+            val apiKey = try { com.aiassistant.AppSettingsService.getInstance().getApiKey() } catch (_: Exception) { null }
+            if (memEngine != null && apiKey != null && apiKey.isNotBlank() && com.aiassistant.AppSettingsService.isMemoryEnabled()) {
+                val history = agent?.ctx?.conversationHistory?.toList() ?: emptyList()
+                if (history.isNotEmpty()) {
+                    Thread({
+                        try {
+                            com.aiassistant.agent.memory.MemoryAutoExtract(memEngine).extract(
+                                history.map { com.aiassistant.AnthropicMessage(it.role, it.content) },
+                                apiKey
+                            )
+                        } finally {
+                            extractingMemory.set(false)
+                        }
+                    }, "memory-auto-extract").apply { isDaemon = true }.start()
+                    // 提取线程已启动，不在此处重置标志（由 finally 块处理）
+                } else {
+                    extractingMemory.set(false)
+                }
+            } else {
+                extractingMemory.set(false)
             }
         }
 
