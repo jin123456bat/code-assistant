@@ -7,10 +7,47 @@ import com.intellij.openapi.application.ApplicationManager
 
 /**
  * 右键菜单 Action 回调桥接——ChatToolWindow 注册 handler，右键菜单通过此桥接触发审查。
+ * 改为 per-project 存储，多项目互不覆盖，支持 dispose 清理。
  */
 object ReviewActionBridge {
-    @Volatile var onReviewSelectedCode: ((String, String) -> Unit)? = null  // (filePath, selectedCode)
-    @Volatile var onSecurityReviewFile: ((String) -> Unit)? = null           // (filePath)
+    private val handlers = java.util.concurrent.ConcurrentHashMap<String, Handler>()
+
+    data class Handler(
+        val onReviewSelectedCode: ((String, String) -> Unit)?,
+        val onSecurityReviewFile: ((String) -> Unit)?
+    )
+
+    fun register(projectBasePath: String?, onReviewSelectedCode: ((String, String) -> Unit)?, onSecurityReviewFile: ((String) -> Unit)?) {
+        val key = projectBasePath ?: return
+        handlers[key] = Handler(onReviewSelectedCode, onSecurityReviewFile)
+    }
+
+    fun unregister(projectBasePath: String?) {
+        val key = projectBasePath ?: return
+        handlers.remove(key)
+    }
+
+    private fun getHandler(projectBasePath: String?): Handler? {
+        val key = projectBasePath ?: return null
+        return handlers[key]
+    }
+
+    fun getOnReviewSelectedCode(projectBasePath: String?): ((String, String) -> Unit)? {
+        return getHandler(projectBasePath)?.onReviewSelectedCode
+    }
+
+    fun getOnSecurityReviewFile(projectBasePath: String?): ((String) -> Unit)? {
+        return getHandler(projectBasePath)?.onSecurityReviewFile
+    }
+
+    /** 兼容旧接口 */
+    @Volatile
+    @Deprecated("用 register/unregister 替代")
+    var onReviewSelectedCode: ((String, String) -> Unit)? = null
+
+    @Volatile
+    @Deprecated("用 register/unregister 替代")
+    var onSecurityReviewFile: ((String) -> Unit)? = null
 }
 
 class ReviewSelectedCodeAction : AnAction() {
@@ -18,7 +55,7 @@ class ReviewSelectedCodeAction : AnAction() {
         val project = e.getData(CommonDataKeys.PROJECT) ?: return
         val file = e.getData(CommonDataKeys.PSI_FILE)?.virtualFile ?: return
         val code = e.getData(CommonDataKeys.EDITOR)?.selectionModel?.selectedText ?: ""
-        val handler = ReviewActionBridge.onReviewSelectedCode
+        val handler = ReviewActionBridge.getOnReviewSelectedCode(project.basePath)
         if (handler != null) {
             handler(file.path, code)
         } else {
@@ -38,7 +75,7 @@ class SecurityReviewFileAction : AnAction() {
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.getData(CommonDataKeys.PROJECT) ?: return
         val file = e.getData(CommonDataKeys.PSI_FILE)?.virtualFile ?: return
-        val handler = ReviewActionBridge.onSecurityReviewFile
+        val handler = ReviewActionBridge.getOnSecurityReviewFile(project.basePath)
         if (handler != null) {
             handler(file.path)
         } else {
