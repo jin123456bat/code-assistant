@@ -56,25 +56,25 @@
 - [x] **文件变更 Hook** ✅ 已完成
   Hooks 系统已支持 `FileChanged`/`WorktreeCreate`/`WorktreeRemove` 事件
 
-- [ ] **插件市场集成**
-  支持从 Marketplace 安装 Skills / Agents / MCP Servers
+- [x] **插件市场集成** ⛔ wontfix
+  Skills/Agents/MCP 已可通过文件系统和配置管理，Marketplace UI 非必需
 
 - [x] **Push 通知** ⛔ wontfix
   需推送服务+移动端基础设施，IDE 插件场景不存在
 
 ## P5 — 体验细节
 
-- [ ] **交互式 Diff 查看器**
-  左右箭头切换文件，上下浏览差异行
+- [x] **交互式 Diff 查看器** ⛔ wontfix
+  IntelliJ 自带 diff 已满足需求，重复造轮子
 
-- [ ] **Vim 模式**
-  输入框支持 Vim 编辑键位
+- [x] **Vim 模式** ⛔ wontfix
+  IntelliJ 已有 IdeaVim 插件，输入框 Vim 键位场景不存在
 
-- [ ] **快捷键系统**
-  可自定义的键盘快捷键（200+ 可绑定动作）
+- [x] **快捷键系统** ⛔ wontfix
+  IntelliJ Keymap EP + Action 注册即可绑定，无需额外系统
 
-- [ ] **非交互/Headless 模式**
-  右键菜单一键执行 Agent 任务，不打开工具窗
+- [x] **非交互/Headless 模式** ✅ 已完成
+  右键菜单 7 动作(审查/安全/修复/解释/优化/注释/测试)，不打开工具窗直接送 Agent
 
 - [x] **上下文可视化** ✅ 已完成
   `/context` 查看 Token 用量 Dashboard，自动 compact
