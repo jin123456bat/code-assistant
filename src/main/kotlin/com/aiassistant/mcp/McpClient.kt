@@ -434,6 +434,10 @@ class McpClient(private val config: McpServerConfig) {
         synchronized(responseLock) {
             try {
                 while (!pendingResponses.containsKey(expectedId)) {
+                    // 进程已死时提前退出，避免等到超时。
+                    // 使用 != true 而非 == false：process 在 disconnect() 中被置 null，
+                    // null == false 为 false，导致检查失效；null != true 则正确触发 break。
+                    if (process?.isAlive != true) break
                     val remaining = deadline - System.currentTimeMillis()
                     if (remaining <= 0) break
                     responseLock.wait(remaining)
@@ -441,7 +445,8 @@ class McpClient(private val config: McpServerConfig) {
             } catch (_: InterruptedException) {
                 Thread.currentThread().interrupt()
             }
-            return pendingResponses.remove(expectedId)  // 超时返回 null，同时清理可能的残留条目
+            // remove 返回 null 表示超时；若超时后 reader 线程迟到写入，此刻一并清理
+            return pendingResponses.remove(expectedId)
         }
     }
 

@@ -46,7 +46,7 @@ Powered by [DeepSeek V4](https://platform.deepseek.com) models. Agent loop auton
 | `task` | Spawn sub-agent for independent tasks | Read-only |
 | `ask_user` | Ask user a question (single/multi choice) | Read-only |
 | `write_file` | Create or overwrite files (path traversal protection) | Confirmation |
-| `execute_command` | Execute shell commands (dangerous command interception) | Confirmation |
+| `execute_command` | Execute shell commands (length limit + danger pattern detection) | Confirmation |
 | `notebook_edit` | Edit Jupyter Notebook cells | Confirmation |
 | `edit_file` | Precise string replacement (unique match required) | Confirmation |
 | `workflow` | Parallel/sequential multi sub-agent orchestration | Read-only |

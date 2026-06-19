@@ -224,13 +224,25 @@ class McpManager(private val project: Project) {
      * 断开所有 MCP 连接，清理僵尸进程
      */
     fun disconnectAll() {
-        for ((_, client) in clients) {
-            client.disconnect()
-        }
+        // 并行断开所有客户端：每个 disconnect 最多等 10 秒进程终止，串行 5 个客户端 = 50 秒。
+        // 并行执行可将总等待时间压缩到最慢客户端的 10 秒。
+        val clientList = clients.values.toList()
         clients.clear()
         configs.clear()
         restartCount.clear()
         instances.remove(project.basePath ?: "")
+        if (clientList.size > 1) {
+            val latch = java.util.concurrent.CountDownLatch(clientList.size)
+            for (client in clientList) {
+                Thread({
+                    try { client.disconnect() } catch (_: Exception) {}
+                    latch.countDown()
+                }, "mcp-disconnect-${client.hashCode()}").apply { isDaemon = true }.start()
+            }
+            try { latch.await(15, java.util.concurrent.TimeUnit.SECONDS) } catch (_: InterruptedException) {}
+        } else {
+            clientList.forEach { try { it.disconnect() } catch (_: Exception) {} }
+        }
     }
 
     fun getConnectedServers(): List<String> = clients.keys.toList()

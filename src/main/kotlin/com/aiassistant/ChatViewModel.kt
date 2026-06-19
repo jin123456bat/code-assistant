@@ -438,8 +438,9 @@ class ChatViewModel {
     fun clearConversation() {
         stopGeneration()  // 内部已调用 rateLimitTimer?.stop()
         generationId++  // 废弃所有 pending EDT 回调，防止 clear 后追加孤立消息
-        // 等待 agent 线程退出（最多 2 秒），防止 finally 块中的回调在 clear 后修改状态
-        agent?.join(2000)
+        // 不在此处 join agent 线程——stopGeneration() 已设置 cancelled=true + interrupt，
+        // generationId++ 确保陈旧回调被丢弃。join 会阻塞 EDT 并与 agent finally 块的
+        // invokeLater 形成死锁（详见 bug-review-2026-06-19-round2 B1）。
         agent?.ctx?.let { ctx ->
             synchronized(ctx.historyLock) { ctx.conversationHistory.clear() }
             ctx.lastInputTokens = 0

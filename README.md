@@ -46,7 +46,7 @@
 | `task` | 创建子 Agent 执行独立任务 | 只读 |
 | `ask_user` | 向用户提问（单选/多选） | 只读 |
 | `write_file` | 写入/覆写文件（含越界防护） | 需确认 |
-| `execute_command` | 执行 Shell 命令（危险命令拦截） | 需确认 |
+| `execute_command` | 执行 Shell 命令（长度限制 + 危险模式检测） | 需确认 |
 | `notebook_edit` | 编辑 Jupyter Notebook | 需确认 |
 | `edit_file` | 精确替换文件中的文本（唯一匹配） | 需确认 |
 | `workflow` | 并行/串行编排多个子 Agent 任务 | 只读 |

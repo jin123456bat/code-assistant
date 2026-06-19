@@ -34,6 +34,12 @@ class ExecuteCommandTool : AgentTool {
 
     override fun execute(params: Map<String, String>, project: Project, onProgress: ((String) -> Unit)?): ToolResult {
         val command = params["command"]?.takeIf { it.isNotBlank() } ?: return ToolResult.err("command 不能为空")
+
+        // 命令长度限制：防止异常长命令（如 base64 编码的恶意脚本）
+        if (command.length > 50000) {
+            return ToolResult.err("安全限制：命令长度不能超过 50000 字符（当前 ${command.length} 字符）")
+        }
+
         val basePath = params["_worktree"] ?: project.basePath ?: return ToolResult.err("项目路径不可用")
         val workingDir = params["working_dir"]?.let { wd ->
             if (File(wd).isAbsolute) File(wd) else File(basePath, wd)
@@ -44,6 +50,20 @@ class ExecuteCommandTool : AgentTool {
             return ToolResult.err("安全限制：不能操作项目目录之外的工作目录")
         }
         if (!workingDir.exists()) return ToolResult.err("工作目录不存在: ${workingDir.path}")
+
+        // 危险模式检测：匹配时不阻止执行（审批卡是主要防线），但在结果中附加安全警告
+        val dangerousPatterns = listOf(
+            "curl" to "| sh", "curl" to "| bash", "wget" to "| sh", "wget" to "| bash",
+            "rm -rf /" to "", "rm -rf ~" to "", "rm -fr /" to "",
+            "> /dev/sda" to "", "dd if=" to "",
+            "fork bomb" to ":(){ :|:& };:"
+        )
+        val safetyWarnings = dangerousPatterns.mapNotNull { (prefix, suffix) ->
+            val cmdLower = command.lowercase()
+            if (suffix.isEmpty() && cmdLower.contains(prefix.lowercase())) prefix
+            else if (suffix.isNotEmpty() && cmdLower.contains(prefix) && cmdLower.contains(suffix)) "$prefix ... $suffix"
+            else null
+        }
 
         return try {
             val shell = if (System.getProperty("os.name").lowercase().contains("win")) {
@@ -88,6 +108,9 @@ class ExecuteCommandTool : AgentTool {
                 append("工作目录: ${workingDir.path}\n")
                 append("退出码: $exitCode\n")
                 if (!finished) append("(命令执行超时，已强制终止)\n")
+                if (safetyWarnings.isNotEmpty()) {
+                    append("⚠️ 安全警告：检测到潜在危险模式 — ${safetyWarnings.joinToString("; ")}\n")
+                }
                 append("\n$truncated")
                 if (output.length > maxChars) append("\n... (输出已截断，共 ${output.length} 字符)")
             }

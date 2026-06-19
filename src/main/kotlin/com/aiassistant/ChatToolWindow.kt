@@ -161,6 +161,9 @@ class ChatToolWindow(private val project: Project) {
         }
         editorListeners.clear()
         com.intellij.openapi.util.Disposer.dispose(editorListenerDisposable)
+        // 显式移除 EditorFactoryListener，防止 Disposer.dispose(empty Disposable) 无法触发自动清理
+        editorFactoryListener?.let { com.intellij.openapi.editor.EditorFactory.getInstance().removeEditorFactoryListener(it) }
+        editorFactoryListener = null
         trackedEditors.clear()
         if (askUserHandler != null && AskUserBridge.handler === askUserHandler) {
             AskUserBridge.handler = null
@@ -811,6 +814,8 @@ class ChatToolWindow(private val project: Project) {
     private var selectionRefChip: RefChip? = null
     /** EditorFactoryListener 的父 Disposable，dispose 时自动移除监听器 */
     private val editorListenerDisposable = com.intellij.openapi.Disposable { }
+    /** 保存 EditorFactoryListener 引用，dispose 时显式移除防止全局泄漏 */
+    private var editorFactoryListener: com.intellij.openapi.editor.event.EditorFactoryListener? = null
     /** 已注册 SelectionListener 的编辑器集合，用于 dispose 时清理 */
     private val trackedEditors = java.util.concurrent.ConcurrentHashMap.newKeySet<com.intellij.openapi.editor.Editor>()
     private val editorListeners = java.util.concurrent.ConcurrentHashMap<com.intellij.openapi.editor.Editor, com.intellij.openapi.editor.event.SelectionListener>()
@@ -948,37 +953,38 @@ class ChatToolWindow(private val project: Project) {
         setupInputCompletions()
 
         // 注册编辑器文本选区监听——捕获用户在编辑器内选中文本的动作
-        com.intellij.openapi.editor.EditorFactory.getInstance().addEditorFactoryListener(
-            object : com.intellij.openapi.editor.event.EditorFactoryListener {
-                override fun editorCreated(event: com.intellij.openapi.editor.event.EditorFactoryEvent) {
-                    val editor = event.editor
-                    trackedEditors.add(editor)
-                    val sl = object : com.intellij.openapi.editor.event.SelectionListener {
-                        override fun selectionChanged(e: com.intellij.openapi.editor.event.SelectionEvent) {
-                            if (e.newRange != null && e.newRange!!.length > 0) {
-                                if (System.currentTimeMillis() - lastAutoInsertTime < 100) return
-                                ApplicationManager.getApplication().invokeLater {
-                                    autoInsertSelectedCode()
-                                }
-                            } else {
-                                // 取消选中 → 移除选区芯片
-                                ApplicationManager.getApplication().invokeLater {
-                                    removeSelectionChip()
-                                }
+        val listener = object : com.intellij.openapi.editor.event.EditorFactoryListener {
+            override fun editorCreated(event: com.intellij.openapi.editor.event.EditorFactoryEvent) {
+                val editor = event.editor
+                trackedEditors.add(editor)
+                val sl = object : com.intellij.openapi.editor.event.SelectionListener {
+                    override fun selectionChanged(e: com.intellij.openapi.editor.event.SelectionEvent) {
+                        if (e.newRange != null && e.newRange!!.length > 0) {
+                            if (System.currentTimeMillis() - lastAutoInsertTime < 100) return
+                            ApplicationManager.getApplication().invokeLater {
+                                autoInsertSelectedCode()
+                            }
+                        } else {
+                            // 取消选中 → 移除选区芯片
+                            ApplicationManager.getApplication().invokeLater {
+                                removeSelectionChip()
                             }
                         }
                     }
-                    editor.selectionModel.addSelectionListener(sl)
-                    editorListeners[editor] = sl
                 }
-                override fun editorReleased(event: com.intellij.openapi.editor.event.EditorFactoryEvent) {
-                    editorListeners.remove(event.editor)?.let {
-                        event.editor.selectionModel.removeSelectionListener(it)
-                    }
-                    trackedEditors.remove(event.editor)
+                editor.selectionModel.addSelectionListener(sl)
+                editorListeners[editor] = sl
+            }
+            override fun editorReleased(event: com.intellij.openapi.editor.event.EditorFactoryEvent) {
+                editorListeners.remove(event.editor)?.let {
+                    event.editor.selectionModel.removeSelectionListener(it)
                 }
-            },
-            editorListenerDisposable
+                trackedEditors.remove(event.editor)
+            }
+        }
+        editorFactoryListener = listener
+        com.intellij.openapi.editor.EditorFactory.getInstance().addEditorFactoryListener(
+            listener, editorListenerDisposable
         )
     }
 
@@ -1278,6 +1284,12 @@ class ChatToolWindow(private val project: Project) {
                 if (heightChanged) {
                     // 自测量气泡：失效后按新内容自动重测尺寸，无需手动 fitWidth。
                     streamingBubble!!.revalidate()
+                } else if (viewModel.streamingContent.contains("```")) {
+                    // 内容包含代码块，updateInPlace 不支持。重置引用，下次调用走 render() 完整重建路径。
+                    streamingBubble = null
+                    streamingContentPane = null
+                    updateStreamingBubble()  // 立即重建
+                    return
                 }
                 streamingBubble!!.repaint()
             }
@@ -2074,30 +2086,35 @@ class ChatToolWindow(private val project: Project) {
             null
         } ?: return false
 
-        try {
-            val bufferedImage = BufferedImage(
-                image.getWidth(null).takeIf { it > 0 } ?: return false,
-                image.getHeight(null).takeIf { it > 0 } ?: return false,
-                BufferedImage.TYPE_INT_ARGB
-            )
-            val g = bufferedImage.createGraphics()
-            g.drawImage(image, 0, 0, null)
-            g.dispose()
+        // 提取图像宽高（轻量操作，在 EDT 完成）
+        val width = image.getWidth(null).takeIf { it > 0 } ?: return false
+        val height = image.getHeight(null).takeIf { it > 0 } ?: return false
 
-            val baos = ByteArrayOutputStream()
-            ImageIO.write(bufferedImage, "png", baos)
-            val imageBytes = baos.toByteArray()
-            val base64 = Base64.getEncoder().encodeToString(imageBytes)
+        // PNG 压缩 + Base64 编码移到后台线程，避免阻塞 EDT（大图耗时 100-500ms+）
+        Thread({
+            try {
+                val bufferedImage = BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB)
+                val g = bufferedImage.createGraphics()
+                g.drawImage(image, 0, 0, null)
+                g.dispose()
 
-            // 去重：相同内容的图片不重复添加
-            if (pastedImages.any { it.image.data == base64 }) return true
-            // 存储为 Claude 原生 image 块（而非 Markdown data URL）
-            pastedImages.add(PastedImage(++pastedImageIdCounter, ImageData("image/png", base64)))
-            rebuildChips()
-            return true
-        } catch (_: Exception) {
-            return false
-        }
+                val baos = ByteArrayOutputStream()
+                ImageIO.write(bufferedImage, "png", baos)
+                val imageBytes = baos.toByteArray()
+                val base64 = Base64.getEncoder().encodeToString(imageBytes)
+
+                ApplicationManager.getApplication().invokeLater {
+                    // 去重：相同内容的图片不重复添加
+                    if (pastedImages.any { it.image.data == base64 }) return@invokeLater
+                    // 存储为 Claude 原生 image 块（而非 Markdown data URL）
+                    pastedImages.add(PastedImage(++pastedImageIdCounter, ImageData("image/png", base64)))
+                    rebuildChips()
+                }
+            } catch (_: Exception) {
+                // 图片处理失败，静默忽略
+            }
+        }, "image-paste-processor").apply { isDaemon = true }.start()
+        return true
     }
 
     private fun activateToolWindow() {

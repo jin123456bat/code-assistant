@@ -188,15 +188,16 @@ class AnthropicSdkClient(
         while (i < messages.size) {
             val current = messages[i]
             // tool_result 消息不合并（必须单独作为 user 消息）
-            if (current.toolCallId != null) {
+            // tool_use 消息不合并（多条 tool_use 各自独立，合并会导致覆盖丢失）
+            if (current.toolCallId != null || current.toolUseId != null) {
                 result.add(current)
                 i++
                 continue
             }
-            // 收集连续同 role + 同 groupId 的非 tool_result 消息（跨轮不合并）
+            // 收集连续同 role + 同 groupId 的非 tool_result/非 tool_use 消息（跨轮不合并）
             val group = mutableListOf<AnthropicMessage>()
             while (i < messages.size && messages[i].role == current.role
-                && messages[i].toolCallId == null && messages[i].groupId == current.groupId) {
+                && messages[i].toolCallId == null && messages[i].toolUseId == null && messages[i].groupId == current.groupId) {
                 group.add(messages[i])
                 i++
             }
@@ -290,7 +291,8 @@ class AnthropicSdkClient(
                         }
                     }
                 } catch (e: Exception) {
-                    com.aiassistant.AppLogger.warn("SDK tool_use input JSON 解析失败 toolName=${msg.toolName} toolInput=${msg.toolInput.take(200)}: ${e.message}")
+                    com.aiassistant.AppLogger.warn("SDK tool_use input JSON 解析失败 toolName=${msg.toolName} toolInput=${msg.toolInput.take(200)}: ${e.message}，跳过该消息")
+                    return null  // 跳过该 tool_use，不发送空参数给 API
                 }
                 blocks.add(ContentBlockParam.ofToolUse(
                     ToolUseBlockParam.builder()

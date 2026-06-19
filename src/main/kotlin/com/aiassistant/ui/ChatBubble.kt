@@ -47,14 +47,15 @@ class ChatBubble(
     /** token 消耗标签：默认隐藏，鼠标悬停时浮现（半透明极小字） */
     private var tokenLabel: JLabel? = null
 
+    /** 鼠标悬停隐藏 token 标签的防抖 Timer，removeNotify 时停止防止泄漏 */
+    private val hideTimer = javax.swing.Timer(200) { tokenLabel?.isVisible = false }.apply {
+        isRepeats = false
+    }
+
     init {
         isOpaque = false
         border = JBUI.Borders.empty(ChatTheme.PAD_BUBBLE_V, ChatTheme.PAD_BUBBLE_H)
         add(content, BorderLayout.CENTER)
-        // 悬停显示 token 消耗量（200ms 延迟隐藏，防抖，复用单个 Timer）
-        val hideTimer = javax.swing.Timer(200) { tokenLabel?.isVisible = false }.apply {
-            isRepeats = false
-        }
         addMouseListener(object : MouseAdapter() {
             override fun mouseEntered(e: MouseEvent) {
                 hideTimer.stop()
@@ -65,6 +66,11 @@ class ChatBubble(
                 hideTimer.start()  // 复用同一个 Timer，不每次创建新实例
             }
         })
+    }
+
+    override fun removeNotify() {
+        super.removeNotify()
+        hideTimer.stop()
     }
 
     /** 设置 token 消耗标签（半透明极小字，默认隐藏） */

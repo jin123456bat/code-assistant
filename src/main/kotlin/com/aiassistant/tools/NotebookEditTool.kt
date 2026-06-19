@@ -94,8 +94,13 @@ class NotebookEditTool : AgentTool {
         for (i in 0 until cells.size()) {
             val cell = cells[i].asJsonObject
             if (cell.get("id")?.asString == cellId) {
+                // 除最后一行外，每行末尾保留 \n——Jupyter 的 nbformat 使用 "".join(source) 还原源码
                 val srcArr = JsonArray()
-                for (line in newSource.lines()) srcArr.add(com.google.gson.JsonPrimitive(line))
+                val lines = newSource.lines()
+                for (i in lines.indices) {
+                    val line = if (i < lines.lastIndex) lines[i] + "\n" else lines[i]
+                    srcArr.add(com.google.gson.JsonPrimitive(line))
+                }
                 cell.add("source", srcArr)
                 return true
             }
@@ -106,7 +111,15 @@ class NotebookEditTool : AgentTool {
     private fun insertCell(cells: JsonArray, afterId: String?, newSource: String, cellType: String) {
         val newCell = JsonObject().apply {
             addProperty("cell_type", cellType)
-            add("source", JsonArray().apply { add(com.google.gson.JsonPrimitive(newSource)) })
+            // source 字段必须是字符串列表（每行一个元素），符合 .ipynb 规范。
+            // 除最后一行外，每行末尾保留 \n——Jupyter 的 nbformat 使用 "".join(source) 还原源码。
+            val srcArr = JsonArray()
+            val lines = newSource.lines()
+            for (i in lines.indices) {
+                val line = if (i < lines.lastIndex) lines[i] + "\n" else lines[i]
+                srcArr.add(com.google.gson.JsonPrimitive(line))
+            }
+            add("source", srcArr)
             add("metadata", JsonObject())
             add("outputs", JsonArray())
             addProperty("id", "cell_${System.currentTimeMillis()}")

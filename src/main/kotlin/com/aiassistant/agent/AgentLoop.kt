@@ -180,7 +180,9 @@ class AgentLoop(
                     if (resultText != null) {
                         // 对齐 Claude Code：子 Agent 结果通过 toolCallId 关联到 task/workflow 工具调用。
                         // LLM 将其视为 tool_result 而非用户指令，消除信任边界混淆。
-                        history.add(AnthropicMessage("user", resultText, toolCallId = entry.toolCallId, groupId = roundGroupId))
+                        synchronized(ctx.historyLock) {
+                            history.add(AnthropicMessage("user", resultText, toolCallId = entry.toolCallId, groupId = roundGroupId))
+                        }
                     }
                 }
 
@@ -201,7 +203,9 @@ class AgentLoop(
                         }
                         if (text != null) {
                             // 对齐 Claude Code：子 Agent 结果通过 toolCallId 关联到 task/workflow 工具调用
-                            history.add(AnthropicMessage("user", text, toolCallId = entry.toolCallId, groupId = roundGroupId))
+                            synchronized(ctx.historyLock) {
+                                history.add(AnthropicMessage("user", text, toolCallId = entry.toolCallId, groupId = roundGroupId))
+                            }
                             AppLogger.info("AgentLoop: 注入子代理结果 ${entry.id} status=${entry.status} toolCallId=${entry.toolCallId}")
                         }
                     }
@@ -578,13 +582,15 @@ class AgentLoop(
                             val resultText = if (toolResult.success) toolResult.content else "错误: ${toolResult.error}"
 
                             if (!firstToolCallTextAdded) {
-                                if (!thinkingBlockAdded && thinking.isNotBlank()) {
-                                    AppLogger.info("AgentLoop: 添加thinking到history thinkingLen=${thinking.length} sigLen=${thinkingSignature.length}")
-                                    history.add(AnthropicMessage("assistant", "", thinking = thinking, thinkingSignature = thinkingSignature))
-                                    thinkingBlockAdded = true
+                                synchronized(ctx.historyLock) {
+                                    if (!thinkingBlockAdded && thinking.isNotBlank()) {
+                                        AppLogger.info("AgentLoop: 添加thinking到history thinkingLen=${thinking.length} sigLen=${thinkingSignature.length}")
+                                        history.add(AnthropicMessage("assistant", "", thinking = thinking, thinkingSignature = thinkingSignature))
+                                        thinkingBlockAdded = true
+                                    }
+                                    history.add(AnthropicMessage("assistant", textContent))
+                                    firstToolCallTextAdded = true
                                 }
-                                history.add(AnthropicMessage("assistant", textContent))
-                                firstToolCallTextAdded = true
                             }
                             // 原子化 tool_use + tool_result 对，防止与 clearConversation/compactHistory 的 clear()+addAll() 交叠
                             synchronized(ctx.historyLock) {
@@ -611,10 +617,12 @@ class AgentLoop(
                         }
                     } else {
                         if (truncated) {
-                            if (thinking.isNotBlank()) {
-                                history.add(AnthropicMessage("assistant", textContent, thinking = thinking, thinkingSignature = thinkingSignature))
-                            } else {
-                                history.add(AnthropicMessage("assistant", textContent))
+                            synchronized(ctx.historyLock) {
+                                if (thinking.isNotBlank()) {
+                                    history.add(AnthropicMessage("assistant", textContent, thinking = thinking, thinkingSignature = thinkingSignature))
+                                } else {
+                                    history.add(AnthropicMessage("assistant", textContent))
+                                }
                             }
                             if (continuationCount >= MAX_CONTINUATIONS) {
                                 AppLogger.warn("AgentLoop: 续写次数已达上限 $MAX_CONTINUATIONS，返回已有内容")
@@ -626,10 +634,12 @@ class AgentLoop(
                             continue
                         }
                         AppLogger.info("AgentLoop 最终回复: $textContent thinkingLen=${thinking.length} sigLen=${thinkingSignature.length}")
-                        if (thinking.isNotBlank()) {
-                            history.add(AnthropicMessage("assistant", textContent, thinking = thinking, thinkingSignature = thinkingSignature))
-                        } else {
-                            history.add(AnthropicMessage("assistant", textContent))
+                        synchronized(ctx.historyLock) {
+                            if (thinking.isNotBlank()) {
+                                history.add(AnthropicMessage("assistant", textContent, thinking = thinking, thinkingSignature = thinkingSignature))
+                            } else {
+                                history.add(AnthropicMessage("assistant", textContent))
+                            }
                         }
                         if (ctx.goal != null) {
                             val goalAchieved = textContent.contains("目标已达成") ||
@@ -641,9 +651,11 @@ class AgentLoop(
                                 callback(textContent, thinking)
                                 break
                             }
-                            history.add(AnthropicMessage("user",
-                                "继续朝着目标「${ctx.goal}」努力。如果目标已达成，请明确说明「目标已达成」并总结完成情况。",
-                                groupId = roundGroupId))
+                            synchronized(ctx.historyLock) {
+                                history.add(AnthropicMessage("user",
+                                    "继续朝着目标「${ctx.goal}」努力。如果目标已达成，请明确说明「目标已达成」并总结完成情况。",
+                                    groupId = roundGroupId))
+                            }
                             loopCount++
                             continue
                         }
