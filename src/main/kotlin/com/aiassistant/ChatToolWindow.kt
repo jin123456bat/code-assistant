@@ -893,11 +893,18 @@ class ChatToolWindow(private val project: Project) {
         add(goalBar)
     }
 
+    /** 审查结果面板——位于聊天区上方，/review 后展示 Findings 列表 */
+    private val reviewResultPanel = com.aiassistant.ui.ReviewResultPanel()
+    private val conversationCenterPanel = JPanel(BorderLayout()).apply {
+        isOpaque = false
+        add(reviewResultPanel, BorderLayout.NORTH)
+        add(conversationScrollPane, BorderLayout.CENTER)
+    }
     private val conversationPanel = JPanel(BorderLayout()).apply {
         isOpaque = true
         background = ChatTheme.winBg
         add(northStack, BorderLayout.NORTH)
-        add(conversationScrollPane, BorderLayout.CENTER)
+        add(conversationCenterPanel, BorderLayout.CENTER)
     }
 
     // ---- main panel ----
