@@ -130,6 +130,22 @@ git diff → 每个文件的 hunk 预览（前10行）
 不调用 LLM，纯本地执行
 ```
 
+### /test 流程
+
+```
+输入: /test 命令
+    ↓
+执行: ./gradlew test (通过 ProcessBuilder)
+    ↓
+解析输出:
+    ├── BUILD SUCCESSFUL → 摘要：N tests passed, 0 failed
+    └── BUILD FAILED   → 提取失败测试名 + 错误消息 + 堆栈
+    ↓
+结果展示:
+    ├── 全部通过 → 聊天 Bubble "✅ 全部 N 个测试通过"
+    └── 有失败   → 失败详情 + 自动发 LLM "以下测试失败，分析根因并修复：<test-name>: <error>"
+```
+
 ### /security-review 流程
 
 ```
@@ -161,6 +177,14 @@ SecurityReviewEngine.analyze(diff)
 /diff                    → 展示分支变更摘要（统计+文件列表+hunk预览）
 /diff --stat             → 仅统计
 /diff <file>             → 指定文件 diff
+```
+
+### /test
+
+```
+/test                    → 运行 ./gradlew test，解析结果，失败时自动调 LLM 分析修复
+/test --file FooTest.kt  → 运行指定测试类
+/test --method testName  → 运行指定测试方法
 ```
 
 ### /security-review
@@ -237,7 +261,8 @@ SecurityReviewEngine.analyze(diff)
 | `security/SecretDetector.kt` | 密钥检测 |
 | `security/PermissionAnalyzer.kt` | 权限分析 |
 | `security/DependencyChecker.kt` | 依赖漏洞 |
-| `commands/ReviewCommands.kt` | 斜杠命令实现 |
+| `commands/ReviewCommands.kt` | 斜杠命令实现 (/review /diff /test /security-review) |
+| `commands/TestRunner.kt` | /test 实现：gradlew test 执行 + 输出解析 + LLM 修复委托 |
 | `ui/ReviewResultPanel.kt` | 审查结果面板 |
 | `ui/ReviewAnnotationGutter.kt` | IDE diff gutter 标注 |
 | `ui/ReviewContextMenu.kt` | 右键菜单 |
