@@ -129,6 +129,9 @@ class ChatToolWindow(private val project: Project) {
     private val checkEmptyListener: () -> Unit = { checkEmptyState() }
     private val rebuildOnSettingsChange: () -> Unit = { needFullRebuild = true; rebuildConversation() }
     private val viewModel = ChatViewModel()
+    private val reviewCommands by lazy {
+        com.aiassistant.commands.ReviewCommands(project.basePath) { viewModel.getApiKey() }
+    }
 
     /** 本窗口注册到 AskUserBridge 的 handler 引用，dispose 时据此安全解绑。 */
     private var askUserHandler: ((String, List<String>, Boolean, CountDownLatch, AtomicReference<String>) -> Unit)? = null
@@ -1687,6 +1690,8 @@ class ChatToolWindow(private val project: Project) {
                 }
             }
         }
+        fun addSystemMessage(text: String) { viewModel.addSystemMessage(text) }
+        fun edt(action: () -> Unit) { ApplicationManager.getApplication().invokeLater(action) }
 
         var commandText = ""  // executeCommand 中写入，供 /goal 等命令读取清空前的内容
         val commands = listOf(
@@ -1702,8 +1707,30 @@ class ChatToolWindow(private val project: Project) {
                 }
             },
             Cmd("/init",  "初始化项目文档") { sendQuick("请分析当前项目结构，创建 CLAUDE.md 文档，包含项目概述、常用命令、架构说明和关键约定。") },
-            Cmd("/review","审查当前改动") { sendQuick("请审查当前分支的代码改动，分析潜在问题并给出修复建议。") },
-            Cmd("/test",  "运行测试") { sendQuick("分析测试结果并修复失败的测试。") },
+            Cmd("/review", "审查当前改动") {
+                Thread({
+                    val result = reviewCommands.reviewAction()
+                    edt { addSystemMessage(result) }
+                }, "review-cmd").apply { isDaemon = true }.start()
+            },
+            Cmd("/diff", "查看变更") { addSystemMessage(reviewCommands.diffAction()) },
+            Cmd("/fix", "修复测试") {
+                val prompt = reviewCommands.fixAction()
+                if (prompt != null) { sendQuick(prompt) }
+                else { addSystemMessage("📋 没有缓存的测试失败输出。请先运行 `/test`。") }
+            },
+            Cmd("/security-review", "安全审查") {
+                Thread({
+                    val result = reviewCommands.securityReviewAction()
+                    edt { addSystemMessage(result) }
+                }, "sec-review-cmd").apply { isDaemon = true }.start()
+            },
+            Cmd("/test", "运行测试") {
+                Thread({
+                    val result = reviewCommands.testAction()
+                    edt { addSystemMessage(result) }
+                }, "test-cmd").apply { isDaemon = true }.start()
+            },
             Cmd("/stop",    "停止生成") { viewModel.stopGeneration() },
             Cmd("/compact", "压缩对话释放 token") {
                 val apiKey = try { AppSettingsService.getInstance().getApiKey() } catch (_: Exception) { null }

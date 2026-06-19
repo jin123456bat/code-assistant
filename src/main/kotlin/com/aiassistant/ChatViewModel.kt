@@ -105,6 +105,13 @@ class ChatViewModel {
     /** 提供对 memoryEngine 的访问，供 /memory 命令使用 */
     fun getMemoryEngine(): com.aiassistant.agent.memory.MemoryEngine? = agent?.ctx?.memoryEngine
 
+    fun getApiKey(): String? = com.aiassistant.AppSettingsService.getInstance().getApiKey()
+
+    fun addSystemMessage(text: String) {
+        messages.add(AgentMessage("system", text))
+        onMessagesChanged?.invoke()
+    }
+
     fun addMcpTools(mcpTools: List<com.aiassistant.agent.AgentTool>) {
         agent?.ctx?.toolRegistry?.registerMcp(mcpTools)
     }
