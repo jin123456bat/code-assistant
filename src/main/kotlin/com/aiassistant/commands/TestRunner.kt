@@ -13,7 +13,9 @@ class TestRunner(private val projectBasePath: String?) {
     fun run(testFilter: String? = null): TestResult {
         val base = projectBasePath ?: return TestResult(false, "项目路径不可用", emptyList())
 
-        val args = mutableListOf("./gradlew", "test")
+        val isWindows = System.getProperty("os.name").lowercase().contains("win")
+        val gradleCmd = if (isWindows) "gradlew.bat" else "./gradlew"
+        val args = mutableListOf(gradleCmd, "test")
         if (testFilter != null) {
             args.add("--tests")
             args.add(testFilter)
@@ -24,8 +26,13 @@ class TestRunner(private val projectBasePath: String?) {
                 .directory(File(base))
                 .redirectErrorStream(true)
                 .start()
+            val finished = process.waitFor(10, java.util.concurrent.TimeUnit.MINUTES)
+            if (!finished) {
+                process.destroyForcibly()
+                process.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)
+            }
             val output = process.inputStream.bufferedReader().use { it.readText() }
-            val exitCode = process.waitFor()
+            val exitCode = if (finished) process.exitValue() else -1
 
             val success = exitCode == 0
             lastTestOutput = output

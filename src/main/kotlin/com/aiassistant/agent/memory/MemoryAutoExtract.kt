@@ -52,7 +52,7 @@ class MemoryAutoExtract(private val engine: MemoryEngine) {
             var resultText = ""
             val messages = listOf(AnthropicMessage("user", prompt))
             client.createStreaming(
-                model = "deepseek-chat",
+                model = com.aiassistant.AppSettingsService.getInstance().getModel() ?: "deepseek-chat",
                 systemPrompt = "",
                 messages = messages,
                 tools = emptyList(),
