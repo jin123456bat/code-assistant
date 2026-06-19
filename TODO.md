@@ -76,8 +76,8 @@
 - [ ] **非交互/Headless 模式**
   右键菜单一键执行 Agent 任务，不打开工具窗
 
-- [ ] **上下文可视化**
-  `/context` 查看当前 token 使用分布，压缩建议
+- [x] **上下文可视化** ✅ 已完成
+  `/context` 查看 Token 用量 Dashboard，自动 compact
 
 ---
 
