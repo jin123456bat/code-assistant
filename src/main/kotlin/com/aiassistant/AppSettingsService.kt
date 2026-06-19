@@ -189,13 +189,15 @@ feat(新功能) | fix(修复) | chore(杂项) | docs(文档) | style(格式) | r
 
     /**
      * 获取工具白名单。
-     * 存储格式为逗号分隔，内置工具名和 MCP 工具名均不含逗号，不会产生分隔歧义。
-     * 如未来支持含逗号的工具名，需改用 JSON 数组或换行符分隔。
+     * 存储格式为逗号分隔，内置工具名均不含逗号。
+     * MCP 工具名不可控，含逗号时输出警告日志。
      */
     @Synchronized
     fun getToolWhitelist(): Set<String> {
         val raw = com.intellij.ide.util.PropertiesComponent.getInstance().getValue(TOOL_WHITELIST_KEY) ?: ""
-        return raw.split(",").map { it.trim() }.filter { it.isNotBlank() }.toSet()
+        val result = raw.split(",").map { it.trim() }.filter { it.isNotBlank() }.toSet()
+        result.forEach { if (it.contains(",")) AppLogger.warn("白名单工具名含逗号: $it") }
+        return result
     }
 
     @Synchronized

@@ -20,8 +20,13 @@ class FixApplier {
             appendLine("请根据以下审查发现修复代码。每修复一项后确认结果。")
             appendLine()
             toFix.forEachIndexed { i, f ->
+                val safePath = try {
+                    java.io.File(f.file).canonicalPath.let { cp ->
+                        if (cp.startsWith(java.io.File(".").canonicalPath)) f.file else "⚠️路径异常: ${f.file}"
+                    }
+                } catch (_: Exception) { "⚠️路径无效: ${f.file}" }
                 appendLine("### ${i + 1}. ${f.title}")
-                appendLine("- 文件: `${f.file}`")
+                appendLine("- 文件: `$safePath`")
                 appendLine("- 行号: ${f.line}")
                 appendLine("- 类型: ${f.severity} / ${f.category}")
                 appendLine("- 描述: ${f.description}")

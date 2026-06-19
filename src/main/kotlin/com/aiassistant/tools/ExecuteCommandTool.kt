@@ -65,18 +65,18 @@ class ExecuteCommandTool : AgentTool {
             else null
         }
 
+        val shell = if (System.getProperty("os.name").lowercase().contains("win")) {
+            arrayOf("cmd.exe", "/c", command)
+        } else {
+            arrayOf("/bin/bash", "-c", command)
+        }
+
+        val process = ProcessBuilder(*shell)
+            .directory(workingDir)
+            .redirectErrorStream(true)
+            .start()
+
         return try {
-            val shell = if (System.getProperty("os.name").lowercase().contains("win")) {
-                arrayOf("cmd.exe", "/c", command)
-            } else {
-                arrayOf("/bin/bash", "-c", command)
-            }
-
-            val process = ProcessBuilder(*shell)
-                .directory(workingDir)
-                .redirectErrorStream(true)
-                .start()
-
             // 逐行读取输出，实时推送到 UI
             val outputBuffer = StringBuilder()
             val reader = process.inputStream.bufferedReader()
@@ -117,6 +117,9 @@ class ExecuteCommandTool : AgentTool {
             ToolResult.ok(summary)
         } catch (e: Exception) {
             ToolResult.err("命令执行失败: ${e.message}")
+        } finally {
+            try { process.outputStream.close() } catch (_: Exception) {}
+            try { process.inputStream.close() } catch (_: Exception) {}
         }
     }
 }

@@ -163,10 +163,12 @@ class McpClient(private val config: McpServerConfig) {
         if (sseRunning) return
         sseRunning = true
         readExecutor.submit {
+            var retryCount = 0
+            val maxRetries = 10
+            val sseEndpoint = config.sseUrl.ifBlank { config.url }
             while (sseRunning && initialized) {
                 try {
                     // 尝试 GET SSE 流
-                    val sseEndpoint = config.sseUrl.ifBlank { config.url }
                     val sseRequest = HttpRequest.newBuilder()
                         .uri(URI.create(sseEndpoint))
                         .header("Accept", "text/event-stream")
@@ -183,9 +185,16 @@ class McpClient(private val config: McpServerConfig) {
                             }
                         }
                     }
-                } catch (_: Exception) {}
-                // SSE 断开后等待重连
-                if (sseRunning) Thread.sleep(5000)
+                    retryCount = 0  // 成功后重置重试计数
+                } catch (e: Exception) {
+                    retryCount++
+                    if (retryCount >= maxRetries) {
+                        com.aiassistant.AppLogger.warn("SSE 重连失败 $maxRetries 次，停止重连: $sseEndpoint")
+                        break
+                    }
+                    val delay = (1000L * retryCount).coerceAtMost(30000L)  // 指数退避 1s→30s
+                    if (sseRunning) Thread.sleep(delay)
+                }
             }
         }
     }

@@ -1480,7 +1480,7 @@ class ChatToolWindow(private val project: Project) {
                 background = ChatTheme.agentBg
                 border = JBUI.Borders.empty(0, 10, 4, 8)
             }
-            panel.add(lastStreamingTextArea!!)
+            lastStreamingTextArea?.let { panel.add(it) }
         }
         val lastText = content.substringAfterLast("\n").trim()
         lastStreamingTextArea?.text = lastText

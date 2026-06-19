@@ -184,7 +184,7 @@ class TaskTool : AgentTool {
                 return null
             }
             return try {
-                val output = process.inputStream.bufferedReader().readText()
+                val output = process.inputStream.bufferedReader().use { it.readText() }
                 val finished = process.waitFor(30, java.util.concurrent.TimeUnit.SECONDS)
                 if (!finished) {
                     process.destroyForcibly()
