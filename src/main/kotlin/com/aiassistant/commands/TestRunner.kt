@@ -50,7 +50,7 @@ class TestRunner(private val projectBasePath: String?) {
         }
     }
 
-    private fun parseFailures(output: String): List<TestFailure> {
+    internal fun parseFailures(output: String): List<TestFailure> {
         val failures = mutableListOf<TestFailure>()
         val testNameRegex = Regex("""(\S+)\s+FAILED""")
 
