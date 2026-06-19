@@ -10,6 +10,15 @@ import com.intellij.openapi.project.Project
  */
 class AgentContext(val project: Project) {
     val toolRegistry = ToolRegistry()
+    lateinit var memoryEngine: com.aiassistant.agent.memory.MemoryEngine
+        private set
+
+    fun initMemory() {
+        if (!::memoryEngine.isInitialized) {
+            memoryEngine = com.aiassistant.agent.memory.MemoryEngine(project.basePath)
+        }
+    }
+
     var systemPrompt: String = ""
     var model: String = "deepseek-chat"
     /** 跨轮对话历史：保留完整 assistant/tool 消息，使 LLM 能感知之前的所有交互 */

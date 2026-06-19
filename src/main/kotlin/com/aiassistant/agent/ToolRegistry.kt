@@ -14,14 +14,27 @@ class ToolRegistry {
     private val mcpTools = java.util.concurrent.ConcurrentHashMap<String, AgentTool>()
 
     /** 注册内置工具。allowedTools 为 null 时注册全部，非 null 时仅注册白名单中的工具。deniedTools 从白名单中排除 */
-    fun registerBuiltIn(allowedTools: Set<String>? = null, deniedTools: Set<String> = emptySet()) {
-        val all = listOf(
+    fun registerBuiltIn(
+        memoryEngine: com.aiassistant.agent.memory.MemoryEngine? = null,
+        allowedTools: Set<String>? = null,
+        deniedTools: Set<String> = emptySet()
+    ) {
+        val allTools = mutableListOf<AgentTool>(
             ReadFileTool(), WriteFileTool(), EditTool(), SearchCodeTool(), ListDirectoryTool(),
             ExecuteCommandTool(), GitDiffTool(), GitLogTool(), GitStatusTool(),
             AskUserTool(), WebSearchTool(), WebFetchTool(), NotebookEditTool(), TaskTool(),
             CodeIntelligenceTool(), McpGetPromptTool(), WorkflowTool()
         )
-        all.forEach {
+        // 有 MemoryEngine 时才注册 Memory 工具
+        if (memoryEngine != null) {
+            allTools.addAll(listOf(
+                com.aiassistant.tools.MemoryWriteTool(memoryEngine),
+                com.aiassistant.tools.MemoryReadTool(memoryEngine),
+                com.aiassistant.tools.MemoryListTool(memoryEngine),
+                com.aiassistant.tools.MemoryDeleteTool(memoryEngine)
+            ))
+        }
+        allTools.forEach {
             val allowed = allowedTools == null || it.name in allowedTools
             val denied = it.name in deniedTools
             if (allowed && !denied) {

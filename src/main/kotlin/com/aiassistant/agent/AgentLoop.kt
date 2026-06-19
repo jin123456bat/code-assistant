@@ -22,7 +22,8 @@ class AgentLoop(
         val SAFE_TOOLS = setOf(
             "search_code", "read_file", "list_directory",
             "git_diff", "git_log", "git_status", "web_search",
-            "web_fetch", "task", "ask_user", "code_intelligence"
+            "web_fetch", "task", "ask_user", "code_intelligence",
+            "memory_read", "memory_list"
         )
 
         // ---- Meta-tool JSON schemas（对齐 Claude Code） ----
@@ -104,7 +105,12 @@ class AgentLoop(
     ) {
         isSubAgent = asSubAgent
         maxLoops = overrideMaxLoops
-        ctx.toolRegistry.registerBuiltIn(allowedTools, deniedTools)
+        ctx.initMemory()
+        ctx.toolRegistry.registerBuiltIn(
+            memoryEngine = ctx.memoryEngine,
+            allowedTools = allowedTools,
+            deniedTools = deniedTools
+        )
         ctx.toolRegistry.registerMcp(mcpTools)
         if (!isSubAgent) {
             val basePath = project.basePath
@@ -1022,7 +1028,8 @@ class AgentLoop(
         } else ""
         val rulesSection = buildRulesSection()
         val claudeMdContent = loadClaudeMdFiles()
-        return """
+        return buildString {
+            append("""
 You are an AI coding assistant in idea. Use tools to work with the project.
 
 ## Project: ${project.name}
@@ -1050,7 +1057,27 @@ $claudeMdContent
 - For git: use git_status/git_diff/git_log
 - For search: use search_code (not execute_command grep)
 - For commands: use execute_command
-        """.trimIndent()
+        """.trimIndent())
+            // 注入相关记忆
+            try {
+                val memEngine = ctx.memoryEngine
+                val recentMessages = ctx.conversationHistory.takeLast(3)
+                    .joinToString("\n") { "${it.role}: ${it.content.take(200)}" }
+                val relevant = memEngine.getRelevantMemories(recentMessages)
+                if (relevant.isNotEmpty()) {
+                    appendLine()
+                    appendLine("## 记忆")
+                    appendLine("以下是从过往对话中提取的相关信息，请参考应用：")
+                    relevant.forEach { mem ->
+                        appendLine()
+                        appendLine("### ${mem.name}")
+                        appendLine(mem.content.take(400))
+                    }
+                }
+            } catch (_: UninitializedPropertyAccessException) {
+                // memoryEngine 尚未初始化，跳过记忆注入
+            }
+        }
     }
 
     private fun buildRulesSection(): String {
