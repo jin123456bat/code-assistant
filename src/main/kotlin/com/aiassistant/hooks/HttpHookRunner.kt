@@ -8,6 +8,7 @@ object HttpHookRunner {
     fun run(url: String, bodyJson: String, timeoutSec: Int): HookDecision? {
         return try {
             val conn = URI.create(url).toURL().openConnection() as HttpURLConnection
+            conn.instanceFollowRedirects = true
             conn.requestMethod = "POST"
             conn.doOutput = true
             conn.setRequestProperty("Content-Type", "application/json")

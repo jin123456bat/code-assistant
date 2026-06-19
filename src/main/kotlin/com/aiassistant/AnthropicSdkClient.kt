@@ -165,7 +165,11 @@ class AnthropicSdkClient(
                 // 通知上层释放 doneLatch（AgentLoop 层），避免 120 秒二次等待。
                 // callAnthropic() 有 hasResponse 标志保护——若已收到部分数据则使用之，不会丢失。
                 if (latch.count > 0) {
-                    callback.onError(RuntimeException("SSE stream ended without message_stop"))
+                    try {
+                        callback.onError(RuntimeException("SSE stream ended without message_stop"))
+                    } catch (_: Exception) {
+                        // 确保 onError 异常不阻止 latch 释放
+                    }
                 }
             }
         } catch (e: Exception) {

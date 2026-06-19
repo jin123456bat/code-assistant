@@ -79,6 +79,8 @@ object SessionStore {
                     java.nio.file.StandardCopyOption.ATOMIC_MOVE,
                     java.nio.file.StandardCopyOption.REPLACE_EXISTING
                 )
+                // 确保 bak 文件最终被清理
+                try { bak.delete() } catch (_: Exception) {}
             } catch (_: java.nio.file.AtomicMoveNotSupportedException) {
                 // 降级路径：先备份旧文件，再非原子替换。若替换中途崩溃，可从 .bak 恢复。
                 try {
@@ -94,6 +96,8 @@ object SessionStore {
                     )
                     // 替换成功，清理备份
                     if (target.exists()) bak.delete()
+                    // 确保 bak 文件最终被清理
+                    try { bak.delete() } catch (_: Exception) {}
                 } catch (e: Exception) {
                     // 非原子 move 失败：尝试回滚 target（从 bak 恢复），并清理 tmp
                     if (bak.exists() && !target.exists()) {

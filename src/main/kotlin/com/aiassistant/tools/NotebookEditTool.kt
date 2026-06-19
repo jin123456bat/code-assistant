@@ -28,7 +28,7 @@ class NotebookEditTool : AgentTool {
     override fun execute(params: Map<String, String>, project: Project, onProgress: ((String) -> Unit)?): ToolResult {
         val notebookPath = params["notebook_path"] ?: return ToolResult.err("缺少 notebook_path 参数")
         val editMode = params["edit_mode"] ?: "replace"
-        val basePath = project.basePath ?: return ToolResult.err("项目路径不可用")
+        val basePath = params["_worktree"] ?: project.basePath ?: return ToolResult.err("项目路径不可用")
 
         val file = if (File(notebookPath).isAbsolute) File(notebookPath) else File(basePath, notebookPath)
         // 路径穿越防护（统一使用 PathUtils）

@@ -1463,11 +1463,19 @@ class ChatToolWindow(private val project: Project) {
         var offset = 0
         for ((type, name) in newEventNames) {
             if (type == "exec") {
-                panel.add(toolRowFactory.subAgentToolRunningRow(name), insertBaseIdx + offset)
+                if (insertBaseIdx > panel.componentCount) {
+                    panel.add(toolRowFactory.subAgentToolRunningRow(name), panel.componentCount)
+                } else {
+                    panel.add(toolRowFactory.subAgentToolRunningRow(name), insertBaseIdx + offset)
+                }
             } else {
                 val resultText = TOOL_RESULT.findAll(content)
                     .firstOrNull { it.groupValues[1] == name }?.groupValues?.get(2)?.trim() ?: ""
-                panel.add(toolRowFactory.subAgentToolResultRow(name, resultText), insertBaseIdx + offset)
+                if (insertBaseIdx > panel.componentCount) {
+                    panel.add(toolRowFactory.subAgentToolResultRow(name, resultText), panel.componentCount)
+                } else {
+                    panel.add(toolRowFactory.subAgentToolResultRow(name, resultText), insertBaseIdx + offset)
+                }
             }
             offset++
         }
