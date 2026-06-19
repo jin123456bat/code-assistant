@@ -124,6 +124,20 @@ class ChatToolWindow(private val project: Project) {
         internal fun register(project: Project, instance: ChatToolWindow) {
             instances[project] = instance
         }
+
+        /** 从外部 Action 发送消息到聊天窗口（右键菜单等） */
+        fun sendMessageToChat(project: Project, message: String) {
+            val instance = instances[project]
+            if (instance != null) {
+                ApplicationManager.getApplication().invokeLater {
+                    instance.viewModel.addSystemMessage(message)
+                    instance.viewModel.sendMessage(
+                        com.aiassistant.AppSettingsService.getInstance().getApiKey() ?: "",
+                        message
+                    )
+                }
+            }
+        }
     }
 
     private val checkEmptyListener: () -> Unit = { checkEmptyState() }
@@ -898,6 +912,23 @@ class ChatToolWindow(private val project: Project) {
 
     init {
         register(project, this)
+        // 注册右键菜单审查回调——ReviewContextMenu 中的 Action 通过此桥接触发实际审查
+        com.aiassistant.ui.ReviewActionBridge.onReviewSelectedCode = { filePath, selectedCode ->
+            if (selectedCode.isNotBlank()) {
+                viewModel.addSystemMessage("🔍 审查选中代码: $filePath")
+                Thread({
+                    val result = reviewCommands.reviewAction()
+                    ApplicationManager.getApplication().invokeLater { viewModel.addSystemMessage(result) }
+                }, "context-review").apply { isDaemon = true }.start()
+            }
+        }
+        com.aiassistant.ui.ReviewActionBridge.onSecurityReviewFile = { filePath ->
+            viewModel.addSystemMessage("🔒 安全审查: $filePath")
+            Thread({
+                val result = reviewCommands.securityReviewAction()
+                ApplicationManager.getApplication().invokeLater { viewModel.addSystemMessage(result) }
+            }, "context-sec-review").apply { isDaemon = true }.start()
+        }
         KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(popupKeyDispatcher)
         // v3: 注册内置工具+Skills（同步安全），首条消息即可调用
         viewModel.initialize(project)
