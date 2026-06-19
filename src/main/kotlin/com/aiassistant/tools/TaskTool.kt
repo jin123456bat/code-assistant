@@ -171,64 +171,69 @@ class TaskTool : AgentTool {
 
     // ---- Worktree 隔离辅助 ----
 
-    /** 创建 git worktree，返回路径；失败返回 null（降级为 in-process） */
-    private fun createWorktree(basePath: String?): String? {
-        if (basePath == null) return null
-        val worktreeDir = java.io.File(basePath, ".claude/worktrees/subagent-${System.currentTimeMillis()}")
-        val process = try {
-            ProcessBuilder("git", "-C", basePath, "worktree", "add", worktreeDir.absolutePath)
-                .redirectErrorStream(true).start()
-        } catch (e: Exception) {
-            com.aiassistant.AppLogger.warn("Worktree 创建异常: ${e.message}")
-            return null
-        }
-        return try {
-            val output = process.inputStream.bufferedReader().readText()
-            val finished = process.waitFor(30, java.util.concurrent.TimeUnit.SECONDS)
-            if (!finished) {
-                process.destroyForcibly()
-                process.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)
-                com.aiassistant.AppLogger.warn("Worktree 创建超时: git worktree add 未在 30s 内完成")
+    companion object {
+        /** 创建 git worktree，返回路径；失败返回 null（降级为 in-process） */
+        fun createWorktree(basePath: String?): String? {
+            if (basePath == null) return null
+            val worktreeDir = java.io.File(basePath, ".claude/worktrees/subagent-${System.currentTimeMillis()}")
+            val process = try {
+                ProcessBuilder("git", "-C", basePath, "worktree", "add", worktreeDir.absolutePath)
+                    .redirectErrorStream(true).start()
+            } catch (e: Exception) {
+                com.aiassistant.AppLogger.warn("Worktree 创建异常: ${e.message}")
                 return null
             }
-            if (process.exitValue() == 0) {
-                com.aiassistant.AppLogger.info("Worktree 创建成功: ${worktreeDir.absolutePath}")
-                worktreeDir.absolutePath
-            } else {
-                com.aiassistant.AppLogger.warn("Worktree 创建失败: $output")
+            return try {
+                val output = process.inputStream.bufferedReader().readText()
+                val finished = process.waitFor(30, java.util.concurrent.TimeUnit.SECONDS)
+                if (!finished) {
+                    process.destroyForcibly()
+                    process.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)
+                    com.aiassistant.AppLogger.warn("Worktree 创建超时: git worktree add 未在 30s 内完成")
+                    return null
+                }
+                if (process.exitValue() == 0) {
+                    com.aiassistant.AppLogger.info("Worktree 创建成功: ${worktreeDir.absolutePath}")
+                    worktreeDir.absolutePath
+                } else {
+                    com.aiassistant.AppLogger.warn("Worktree 创建失败: $output")
+                    null
+                }
+            } catch (e: Exception) {
+                process.destroyForcibly()
+                com.aiassistant.AppLogger.warn("Worktree 创建异常: ${e.message}")
                 null
             }
-        } catch (e: Exception) {
-            process.destroyForcibly()
-            com.aiassistant.AppLogger.warn("Worktree 创建异常: ${e.message}")
-            null
+        }
+
+        /** 删除 git worktree */
+        fun removeWorktree(path: String?) {
+            if (path == null) return
+            val worktreeDir = java.io.File(path)
+            val basePath = worktreeDir.parentFile?.parentFile?.absolutePath ?: return
+            val process = try {
+                ProcessBuilder("git", "-C", basePath, "worktree", "remove", path, "--force")
+                    .redirectErrorStream(true).start()
+            } catch (e: Exception) {
+                com.aiassistant.AppLogger.warn("Worktree 删除异常: ${e.message}")
+                return
+            }
+            try {
+                val finished = process.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)
+                if (!finished) {
+                    process.destroyForcibly()
+                    process.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)
+                    com.aiassistant.AppLogger.warn("Worktree 删除超时: git worktree remove 未在 10s 内完成")
+                } else {
+                    com.aiassistant.AppLogger.info("Worktree 已删除: $path")
+                }
+            } catch (e: Exception) {
+                process.destroyForcibly()
+                com.aiassistant.AppLogger.warn("Worktree 删除异常: ${e.message}")
+            }
         }
     }
 
-    /** 删除 git worktree */
-    private fun removeWorktree(path: String?) {
-        if (path == null) return
-        val worktreeDir = java.io.File(path)
-        val basePath = worktreeDir.parentFile?.parentFile?.absolutePath ?: return
-        val process = try {
-            ProcessBuilder("git", "-C", basePath, "worktree", "remove", path, "--force")
-                .redirectErrorStream(true).start()
-        } catch (e: Exception) {
-            com.aiassistant.AppLogger.warn("Worktree 删除异常: ${e.message}")
-            return
-        }
-        try {
-            val finished = process.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)
-            if (!finished) {
-                process.destroyForcibly()
-                process.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)
-                com.aiassistant.AppLogger.warn("Worktree 删除超时: git worktree remove 未在 10s 内完成")
-            } else {
-                com.aiassistant.AppLogger.info("Worktree 已删除: $path")
-            }
-        } catch (e: Exception) {
-            process.destroyForcibly()
-            com.aiassistant.AppLogger.warn("Worktree 删除异常: ${e.message}")
-        }
-    }
+    private fun createWorktree(basePath: String?) = Companion.createWorktree(basePath)
+    private fun removeWorktree(path: String?) = Companion.removeWorktree(path)
 }

@@ -66,11 +66,11 @@ class MemoryStore(
     // ---- YAML frontmatter 解析 ----
 
     private fun parseMdContent(content: String, name: String, scope: String): MemoryEntry? {
-        val parts = content.split("---", limit = 3)
-        if (parts.size < 3) return null
-
-        val frontmatter = parts[1]
-        val body = parts[2].trimStart()
+        // 用正则匹配 exactly 文件开头的 YAML frontmatter（---\n...\n---\n）
+        val frontmatterRegex = Regex("""^---\s*\n(.*?)\n---\s*\n(.*)""", RegexOption.DOT_MATCHES_ALL)
+        val match = frontmatterRegex.find(content) ?: return null
+        val frontmatter = match.groupValues[1]
+        val body = match.groupValues[2].trimStart()
 
         val nameField = extractField(frontmatter, "name") ?: name
         val description = extractField(frontmatter, "description") ?: ""

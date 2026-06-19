@@ -64,8 +64,10 @@ class DiffCollector(private val projectBasePath: String?) {
     private fun detectBaseBranch(): String {
         val base = projectBasePath!!
         val hasMain = runCatching {
-            ProcessBuilder("git", "-C", base, "rev-parse", "--verify", "origin/main")
-                .start().waitFor() == 0
+            val process = ProcessBuilder("git", "-C", base, "rev-parse", "--verify", "origin/main")
+                .redirectErrorStream(true).start()
+            process.inputStream.bufferedReader().use { it.readText() }
+            process.waitFor() == 0
         }.getOrDefault(false)
         return if (hasMain) "origin/main" else "origin/master"
     }

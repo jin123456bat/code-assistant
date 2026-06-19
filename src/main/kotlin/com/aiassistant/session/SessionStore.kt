@@ -93,12 +93,18 @@ object SessionStore {
                         java.nio.file.StandardCopyOption.REPLACE_EXISTING
                     )
                     // 替换成功，清理备份
-                    bak.delete()
+                    if (target.exists()) bak.delete()
                 } catch (e: Exception) {
                     // 非原子 move 失败：尝试回滚 target（从 bak 恢复），并清理 tmp
                     if (bak.exists() && !target.exists()) {
-                        try { java.nio.file.Files.move(bak.toPath(), target.toPath()) } catch (_: Exception) {}
+                        try {
+                            java.nio.file.Files.move(bak.toPath(), target.toPath())
+                        } catch (_: Exception) {
+                            // 回滚失败时保留 bak 作为最后副本，不 delete
+                        }
                     }
+                    // 只有回滚成功（target 已恢复）时才删除 bak
+                    if (target.exists()) bak.delete()
                     if (!tmp.delete()) tmp.deleteOnExit()
                     throw e
                 }

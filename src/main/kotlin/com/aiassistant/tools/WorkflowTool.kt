@@ -99,6 +99,7 @@ class WorkflowTool : AgentTool {
                     SubAgentRegistry.fail(subId, e.message ?: "未知错误")
                 } finally {
                     childLoop.stop()
+                    TaskTool.removeWorktree(childLoop.workTreePath)
                 }
             }
             futures.add(future)
@@ -159,6 +160,7 @@ class WorkflowTool : AgentTool {
                 results.add("❌ **${task.description}**\n失败: ${e.message}")
             } finally {
                 childLoop.stop()
+                TaskTool.removeWorktree(childLoop.workTreePath)
             }
         }
         return ToolResult.ok("## 串行工作流完成（${results.size}/${tasks.size}）\n\n" + results.joinToString("\n\n---\n\n"))
@@ -177,6 +179,13 @@ class WorkflowTool : AgentTool {
         childLoop.onConfirmTool = { _, _, latch, choice ->
             choice.set(agentType.autoApprove)
             latch.countDown()
+        }
+        // Worktree 隔离：为并行子 Agent 创建独立 git worktree
+        val workTreePath: String? = if (agentType.isolation == "worktree") {
+            TaskTool.createWorktree(project.basePath)
+        } else null
+        if (workTreePath != null) {
+            childLoop.workTreePath = workTreePath
         }
         return childLoop
     }
