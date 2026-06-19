@@ -32,6 +32,6 @@ class SecurityReviewEngine(private val projectBasePath: String?) {
         if (depFindings.isNotEmpty()) { allFindings.addAll(depFindings); dimensions.add("dependencies") }
 
         val score = if (allFindings.isEmpty()) 100 else (100 - allFindings.count { it.severity == Severity.CRITICAL } * 20).coerceAtLeast(0)
-        return SecurityReport(allFindings.sortedByDescending { it.severity.ordinal }, dimensions, score)
+        return SecurityReport(allFindings.sortedByDescending { when(it.severity) { Severity.CRITICAL -> 3; Severity.WARNING -> 2; else -> 1 } }, dimensions, score)
     }
 }

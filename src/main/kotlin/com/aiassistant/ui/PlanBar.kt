@@ -80,7 +80,7 @@ class PlanBar : JPanel(BorderLayout()) {
             return
         }
 
-        if (newVisible && !oldVisible || !tasksChanged && tasks.isEmpty()) {
+        if (newVisible && (!oldVisible || (!tasksChanged && tasks.isEmpty()))) {
             // 首次可见 或 仅 plan 状态变化 → 全量重建
             clearComponentRefs()
             prevTaskVersions.clear()

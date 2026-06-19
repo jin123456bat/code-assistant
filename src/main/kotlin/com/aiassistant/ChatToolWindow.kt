@@ -927,7 +927,10 @@ class ChatToolWindow(private val project: Project) {
                     viewModel.addSystemMessage("🔍 审查选中代码: $filePath")
                     Thread({
                         val result = reviewCommands.reviewAction()
-                        ApplicationManager.getApplication().invokeLater { viewModel.addSystemMessage(result) }
+                        ApplicationManager.getApplication().invokeLater {
+                            viewModel.addSystemMessage(result)
+                            reviewResultPanel.showResults(reviewCommands.lastFindings, reviewCommands.lastScore)
+                        }
                     }, "context-review").apply { isDaemon = true }.start()
                 }
             },
@@ -935,7 +938,10 @@ class ChatToolWindow(private val project: Project) {
                 viewModel.addSystemMessage("🔒 安全审查: $filePath")
                 Thread({
                     val result = reviewCommands.securityReviewAction()
-                    ApplicationManager.getApplication().invokeLater { viewModel.addSystemMessage(result) }
+                    ApplicationManager.getApplication().invokeLater {
+                        viewModel.addSystemMessage(result)
+                        reviewResultPanel.showResults(reviewCommands.lastFindings, reviewCommands.lastScore)
+                    }
                 }, "context-sec-review").apply { isDaemon = true }.start()
             }
         )
@@ -1757,7 +1763,10 @@ class ChatToolWindow(private val project: Project) {
             Cmd("/review", "审查当前改动") {
                 Thread({
                     val result = reviewCommands.reviewAction()
-                    edt { addSystemMessage(result) }
+                    edt {
+                        addSystemMessage(result)
+                        reviewResultPanel.showResults(reviewCommands.lastFindings, reviewCommands.lastScore)
+                    }
                 }, "review-cmd").apply { isDaemon = true }.start()
             },
             Cmd("/diff", "查看变更") { addSystemMessage(reviewCommands.diffAction()) },
@@ -1769,7 +1778,10 @@ class ChatToolWindow(private val project: Project) {
             Cmd("/security-review", "安全审查") {
                 Thread({
                     val result = reviewCommands.securityReviewAction()
-                    edt { addSystemMessage(result) }
+                    edt {
+                        addSystemMessage(result)
+                        reviewResultPanel.showResults(reviewCommands.lastFindings, reviewCommands.lastScore)
+                    }
                 }, "sec-review-cmd").apply { isDaemon = true }.start()
             },
             Cmd("/test", "运行测试") {

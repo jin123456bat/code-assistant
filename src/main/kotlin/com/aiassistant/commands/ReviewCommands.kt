@@ -13,6 +13,9 @@ class ReviewCommands(private val projectBasePath: String?, private val getApiKey
     private val securityEngine = SecurityReviewEngine(projectBasePath)
     private val testRunner = TestRunner(projectBasePath)
 
+    @Volatile var lastFindings: List<Finding> = emptyList()
+    @Volatile var lastScore: Int = 0
+
     fun diffAction(): String {
         val stat = reviewEngine.getDiffStat()
         return if (stat.isBlank()) "📊 无变更" else buildString {
@@ -27,6 +30,9 @@ class ReviewCommands(private val projectBasePath: String?, private val getApiKey
         val apiKey = getApiKey() ?: return "❌ 请先配置 API Key"
         val result = reviewEngine.review(apiKey)
             ?: return "📋 无变更可审查"
+
+        lastFindings = result.findings
+        lastScore = result.score
 
         if (fixMode) {
             val prompt = reviewEngine.fixApplier.buildPrompt(result.findings)
@@ -86,6 +92,8 @@ class ReviewCommands(private val projectBasePath: String?, private val getApiKey
             if (file.isFile) fileContents[fc.path] = file.readText(Charsets.UTF_8)
         }
         val report = securityEngine.analyze(fileContents)
+        lastFindings = report.findings
+        lastScore = report.score
         // 将安全审查结果写入 gutter，在编辑器行号旁显示标记
         ReviewAnnotationGutter.setFindings(projectBasePath, report.findings)
         return buildString {

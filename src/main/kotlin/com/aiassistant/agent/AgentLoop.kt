@@ -171,11 +171,11 @@ class AgentLoop(
 
                 synchronized(ctx.historyLock) {
                     if (forkHistory != null && forkHistory.isNotEmpty()) {
-                        val lastRole = forkHistory.last().role
-                        if (lastRole == "user") {
-                            error("fork 历史末尾为 user 角色，对话消息交替已被破坏，请检查 conversationHistory 构建逻辑")
+                        if (forkHistory.last().role == "user") {
+                            AppLogger.warn("fork历史末尾为 user 角色，跳过注入")
+                        } else {
+                            history.addAll(0, forkHistory)
                         }
-                        history.addAll(0, forkHistory)
                     }
                     history.add(AnthropicMessage("user", effectiveUserMessage, images = images, groupId = roundGroupId))
                 }
@@ -557,7 +557,8 @@ class AgentLoop(
                                 }
                                 // PreToolUse 可能返回额外上下文内容
                                 if (!hookDecision.content.isNullOrBlank()) {
-                                    ctx.pendingDiagnostics = "${ctx.pendingDiagnostics ?: ""}\n${hookDecision.content}"
+                                    val existing = ctx.pendingDiagnostics
+                                    ctx.pendingDiagnostics = if (existing != null) "$existing\n[${tc.name} hook] ${hookDecision.content}" else "[${tc.name} hook] ${hookDecision.content}"
                                 }
                             }
 
@@ -858,7 +859,8 @@ class AgentLoop(
         )
 
         try { doneLatch.await(120, java.util.concurrent.TimeUnit.SECONDS) } catch (_: InterruptedException) {
-            Thread.currentThread().interrupt()  // 恢复中断标志
+            Thread.currentThread().interrupt()
+            return null  // 立即返回，不继续处理部分数据
         }
         if (!hasResponse) {
             // 超时或中断：关闭 SDK 客户端以中断底层 HTTP/SSE 连接，防止资源泄漏
