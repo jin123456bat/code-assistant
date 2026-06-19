@@ -1720,7 +1720,23 @@ class ChatToolWindow(private val project: Project) {
                 val file = java.io.File(project.basePath, "conversation-export-${System.currentTimeMillis()}.md")
                 file.writeText(text)
             },
-            Cmd("/clear",   "清空输入") { /* 已在 executeCommand 中清空 */ }
+            Cmd("/clear",   "清空输入") { /* 已在 executeCommand 中清空 */ },
+            Cmd("/memory", "查看记忆") {
+                val memEngine = viewModel.getMemoryEngine() ?: return@Cmd
+                val index = memEngine.list()
+                if (index.isEmpty()) {
+                    viewModel.messages.add(AgentMessage("system", "📝 暂无记忆，开始对话后系统会自动提取。"))
+                } else {
+                    val sb = StringBuilder()
+                    sb.appendLine("📝 **记忆列表** (${index.size} 条)\n")
+                    index.forEachIndexed { i, entry ->
+                        sb.appendLine("${i + 1}. **${entry.name}** (${entry.scope}) — ${entry.description}")
+                    }
+                    sb.appendLine("\n对话中可通过 memory_read 工具查看详情或搜索记忆。")
+                    viewModel.messages.add(AgentMessage("system", sb.toString()))
+                }
+                viewModel.onMessagesChanged?.invoke()
+            }
         )
 
         fun executeCommand(cmd: Cmd) {

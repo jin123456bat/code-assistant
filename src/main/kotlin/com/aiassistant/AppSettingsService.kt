@@ -27,6 +27,7 @@ class AppSettingsService {
         private const val COMPLETION_MANUAL_SHORTCUT_KEY = "$SERVICE_NAME.COMPLETION.MANUAL_SHORTCUT"
         private const val COMPLETION_PREV_CANDIDATE_KEY = "$SERVICE_NAME.COMPLETION.PREV_CANDIDATE"
         private const val COMPLETION_NEXT_CANDIDATE_KEY = "$SERVICE_NAME.COMPLETION.NEXT_CANDIDATE"
+        private const val MEMORY_ENABLED_KEY = "$SERVICE_NAME.MEMORY_ENABLED"
         private const val TOKEN_DISPLAY_KEY = "$SERVICE_NAME.TOKEN_DISPLAY"
 
         fun isTokenDisplayEnabled(): Boolean =
@@ -34,6 +35,15 @@ class AppSettingsService {
 
         fun setTokenDisplayEnabled(enabled: Boolean) {
             com.intellij.ide.util.PropertiesComponent.getInstance().setValue(TOKEN_DISPLAY_KEY, enabled, true)
+        }
+
+        fun isMemoryEnabled(): Boolean {
+            val raw = com.intellij.ide.util.PropertiesComponent.getInstance().getValue(MEMORY_ENABLED_KEY)
+            return raw == null || raw.toBooleanStrictOrNull() != false
+        }
+
+        fun setMemoryEnabled(enabled: Boolean) {
+            com.intellij.ide.util.PropertiesComponent.getInstance().setValue(MEMORY_ENABLED_KEY, enabled.toString())
         }
 
         val AVAILABLE_MODELS = listOf(

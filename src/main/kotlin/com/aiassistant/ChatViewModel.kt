@@ -102,6 +102,9 @@ class ChatViewModel {
 
     fun getTokenStats(): AgentContext.TokenStats? = agent?.ctx?.tokenStats
 
+    /** 提供对 memoryEngine 的访问，供 /memory 命令使用 */
+    fun getMemoryEngine(): com.aiassistant.agent.memory.MemoryEngine? = agent?.ctx?.memoryEngine
+
     fun addMcpTools(mcpTools: List<com.aiassistant.agent.AgentTool>) {
         agent?.ctx?.toolRegistry?.registerMcp(mcpTools)
     }
@@ -463,6 +466,22 @@ class ChatViewModel {
         pendingApprovals.clear()
         activity = Activity.Idle
         isThinking = false
+
+        // 自动提取记忆（异步，不阻塞 EDT 和 clear 流程）
+        val memEngine = agent?.ctx?.memoryEngine
+        val apiKey = com.aiassistant.AppSettingsService.getInstance().getApiKey()
+        if (memEngine != null && apiKey != null && apiKey.isNotBlank() && com.aiassistant.AppSettingsService.isMemoryEnabled()) {
+            val history = agent?.ctx?.conversationHistory?.toList() ?: emptyList()
+            if (history.isNotEmpty()) {
+                Thread({
+                    com.aiassistant.agent.memory.MemoryAutoExtract(memEngine).extract(
+                        history.map { com.aiassistant.AnthropicMessage(it.role, it.content) },
+                        apiKey
+                    )
+                }, "memory-auto-extract").apply { isDaemon = true }.start()
+            }
+        }
+
         runOnEdt { onMessagesChanged?.invoke() }
     }
 
