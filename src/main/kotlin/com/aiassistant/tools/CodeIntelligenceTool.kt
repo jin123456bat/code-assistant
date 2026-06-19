@@ -11,11 +11,15 @@ import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiManager
 import com.intellij.psi.PsiNamedElement
 import com.intellij.psi.PsiClass
+import com.intellij.psi.PsiMethod
+import com.intellij.psi.PsiCallExpression
+import com.intellij.psi.PsiRecursiveElementVisitor
 import com.intellij.psi.presentation.java.SymbolPresentationUtil
 import com.intellij.psi.search.FilenameIndex
 import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.psi.search.searches.ClassInheritorsSearch
 import com.intellij.psi.search.searches.ReferencesSearch
+import com.intellij.psi.util.PsiTreeUtil
 
 /**
  * PSI 代码智能工具 — 通过 IntelliJ PSI API 提供结构化代码导航。
@@ -30,7 +34,9 @@ class CodeIntelligenceTool : AgentTool {
         append("- find_implementations: 查找接口/抽象类的所有实现类（需 Java/Kotlin 支持）\n")
         append("- hover: 返回符号的类型信息和文档注释\n")
         append("- document_symbols: 列出文件的所有顶层符号\n")
-        append("- workspace_symbol: 按文件名或符号名在全局范围内搜索")
+        append("- workspace_symbol: 按文件名或符号名在全局范围内搜索\n")
+        append("- incoming_calls: 查询哪些方法调用了此方法（调用者/入向调用层级）\n")
+        append("- outgoing_calls: 查询此方法调用了哪些其他方法（被调用方/出向调用层级）")
     }
     override val parameters = listOf(
         ToolParameter(
@@ -39,7 +45,8 @@ class CodeIntelligenceTool : AgentTool {
             required = true,
             enum = listOf(
                 "go_to_definition", "find_references", "find_implementations",
-                "hover", "document_symbols", "workspace_symbol"
+                "hover", "document_symbols", "workspace_symbol",
+                "incoming_calls", "outgoing_calls"
             )
         ),
         ToolParameter("file_path", "string", "文件相对项目根路径（workspace_symbol 操作除外）"),
@@ -77,6 +84,8 @@ class CodeIntelligenceTool : AgentTool {
                             "find_references" -> findReferences(element, project, basePath, maxResults)
                             "find_implementations" -> findImplementations(element, project, basePath, maxResults)
                             "hover" -> hover(element, project, basePath)
+                            "incoming_calls" -> incomingCalls(element, project, basePath, maxResults)
+                            "outgoing_calls" -> outgoingCalls(element, project, basePath)
                             else -> ToolResult.err("未知操作: $operation")
                         }
                     }
@@ -245,6 +254,114 @@ class CodeIntelligenceTool : AgentTool {
             e = e.parent
         }
         return null
+    }
+
+    /** 查找 PSI 元素所在的方法 (PsiMethod) */
+    private fun findContainingMethod(element: PsiElement): PsiMethod? {
+        return PsiTreeUtil.getParentOfType(element, PsiMethod::class.java)
+    }
+
+    // ---- 调用层级 ----
+
+    /**
+     * incoming_calls: 查询哪些方法调用了此方法（入向调用层级）。
+     * 使用 MethodReferencesSearch/Finder 查找所有调用点，然后提取调用方方法。
+     */
+    private fun incomingCalls(element: PsiElement, project: Project, basePath: String, maxResults: Int): ToolResult {
+        val method = findContainingMethod(element)
+            ?: return ToolResult.err("所选位置不是方法/函数，无法查询调用层级")
+
+        val methodName = method.name ?: "(匿名)"
+
+        // 使用 ReferencesSearch 查找所有对该方法的引用
+        val refs = try {
+            ReferencesSearch.search(method, GlobalSearchScope.projectScope(project))
+                .findAll()
+                .take(maxResults)
+        } catch (_: Exception) {
+            return ToolResult.err("无法搜索 $methodName 的引用，当前语言可能不支持")
+        }
+
+        // 过滤出是方法调用（call site）的引用，排除函数声明等非调用引用
+        val callers = mutableMapOf<String, String>() // name -> location
+        for (ref in refs) {
+            val callerMethod = findContainingMethod(ref.element)
+            if (callerMethod != null && callerMethod != method) {
+                val name = callerMethod.name ?: "(匿名)"
+                if (name !in callers) {
+                    callers[name] = formatLocation(callerMethod, basePath)
+                }
+            }
+        }
+
+        val sb = StringBuilder()
+        sb.appendLine("### 入向调用层级 (Incoming Calls)")
+        sb.appendLine("方法: `$methodName` (${formatLocation(method, basePath)})")
+        sb.appendLine()
+
+        if (callers.isEmpty()) {
+            sb.appendLine("`$methodName` 没有被其他方法调用")
+        } else {
+            sb.appendLine("`$methodName` 被以下 ${callers.size} 个方法调用：")
+            sb.appendLine()
+            callers.entries.forEachIndexed { i, (name, loc) ->
+                sb.appendLine("${i + 1}. `$name()` — $loc")
+            }
+        }
+
+        return ToolResult.ok(sb.toString())
+    }
+
+    /**
+     * outgoing_calls: 查询此方法调用了哪些其他方法（出向调用层级）。
+     * 遍历方法体内的所有 PsiCallExpression，解析被调用方。
+     */
+    private fun outgoingCalls(element: PsiElement, project: Project, basePath: String): ToolResult {
+        val method = findContainingMethod(element)
+            ?: return ToolResult.err("所选位置不是方法/函数，无法查询调用层级")
+
+        val methodName = method.name ?: "(匿名)"
+
+        val calledMethods = mutableSetOf<String>() // "ClassName.methodName()" 集合（去重）
+
+        // 遍历方法子树，收集所有 PsiCallExpression
+        method.accept(object : PsiRecursiveElementVisitor() {
+            override fun visitElement(element: PsiElement) {
+                if (element is PsiCallExpression) {
+                    try {
+                        val resolved = element.resolveMethod()
+                        if (resolved != null && resolved != method) {
+                            val className = resolved.containingClass?.name ?: ""
+                            val calleeName = if (className.isNotEmpty()) "$className.${resolved.name}()" else "${resolved.name}()"
+                            calledMethods.add(calleeName)
+                        }
+                    } catch (_: Exception) {
+                        // 解析失败，跳过
+                    }
+                }
+                super.visitElement(element)
+            }
+        })
+
+        val sb = StringBuilder()
+        sb.appendLine("### 出向调用层级 (Outgoing Calls)")
+        sb.appendLine("方法: `$methodName` (${formatLocation(method, basePath)})")
+        sb.appendLine()
+
+        if (calledMethods.isEmpty()) {
+            sb.appendLine("`$methodName` 没有调用其他方法（或方法体为空/抽象方法）")
+        } else {
+            sb.appendLine("`$methodName` 调用了以下 ${calledMethods.size} 个方法：")
+            sb.appendLine()
+            calledMethods.take(15).sorted().forEachIndexed { i, callee ->
+                sb.appendLine("${i + 1}. `$callee`")
+            }
+            if (calledMethods.size > 15) {
+                sb.appendLine("... 及其他 ${calledMethods.size - 15} 个方法")
+            }
+        }
+
+        return ToolResult.ok(sb.toString())
     }
 
     private fun hover(element: PsiElement, project: Project, basePath: String): ToolResult {
