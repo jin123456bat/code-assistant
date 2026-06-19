@@ -5,7 +5,7 @@ import com.intellij.openapi.project.Project
 import java.util.concurrent.Executors
 
 /**
- * MCP 变更监听器 — 服务器推送变更时通知上层更新 AgentContext 和 ToolRegistryV3
+ * MCP 变更监听器 — 服务器推送变更时通知上层更新 AgentContext 和 ToolRegistry
  */
 interface McpChangeListener {
     fun onToolsChanged(serverName: String, newTools: List<AgentTool>)
@@ -24,7 +24,7 @@ class McpManager(private val project: Project) {
     private val configs = java.util.concurrent.ConcurrentHashMap<String, McpServerConfig>()
     private val restartCount = java.util.concurrent.ConcurrentHashMap<String, Int>()
 
-    /** MCP 变更监听器（由 ChatViewModel 注册，用于更新 AgentContext 和 ToolRegistryV3） */
+    /** MCP 变更监听器（由 ChatViewModel 注册，用于更新 AgentContext 和 ToolRegistry） */
     @Volatile var changeListener: McpChangeListener? = null
 
     companion object {

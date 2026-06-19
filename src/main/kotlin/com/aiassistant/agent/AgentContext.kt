@@ -9,7 +9,7 @@ import com.intellij.openapi.project.Project
  * Agent 共享上下文 — 贯穿整个 agent 生命周期。
  */
 class AgentContext(val project: Project) {
-    val toolRegistry = ToolRegistryV3()
+    val toolRegistry = ToolRegistry()
     var systemPrompt: String = ""
     var model: String = "deepseek-chat"
     /** 跨轮对话历史：保留完整 assistant/tool 消息，使 LLM 能感知之前的所有交互 */

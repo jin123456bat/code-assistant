@@ -31,7 +31,7 @@ ChatToolWindowFactory → ChatToolWindow (Swing UI, ~1590 行)
     → ChatViewModel  (UI 桥接，轻量 ViewModel，含 Activity 状态机)
         → AgentLoop (agent，Agent 主循环)
             → AnthropicSdkClient (Anthropic Java SDK 封装)
-            → ToolRegistryV3    (工具分发)
+            → ToolRegistry    (工具分发)
 ```
 
 ### UI 层（`ui/` 包，~2200 行）
@@ -105,7 +105,7 @@ msgIdToComponent:    Map<msgId → Component>  ← 已渲染组件引用
 
 **Agent 循环**（`agent/AgentLoop.kt`，核心）：在后台 `Thread` 上跑 `while` 循环（`MAX_LOOPS=100`，连续失败 `MAX_FAILURES=3` 即中止）。每轮调用模型 → 若返回 `tool_use` 则执行工具并把结果回填到 `history` 继续下一轮 → 若返回纯文本则结束。所有 UI 更新通过回调（`onMessage`/`onStreaming`/`onToolExecute`…）经 `invokeLater`/`invokeAndWait` 切回 EDT。
 
-**agent 包**（`agent/`）：包含 Agent 核心实现和共享类型——`AgentLoop`、`AgentContext`（贯穿生命周期的共享上下文，含 `Task`/`TaskStatus`（对齐 Claude Code Task 系统）、`planMode`/`approvedPlan`（Plan Mode 审批）、`ImageData`/`AgentMessage`（`id: Long` 消息唯一标识 + `version: Int` 增量渲染版本号）、`skillDefs: Map<String, SkillDef>` 已加载 skill 定义）、`ToolRegistryV3`、`SkillEngine`、`AgentTool` 接口。
+**agent 包**（`agent/`）：包含 Agent 核心实现和共享类型——`AgentLoop`、`AgentContext`（贯穿生命周期的共享上下文，含 `Task`/`TaskStatus`（对齐 Claude Code Task 系统）、`planMode`/`approvedPlan`（Plan Mode 审批）、`ImageData`/`AgentMessage`（`id: Long` 消息唯一标识 + `version: Int` 增量渲染版本号）、`skillDefs: Map<String, SkillDef>` 已加载 skill 定义）、`ToolRegistry`、`SkillEngine`、`AgentTool` 接口。
 
 **跨轮对话历史**：`AgentContext.conversationHistory`（`synchronizedList<AnthropicMessage>`）跨 `sendMessage()` 调用保留完整 assistant/tool 消息，使 LLM 能感知之前的所有交互。每轮 `run()` 追加当前轮消息，`clearConversation()` 清空。线程安全：单操作由 `synchronizedList` 保护，复合操作（`toList()`+`clear()`+`addAll()`）使用 `historyLock`。
 
@@ -120,11 +120,11 @@ msgIdToComponent:    Map<msgId → Component>  ← 已渲染组件引用
 
 **适配器：`AnthropicAdapter` 是唯一的适配器**（Anthropic Messages 格式 + `input_schema` 工具）。
 
-**工具系统**：`tools/` 下每个工具实现 `agent.AgentTool` 接口（`name` / `description` / `parameters` / `execute()`）。17 个内置工具由 `ToolRegistryV3.registerBuiltIn()` 注册：`search_code`、`read_file`（支持 `resource://` URI 读取 MCP 资源）、`write_file`、`edit_file`、`list_directory`、`execute_command`、`git_diff`、`git_log`、`git_status`、`ask_user`、`web_search`、`web_fetch`、`notebook_edit`、`task`、`code_intelligence`、`mcp_get_prompt`、`workflow`。两类工具来源统一管理：内置 / MCP（`registerMcp`）。七个元工具由 `AgentLoop.buildSdkToolDefs()` 硬编码添加：`Skill`（统一 skill 激活）、`EnterPlanMode`/`ExitPlanMode`（Plan Mode 工作流）、`TaskCreate`/`TaskUpdate`/`TaskList`/`TaskGet`（Task 执行追踪）。
+**工具系统**：`tools/` 下每个工具实现 `agent.AgentTool` 接口（`name` / `description` / `parameters` / `execute()`）。17 个内置工具由 `ToolRegistry.registerBuiltIn()` 注册：`search_code`、`read_file`（支持 `resource://` URI 读取 MCP 资源）、`write_file`、`edit_file`、`list_directory`、`execute_command`、`git_diff`、`git_log`、`git_status`、`ask_user`、`web_search`、`web_fetch`、`notebook_edit`、`task`、`code_intelligence`、`mcp_get_prompt`、`workflow`。两类工具来源统一管理：内置 / MCP（`registerMcp`）。七个元工具由 `AgentLoop.buildSdkToolDefs()` 硬编码添加：`Skill`（统一 skill 激活）、`EnterPlanMode`/`ExitPlanMode`（Plan Mode 工作流）、`TaskCreate`/`TaskUpdate`/`TaskList`/`TaskGet`（Task 执行追踪）。
 
 **安全模型**：`AgentLoop.SAFE_TOOLS`（只读工具）+ 用户白名单 `AppSettingsService.getToolWhitelist()` 内的工具直接执行；其余工具（`write_file`、`execute_command` 等）触发内联确认——`onConfirmTool` 回调配合 `CountDownLatch`/`AtomicBoolean` 阻塞等待用户通过审批选择卡在 UI 上点确认。`read_file` 额外检查路径安全：项目内免审，项目外触发审批。
 
-**MCP**（`mcp/`）：`McpManager` 从 `~/.claude.json`（用户全局）和 `.mcp.json`（项目根）读取 MCP server 配置，`McpClient` 支持 **stdio** 和 **HTTP** 两种传输。JSON-RPC 2.0 协议（`initialize` → `initialized` → `tools/list` → `tools/call`）。Client capabilities：`roots`+`sampling`（对齐 Claude Code）。工具发现后包装为 `McpToolAdapter` 注册到 `ToolRegistryV3.registerMcp()`。支持 `McpToolAdapter.rawArgsJson` 保留原始 JSON 参数类型。支持 **MCP Prompts**（`prompts/list` 列在 system prompt + `mcp_get_prompt` 工具按需获取渲染内容）和 **MCP Resources**（`resources/list` 列在 system prompt + `read_file` 支持 `resource://` URI 按需读取）。支持 **SSE 推送通知**（stdio 后台线程持续监听 + HTTP SSE 流，自动处理 `tools/prompts/resources/list_changed`）和 **Ping 心跳**（回复 `{}` 防止服务器超时断连）。支持 **Cancelled 取消通知**（`stop()` 时向所有服务器发送 `notifications/cancelled`）和 **自动健康检查**（`healthCheck` 在每次 agent 对话启动时运行，恢复崩溃的服务器并重新发现工具，同时重试初始连接失败的配置，最多 3 次）。`McpChangeListener` 接口在服务器推送变更时自动更新 `ToolRegistryV3` 和 `AgentContext`（线程安全：`mcpTools` 用 `ConcurrentHashMap`，`mcpPrompts`/`mcpResources` 用 `CopyOnWriteArrayList`）。MCP 加载在后台线程执行避免阻塞 EDT。通知回调使用 `bgExecutor` 线程池复用线程。
+**MCP**（`mcp/`）：`McpManager` 从 `~/.claude.json`（用户全局）和 `.mcp.json`（项目根）读取 MCP server 配置，`McpClient` 支持 **stdio** 和 **HTTP** 两种传输。JSON-RPC 2.0 协议（`initialize` → `initialized` → `tools/list` → `tools/call`）。Client capabilities：`roots`+`sampling`（对齐 Claude Code）。工具发现后包装为 `McpToolAdapter` 注册到 `ToolRegistry.registerMcp()`。支持 `McpToolAdapter.rawArgsJson` 保留原始 JSON 参数类型。支持 **MCP Prompts**（`prompts/list` 列在 system prompt + `mcp_get_prompt` 工具按需获取渲染内容）和 **MCP Resources**（`resources/list` 列在 system prompt + `read_file` 支持 `resource://` URI 按需读取）。支持 **SSE 推送通知**（stdio 后台线程持续监听 + HTTP SSE 流，自动处理 `tools/prompts/resources/list_changed`）和 **Ping 心跳**（回复 `{}` 防止服务器超时断连）。支持 **Cancelled 取消通知**（`stop()` 时向所有服务器发送 `notifications/cancelled`）和 **自动健康检查**（`healthCheck` 在每次 agent 对话启动时运行，恢复崩溃的服务器并重新发现工具，同时重试初始连接失败的配置，最多 3 次）。`McpChangeListener` 接口在服务器推送变更时自动更新 `ToolRegistry` 和 `AgentContext`（线程安全：`mcpTools` 用 `ConcurrentHashMap`，`mcpPrompts`/`mcpResources` 用 `CopyOnWriteArrayList`）。MCP 加载在后台线程执行避免阻塞 EDT。通知回调使用 `bgExecutor` 线程池复用线程。
 
 **Skills**（`agent/SkillEngine.kt`）：扫描 `<project>/.claude/skills/**/SKILL.md` 和 `~/.claude/skills/**/SKILL.md`，解析为 `SkillDef` 存入 `AgentContext.skillDefs`。对齐 Claude Code：skill 不作为独立工具注册，而是通过统一的 `Skill` 元工具（`Skill(skill=名称, args=输入)`）激活。激活后 skill prompt 注入 system prompt（而非 tool_result 消息），描述列表则始终在 system prompt 的 Skills 段落中渐进披露。支持 `/skill-name` 客户端拦截和 `preferredModel` 模型路由。YAML frontmatter 支持 `allowed-tools`（skill 激活时预批准的工具列表）和 `invoke-for`（`"user"`=仅命令菜单 / `"agent"`=仅 LLM 调用）。
 

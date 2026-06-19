@@ -6,8 +6,8 @@
 
 ## P0 — 核心能力
 
-- [ ] **Task 任务跟踪**
-  `TaskCreate` / `TaskList` / `TaskGet` / `TaskUpdate`，Agent 自动分解任务并跟踪进度
+- [x] **Task 任务跟踪** ✅ 已完成
+  `TaskCreate` / `TaskList` / `TaskGet` / `TaskUpdate`，Agent 自动分解任务并跟踪进度，PlanBar UI 展示进度
 
 ## P1 — 交互增强
 

@@ -6,9 +6,9 @@ import com.aiassistant.tools.*
 import com.intellij.openapi.project.Project
 
 /**
- * v3 统一工具注册中心。
+ * 统一工具注册中心。
  */
-class ToolRegistryV3 {
+class ToolRegistry {
 
     private val tools = mutableMapOf<String, AgentTool>()
     private val mcpTools = java.util.concurrent.ConcurrentHashMap<String, AgentTool>()
