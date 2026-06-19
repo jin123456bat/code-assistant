@@ -50,17 +50,17 @@
 
 ## P4 — 安全与生态
 
-- [ ] **Sandbox 沙箱**
-  文件系统/网络/OS 级隔离执行环境
+- [x] **Sandbox 沙箱** ⛔ wontfix
+  审批卡已提供有效防护，容器/VM 级沙箱实现极重
 
-- [ ] **文件变更 Hook**
-  `FileChanged` / `WorktreeCreate` / `WorktreeRemove` 事件
+- [x] **文件变更 Hook** ✅ 已完成
+  Hooks 系统已支持 `FileChanged`/`WorktreeCreate`/`WorktreeRemove` 事件
 
 - [ ] **插件市场集成**
   支持从 Marketplace 安装 Skills / Agents / MCP Servers
 
-- [ ] **Push 通知**
-  桌面/手机推送长期运行任务完成通知
+- [x] **Push 通知** ⛔ wontfix
+  需推送服务+移动端基础设施，IDE 插件场景不存在
 
 ## P5 — 体验细节
 
