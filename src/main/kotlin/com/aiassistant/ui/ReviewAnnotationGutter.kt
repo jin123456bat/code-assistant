@@ -16,14 +16,32 @@ import javax.swing.Icon
 class ReviewAnnotationGutter : LineMarkerProvider {
 
     companion object {
-        /** 当前审查结果缓存，/review 执行后由 ReviewEngine 写入 */
-        @Volatile
-        var currentFindings: List<Finding> = emptyList()
+        /** per-project 审查结果缓存 (Project basePath → findings) */
+        private val projectFindings = java.util.concurrent.ConcurrentHashMap<String, List<Finding>>()
 
-        /** 清除所有审查标记 */
-        fun clear() {
-            currentFindings = emptyList()
+        /** 写入 project 的审查结果 */
+        fun setFindings(projectBasePath: String?, findings: List<Finding>) {
+            val key = projectBasePath ?: return
+            projectFindings[key] = findings
         }
+
+        /** 读取 project 的审查结果 */
+        fun getFindings(projectBasePath: String?): List<Finding> {
+            val key = projectBasePath ?: return emptyList()
+            return projectFindings[key] ?: emptyList()
+        }
+
+        /** 清除 project 的审查标记 */
+        fun clear(projectBasePath: String?) {
+            val key = projectBasePath ?: return
+            projectFindings.remove(key)
+        }
+
+        /** 兼容旧接口 */
+        @Deprecated("用 setFindings/getFindings 替代")
+        var currentFindings: List<Finding>
+            get() = getFindings("")
+            set(value) = setFindings("", value)
     }
 
     override fun getLineMarkerInfo(element: PsiElement): LineMarkerInfo<*>? {
@@ -34,11 +52,11 @@ class ReviewAnnotationGutter : LineMarkerProvider {
         elements: MutableList<out PsiElement>,
         result: MutableCollection<in LineMarkerInfo<*>>
     ) {
-        val findings = currentFindings
-        if (findings.isEmpty()) return
-
         val psiFile = elements.firstOrNull()?.containingFile ?: return
         val projectBasePath = psiFile.project.basePath ?: return
+
+        val findings = getFindings(projectBasePath)
+        if (findings.isEmpty()) return
 
         // 提取匹配当前文件的 findings
         val filePath = psiFile.virtualFile.path
