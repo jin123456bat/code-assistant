@@ -143,7 +143,24 @@ git diff → 每个文件的 hunk 预览（前10行）
     ↓
 结果展示:
     ├── 全部通过 → 聊天 Bubble "✅ 全部 N 个测试通过"
-    └── 有失败   → 失败详情 + 自动发 LLM "以下测试失败，分析根因并修复：<test-name>: <error>"
+    └── 有失败   → 列出失败测试名 + 错误消息 + 堆栈（仅报告，不修复）
+```
+
+### /fix 流程
+
+```
+输入: /fix 命令（或 /test 失败后用户手动调用）
+    ↓
+收集上下文:
+    ├── 上次 /test 的失败输出（缓存在 ViewModel 中）
+    ├── 相关源文件（根据失败测试的堆栈定位）
+    └── 当前 git diff（如果有变更）
+    ↓
+发 LLM: "以下测试失败，分析根因并修复代码：<test>: <error>"
+    ↓
+LLM 通过 Edit 工具直接修复源文件
+    ↓
+修复后自动重新运行 /test 验证
 ```
 
 ### /security-review 流程
@@ -182,9 +199,16 @@ SecurityReviewEngine.analyze(diff)
 ### /test
 
 ```
-/test                    → 运行 ./gradlew test，解析结果，失败时自动调 LLM 分析修复
+/test                    → 运行 ./gradlew test，解析结果并展示（仅报告，不修复）
 /test --file FooTest.kt  → 运行指定测试类
 /test --method testName  → 运行指定测试方法
+```
+
+### /fix
+
+```
+/fix                    → 分析上次 /test 的失败输出，调 LLM 定位根因并修复代码
+/fix --retry            → 修复后自动重新运行 /test 验证
 ```
 
 ### /security-review
@@ -261,8 +285,8 @@ SecurityReviewEngine.analyze(diff)
 | `security/SecretDetector.kt` | 密钥检测 |
 | `security/PermissionAnalyzer.kt` | 权限分析 |
 | `security/DependencyChecker.kt` | 依赖漏洞 |
-| `commands/ReviewCommands.kt` | 斜杠命令实现 (/review /diff /test /security-review) |
-| `commands/TestRunner.kt` | /test 实现：gradlew test 执行 + 输出解析 + LLM 修复委托 |
+| `commands/ReviewCommands.kt` | 斜杠命令实现 (/review /diff /test /security-review /fix) |
+| `commands/TestRunner.kt` | /test + /fix 实现：gradlew test 执行 + 输出解析 + 失败缓存 + LLM 修复 |
 | `ui/ReviewResultPanel.kt` | 审查结果面板 |
 | `ui/ReviewAnnotationGutter.kt` | IDE diff gutter 标注 |
 | `ui/ReviewContextMenu.kt` | 右键菜单 |
