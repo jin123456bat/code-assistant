@@ -29,13 +29,23 @@ class ReviewCommands(private val projectBasePath: String?, private val getApiKey
             ?: return "📋 无变更可审查"
 
         if (fixMode) {
-            val fixResult = reviewEngine.fixApplier.apply(result.findings, projectBasePath)
-            return buildString {
-                appendLine(renderResult(result.findings, result.score, result.totalFiles))
-                appendLine()
-                appendLine("## --fix 自动修复")
-                appendLine("✅ ${fixResult.fixed} 条已修复 | ⚠️ ${fixResult.skipped} 条需手动处理")
-                fixResult.details.forEach { appendLine(it) }
+            val prompt = reviewEngine.fixApplier.buildPrompt(result.findings)
+            if (prompt != null) {
+                return buildString {
+                    appendLine(renderResult(result.findings, result.score, result.totalFiles))
+                    appendLine()
+                    appendLine("## --fix 自动修复")
+                    appendLine("已将 ${result.findings.count { it.severity == Severity.CRITICAL || it.confidence >= 8 }} 条高置信度问题发送给 Agent 自动修复。")
+                    appendLine()
+                    appendLine(prompt)
+                }
+            } else {
+                return buildString {
+                    appendLine(renderResult(result.findings, result.score, result.totalFiles))
+                    appendLine()
+                    appendLine("## --fix")
+                    appendLine("无需修复（无 CRITICAL 或高置信度问题）")
+                }
             }
         }
         if (commentMode) return reviewEngine.commentFormatter.toGitHub(result.findings)

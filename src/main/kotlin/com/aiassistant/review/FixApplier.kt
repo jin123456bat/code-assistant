@@ -1,43 +1,37 @@
 package com.aiassistant.review
 
-import java.io.File
-
+/**
+ * FixApplier：/review --fix 时生成修复 prompt，发给 Agent 用 edit_file 工具修复。
+ * 不再直接改写源文件——所有写操作走 AgentLoop 的 Edit 工具审批流程。
+ */
 class FixApplier {
+
     data class FixResult(val fixed: Int, val skipped: Int, val details: List<String>)
 
-    fun apply(findings: List<Finding>, projectBasePath: String?): FixResult {
+    /**
+     * 生成修复 prompt。高置信度 findings 拼成结构化指令，交给 Agent 逐个修复。
+     * Agent 使用自身的 edit_file 工具，经过正常的工具审批机制。
+     */
+    fun buildPrompt(findings: List<Finding>): String? {
         val toFix = findings.filter { it.severity == Severity.CRITICAL || it.confidence >= 8 }
-        var fixed = 0
-        val details = mutableListOf<String>()
+        if (toFix.isEmpty()) return null
 
-        for (f in toFix) {
-            if (f.suggestion.isBlank()) {
-                details.add("⚠️ ${f.file}:${f.line} — ${f.title}（无修复建议，跳过）")
-                continue
+        return buildString {
+            appendLine("请根据以下审查发现修复代码。每修复一项后确认结果。")
+            appendLine()
+            toFix.forEachIndexed { i, f ->
+                appendLine("### ${i + 1}. ${f.title}")
+                appendLine("- 文件: `${f.file}`")
+                appendLine("- 行号: ${f.line}")
+                appendLine("- 类型: ${f.severity} / ${f.category}")
+                appendLine("- 描述: ${f.description}")
+                if (f.suggestion.isNotBlank()) appendLine("- 建议: ${f.suggestion}")
+                appendLine()
             }
-            try {
-                val file = File(projectBasePath, f.file)
-                if (!file.isFile) {
-                    details.add("⚠️ ${f.file} 不存在，跳过")
-                    continue
-                }
-                val content = file.readText(Charsets.UTF_8)
-                val lines = content.lines()
-                if (f.line < 1 || f.line > lines.size) {
-                    details.add("⚠️ ${f.file}:${f.line} 行号越界")
-                    continue
-                }
-                val newContent = content.replace(
-                    lines[f.line - 1],
-                    "// REVIEW-FIX: ${f.title}\n${lines[f.line - 1]}"
-                )
-                file.writeText(newContent, Charsets.UTF_8)
-                fixed++
-                details.add("✅ ${f.file}:${f.line} — ${f.title}")
-            } catch (e: Exception) {
-                details.add("❌ ${f.file}:${f.line} — ${e.message}")
-            }
+            appendLine("使用 edit_file 工具逐一修复上述问题。修复原则:")
+            appendLine("1. 只修改源代码，不改测试（除非测试本身有 bug）")
+            appendLine("2. 每次修改后确认代码编译通过")
+            appendLine("3. 跳过有歧义或无法确定的问题")
         }
-        return FixResult(fixed, toFix.size - fixed, details)
     }
 }
