@@ -37,11 +37,6 @@ class ReviewAnnotationGutter : LineMarkerProvider {
             projectFindings.remove(key)
         }
 
-        /** 兼容旧接口 */
-        @Deprecated("用 setFindings/getFindings 替代")
-        var currentFindings: List<Finding>
-            get() = getFindings("")
-            set(value) = setFindings("", value)
     }
 
     override fun getLineMarkerInfo(element: PsiElement): LineMarkerInfo<*>? {

@@ -9,7 +9,7 @@ class SecretDetector {
         Regex("""(apiKey|api_key|apikey)\s*[:=]\s*["'][^"']{8,}["']""", RegexOption.IGNORE_CASE) to "疑似 API Key 硬编码",
         Regex("""(password|passwd)\s*[:=]\s*["'][^"']+["']""", RegexOption.IGNORE_CASE) to "疑似密码硬编码",
         Regex("""(token|secret)\s*[:=]\s*["'][^"']{8,}["']""", RegexOption.IGNORE_CASE) to "疑似 Token 硬编码",
-        Regex("""BEGIN\s+(RSA|EC|DSA)\s+PRIVATE\s+KEY""") to "私钥硬编码",
+        Regex("""BEGIN\s+(RSA|EC|DSA|OPENSSH|ENCRYPTED)?\s*PRIVATE\s+KEY""") to "私钥硬编码",
     )
 
     fun scan(content: String, filePath: String): List<Finding> {

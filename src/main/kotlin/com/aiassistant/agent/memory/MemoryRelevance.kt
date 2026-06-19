@@ -7,6 +7,13 @@ class MemoryRelevance {
         const val MAX_CHARS = 2000
     }
 
+    /**
+     * 根据上下文关键词匹配最相关的记忆条目。
+     * TODO: 当前仅匹配 description + name，不匹配 content。
+     * 设计权衡：MemoryRelevance 只有 IndexEntry（不含 content），
+     * 若从 MemoryEngine.getRelevantMemories 中先 read 所有 content 再匹配，
+     * 对大量记忆文件 IO 开销过高。
+     */
     fun match(context: String, memories: List<IndexEntry>): List<IndexEntry> {
         if (memories.isEmpty() || context.isBlank()) return emptyList()
         val contextKeywords = extractKeywords(context)

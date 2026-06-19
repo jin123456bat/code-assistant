@@ -92,13 +92,26 @@ class MemoryAutoExtract(private val engine: MemoryEngine) {
     /**
      * 解析 LLM 返回的 JSON 数组文本，提取 MemoryEntry 列表。
      * 容错：跳过无法解析的条目，仅在整体非 JSON 时返回空列表。
+     * 额外容错：超时导致 JSON 数组未闭合时，尝试手动闭合最后一项。
      */
     private fun parseResult(text: String): List<MemoryEntry> {
         return try {
             val jsonStart = text.indexOf('[')
             val jsonEnd = text.lastIndexOf(']')
-            if (jsonStart < 0 || jsonEnd < 0) return emptyList()
-            val json = text.substring(jsonStart, jsonEnd + 1)
+            if (jsonStart < 0) return emptyList()
+            val json: String
+            if (jsonEnd < 0) {
+                // 数组未闭合（超时导致不完整 JSON），尝试手动闭合最后一项
+                val partial = text.substring(jsonStart)
+                val lastBrace = partial.lastIndexOf('}')
+                if (lastBrace >= 0) {
+                    json = partial.substring(0, lastBrace + 1) + "]"
+                } else {
+                    return emptyList()
+                }
+            } else {
+                json = text.substring(jsonStart, jsonEnd + 1)
+            }
             val gson = Gson()
             val listType = object : com.google.gson.reflect.TypeToken<List<Map<String, Any>>>() {}.type
             val arr: List<Map<String, Any>> = gson.fromJson(json, listType)

@@ -30,7 +30,9 @@ class MemoryEngine(projectBasePath: String?) {
      * 获取索引列表，优先返回缓存。
      */
     fun getIndex(): List<IndexEntry> {
-        cachedIndex = store.list()
+        if (cachedIndex == null) {
+            cachedIndex = store.list()
+        }
         return cachedIndex!!
     }
 
