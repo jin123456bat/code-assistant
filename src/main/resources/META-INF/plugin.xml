@@ -122,5 +122,19 @@
             description="对当前文件进行安全五维度审查">
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
         </action>
+        <action
+            id="CodeAssistant.FixSelectedCode"
+            class="com.aiassistant.ui.FixSelectedCodeAction"
+            text="修复此代码"
+            description="让 AI 修复选中的代码">
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+        </action>
+        <action
+            id="CodeAssistant.ExplainSelectedCode"
+            class="com.aiassistant.ui.ExplainSelectedCodeAction"
+            text="解释此代码"
+            description="让 AI 解释选中的代码">
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+        </action>
     </actions>
 </idea-plugin>

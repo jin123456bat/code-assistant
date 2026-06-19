@@ -14,12 +14,19 @@ object ReviewActionBridge {
 
     data class Handler(
         val onReviewSelectedCode: ((String, String) -> Unit)?,
-        val onSecurityReviewFile: ((String) -> Unit)?
+        val onSecurityReviewFile: ((String) -> Unit)?,
+        val onFixSelectedCode: ((String, String) -> Unit)?,
+        val onExplainSelectedCode: ((String, String) -> Unit)?
     )
 
-    fun register(projectBasePath: String?, onReviewSelectedCode: ((String, String) -> Unit)?, onSecurityReviewFile: ((String) -> Unit)?) {
+    fun register(projectBasePath: String?,
+                 onReviewSelectedCode: ((String, String) -> Unit)?,
+                 onSecurityReviewFile: ((String) -> Unit)?,
+                 onFixSelectedCode: ((String, String) -> Unit)? = null,
+                 onExplainSelectedCode: ((String, String) -> Unit)? = null
+    ) {
         val key = projectBasePath ?: return
-        handlers[key] = Handler(onReviewSelectedCode, onSecurityReviewFile)
+        handlers[key] = Handler(onReviewSelectedCode, onSecurityReviewFile, onFixSelectedCode, onExplainSelectedCode)
     }
 
     fun unregister(projectBasePath: String?) {
@@ -38,6 +45,14 @@ object ReviewActionBridge {
 
     fun getOnSecurityReviewFile(projectBasePath: String?): ((String) -> Unit)? {
         return getHandler(projectBasePath)?.onSecurityReviewFile
+    }
+
+    fun getOnFixSelectedCode(projectBasePath: String?): ((String, String) -> Unit)? {
+        return getHandler(projectBasePath)?.onFixSelectedCode
+    }
+
+    fun getOnExplainSelectedCode(projectBasePath: String?): ((String, String) -> Unit)? {
+        return getHandler(projectBasePath)?.onExplainSelectedCode
     }
 
     /** 兼容旧接口 */
@@ -85,5 +100,49 @@ class SecurityReviewFileAction : AnAction() {
 
     override fun update(e: AnActionEvent) {
         e.presentation.isEnabled = e.getData(CommonDataKeys.PSI_FILE) != null
+    }
+}
+
+class FixSelectedCodeAction : AnAction() {
+    override fun actionPerformed(e: AnActionEvent) {
+        val project = e.getData(CommonDataKeys.PROJECT) ?: return
+        val file = e.getData(CommonDataKeys.PSI_FILE)?.virtualFile ?: return
+        val code = e.getData(CommonDataKeys.EDITOR)?.selectionModel?.selectedText ?: ""
+
+        val handler = ReviewActionBridge.getOnFixSelectedCode(project.basePath)
+        if (handler != null) {
+            handler(file.path, code)
+        } else {
+            val msg = if (code.isNotBlank())
+                "请修复以下代码（${file.name}）：\n```\n${code.take(3000)}\n```"
+            else "请检查并修复 ${file.name} 中的问题"
+            com.aiassistant.ChatToolWindow.sendMessageToChat(project, msg)
+        }
+    }
+
+    override fun update(e: AnActionEvent) {
+        e.presentation.isEnabled = e.getData(CommonDataKeys.PROJECT) != null
+    }
+}
+
+class ExplainSelectedCodeAction : AnAction() {
+    override fun actionPerformed(e: AnActionEvent) {
+        val project = e.getData(CommonDataKeys.PROJECT) ?: return
+        val file = e.getData(CommonDataKeys.PSI_FILE)?.virtualFile ?: return
+        val code = e.getData(CommonDataKeys.EDITOR)?.selectionModel?.selectedText ?: ""
+
+        val handler = ReviewActionBridge.getOnExplainSelectedCode(project.basePath)
+        if (handler != null) {
+            handler(file.path, code)
+        } else {
+            val msg = if (code.isNotBlank())
+                "请解释以下代码（${file.name}）：\n```\n${code.take(3000)}\n```"
+            else "请解释 ${file.name} 的功能和设计思路"
+            com.aiassistant.ChatToolWindow.sendMessageToChat(project, msg)
+        }
+    }
+
+    override fun update(e: AnActionEvent) {
+        e.presentation.isEnabled = e.getData(CommonDataKeys.PROJECT) != null
     }
 }
