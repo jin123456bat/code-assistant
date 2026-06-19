@@ -58,6 +58,9 @@ class AgentContext(val project: Project) {
     /** 目标驱动模式：设置后 Agent 持续工作直到目标达成（用户中断或 MAX_LOOPS） */
     @Volatile var goal: String? = null
 
+    /** 待注入的 IDE Inspection 诊断结果（write/edit 后由 DiagnosticFeedback 写入，下一轮 send 前注入） */
+    @Volatile var pendingDiagnostics: String? = null
+
     val rules = mutableListOf<RuleDef>()
 
     data class RuleDef(

@@ -160,6 +160,15 @@ class AgentLoop(
                 val toolNames = ctx.toolRegistry.getAll().joinToString(", ") { it.name }
                 edt { onMessage?.invoke(AgentMessage("system", "$toolCount 个工具已就绪: $toolNames")) }
 
+                // 注入上轮 write/edit 产生的 IDE 诊断结果
+                val diagnostics = ctx.pendingDiagnostics
+                val effectiveUserMessage = if (diagnostics != null) {
+                    ctx.pendingDiagnostics = null
+                    "$userMessage\n\n$diagnostics"
+                } else {
+                    userMessage
+                }
+
                 synchronized(ctx.historyLock) {
                     if (forkHistory != null && forkHistory.isNotEmpty()) {
                         val lastRole = forkHistory.last().role
@@ -168,7 +177,7 @@ class AgentLoop(
                         }
                         history.addAll(0, forkHistory)
                     }
-                    history.add(AnthropicMessage("user", userMessage, images = images, groupId = roundGroupId))
+                    history.add(AnthropicMessage("user", effectiveUserMessage, images = images, groupId = roundGroupId))
                 }
 
                 val subResults = SubAgentRegistry.drainCompleted()
@@ -602,6 +611,23 @@ class AgentLoop(
                             synchronized(ctx.historyLock) {
                                 history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments, thinking = thinking, thinkingSignature = thinkingSignature))
                                 history.add(AnthropicMessage("user", resultText, toolCallId = tc.id, groupId = roundGroupId))
+                            }
+
+                            // write/edit 执行成功后，收集 IDE Inspection 诊断并注入下一轮
+                            if (toolResult.success && (tc.name == "write_file" || tc.name == "edit_file")) {
+                                val filePath = tc.arguments?.let { args ->
+                                    try {
+                                        val map = gson.fromJson(args, Map::class.java) as? Map<*, *>
+                                        map?.get("file_path")?.toString() ?: map?.get("relativePath")?.toString()
+                                    } catch (_: Exception) { null }
+                                }
+                                if (filePath != null) {
+                                    val diagResult = DiagnosticFeedback.collect(project, filePath)
+                                    if (diagResult != null) {
+                                        AppLogger.info("DiagnosticFeedback: 注入 ${tc.name} 的诊断结果")
+                                        ctx.pendingDiagnostics = diagResult
+                                    }
+                                }
                             }
 
                             // 使用 invokeLater 避免 Agent 线程阻塞等待 EDT
