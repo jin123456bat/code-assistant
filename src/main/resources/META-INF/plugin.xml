@@ -44,6 +44,10 @@
         <inline.completion.provider
             id="ai-assistant"
             implementation="com.aiassistant.completion.AiCompletionProvider"/>
+
+        <codeInsight.lineMarkerProvider
+                language=""
+                implementationClass="com.aiassistant.ui.ReviewAnnotationGutter"/>
     </extensions>
 
     <actions resource-bundle="messages.AiAssistantBundle">

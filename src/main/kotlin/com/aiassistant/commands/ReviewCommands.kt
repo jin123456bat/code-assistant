@@ -5,6 +5,7 @@ import com.aiassistant.review.Severity
 import com.aiassistant.review.Finding
 import com.aiassistant.review.DiffCollector
 import com.aiassistant.security.SecurityReviewEngine
+import com.aiassistant.ui.ReviewAnnotationGutter
 
 class ReviewCommands(private val projectBasePath: String?, private val getApiKey: () -> String?) {
 
@@ -42,6 +43,8 @@ class ReviewCommands(private val projectBasePath: String?, private val getApiKey
     }
 
     private fun renderResult(findings: List<Finding>, score: Int, totalFiles: Int): String {
+        // 将审查结果写入 gutter，在编辑器行号旁显示标记
+        ReviewAnnotationGutter.currentFindings = findings
         return buildString {
             appendLine("## 📋 代码审查报告")
             appendLine("**评分:** $score/100 | **文件:** $totalFiles | **发现问题:** ${findings.size}")
@@ -73,6 +76,8 @@ class ReviewCommands(private val projectBasePath: String?, private val getApiKey
             if (file.isFile) fileContents[fc.path] = file.readText(Charsets.UTF_8)
         }
         val report = securityEngine.analyze(fileContents)
+        // 将安全审查结果写入 gutter，在编辑器行号旁显示标记
+        ReviewAnnotationGutter.currentFindings = report.findings
         return buildString {
             appendLine("## 🔒 安全审查报告")
             appendLine("**评分:** ${report.score}/100 | **维度:** ${report.dimensionsCovered.joinToString(", ")} | **发现问题:** ${report.findings.size}")
