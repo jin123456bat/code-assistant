@@ -469,7 +469,7 @@ class ChatViewModel {
 
         // 自动提取记忆（异步，不阻塞 EDT 和 clear 流程）
         val memEngine = agent?.ctx?.memoryEngine
-        val apiKey = com.aiassistant.AppSettingsService.getInstance().getApiKey()
+        val apiKey = try { com.aiassistant.AppSettingsService.getInstance().getApiKey() } catch (_: Exception) { null }
         if (memEngine != null && apiKey != null && apiKey.isNotBlank() && com.aiassistant.AppSettingsService.isMemoryEnabled()) {
             val history = agent?.ctx?.conversationHistory?.toList() ?: emptyList()
             if (history.isNotEmpty()) {
