@@ -193,7 +193,11 @@ class McpClient(private val config: McpServerConfig) {
                         break
                     }
                     val delay = (1000L * retryCount).coerceAtMost(30000L)  // 指数退避 1s→30s
-                    if (sseRunning) Thread.sleep(delay)
+                    // 短轮询代替长 sleep: disconnect() 后最多 1s 即可退出
+                    val deadline = System.currentTimeMillis() + delay
+                    while (sseRunning && System.currentTimeMillis() < deadline) {
+                        Thread.sleep(1000)
+                    }
                 }
             }
         }
