@@ -101,6 +101,26 @@ object HookConfigLoader {
                     currentHookEntries.clear()
                 }
                 trimmed.startsWith("- type:") -> currentHookEntries.add(parseYamlHookLine(trimmed))
+                // 缩进行的 key-value 对，如 "  command: echo hello"
+                trimmed.startsWith("  ") && trimmed.contains(":") && !trimmed.startsWith("  -") -> {
+                    if (currentHookEntries.isNotEmpty()) {
+                        val kv = trimmed.split(":", limit = 2)
+                        if (kv.size == 2) {
+                            val key = kv[0].trim()
+                            val value = kv[1].trim().removeSurrounding("\"")
+                            val lastEntry = currentHookEntries.last()
+                            currentHookEntries[currentHookEntries.lastIndex] = when (key) {
+                                "command" -> lastEntry.copy(command = value)
+                                "url" -> lastEntry.copy(url = value)
+                                "method" -> lastEntry.copy(method = value)
+                                "tool" -> lastEntry.copy(tool = value)
+                                "prompt" -> lastEntry.copy(prompt = value)
+                                "timeout" -> lastEntry.copy(timeout = value.toIntOrNull() ?: 60)
+                                else -> lastEntry
+                            }
+                        }
+                    }
+                }
             }
         }
         flushEntries(hooks, currentEvent, currentMatcher, currentHookEntries)

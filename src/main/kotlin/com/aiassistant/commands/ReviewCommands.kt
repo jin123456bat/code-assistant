@@ -35,7 +35,7 @@ class ReviewCommands(private val projectBasePath: String?, private val getApiKey
         lastScore = result.score
 
         if (fixMode) {
-            val prompt = reviewEngine.fixApplier.buildPrompt(result.findings)
+            val prompt = reviewEngine.fixApplier.buildPrompt(result.findings, projectBasePath)
             if (prompt != null) {
                 return buildString {
                     appendLine(renderResult(result.findings, result.score, result.totalFiles))

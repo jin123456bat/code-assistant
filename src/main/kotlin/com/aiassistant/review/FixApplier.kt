@@ -12,7 +12,7 @@ class FixApplier {
      * 生成修复 prompt。高置信度 findings 拼成结构化指令，交给 Agent 逐个修复。
      * Agent 使用自身的 edit_file 工具，经过正常的工具审批机制。
      */
-    fun buildPrompt(findings: List<Finding>): String? {
+    fun buildPrompt(findings: List<Finding>, projectBasePath: String? = null): String? {
         val toFix = findings.filter { it.severity == Severity.CRITICAL || it.confidence >= 8 }
         if (toFix.isEmpty()) return null
 
@@ -21,8 +21,9 @@ class FixApplier {
             appendLine()
             toFix.forEachIndexed { i, f ->
                 val safePath = try {
+                    val projectRoot = if (projectBasePath != null) java.io.File(projectBasePath).canonicalPath else java.io.File(".").canonicalPath
                     java.io.File(f.file).canonicalPath.let { cp ->
-                        if (cp.startsWith(java.io.File(".").canonicalPath)) f.file else "⚠️路径异常: ${f.file}"
+                        if (cp.startsWith(projectRoot)) f.file else "⚠️路径异常: ${f.file}"
                     }
                 } catch (_: Exception) { "⚠️路径无效: ${f.file}" }
                 appendLine("### ${i + 1}. ${f.title}")

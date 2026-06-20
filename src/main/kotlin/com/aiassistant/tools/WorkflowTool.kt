@@ -95,7 +95,7 @@ class WorkflowTool : AgentTool {
                     latch.await()
                     val result = resultRef.get()?.takeIf { it.isNotBlank() } ?: "(未返回结果)"
                     SubAgentRegistry.complete(subId, result)
-                } catch (e: Exception) {
+                } catch (e: Throwable) {
                     SubAgentRegistry.fail(subId, e.message ?: "未知错误")
                 } finally {
                     childLoop.stop()

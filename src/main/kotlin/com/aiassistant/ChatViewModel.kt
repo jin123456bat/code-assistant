@@ -465,6 +465,35 @@ class ChatViewModel {
         // 不在此处 join agent 线程——stopGeneration() 已设置 cancelled=true + interrupt，
         // generationId++ 确保陈旧回调被丢弃。join 会阻塞 EDT 并与 agent finally 块的
         // invokeLater 形成死锁（详见 bug-review-2026-06-19-round2 B1）。
+        // 自动提取记忆（仅当对话足够长时触发，防并发）
+        // 必须在 messages.clear() 之前 snapshot，否则 messages.size 永为 0
+        val MIN_MESSAGES_FOR_EXTRACT = 6
+        val snapshotMessages = messages.toList()
+        val snapshotHistory = agent?.ctx?.conversationHistory?.toList() ?: emptyList()
+        if (snapshotMessages.size >= MIN_MESSAGES_FOR_EXTRACT && extractingMemory.compareAndSet(false, true)) {
+            val memEngine = agent?.ctx?.memoryEngine
+            val apiKey = try { com.aiassistant.AppSettingsService.getInstance().getApiKey() } catch (_: Exception) { null }
+            if (memEngine != null && apiKey != null && apiKey.isNotBlank() && com.aiassistant.AppSettingsService.isMemoryEnabled()) {
+                if (snapshotHistory.isNotEmpty()) {
+                    Thread({
+                        try {
+                            com.aiassistant.agent.memory.MemoryAutoExtract(memEngine).extract(
+                                snapshotHistory.map { com.aiassistant.AnthropicMessage(it.role, it.content) },
+                                apiKey
+                            )
+                        } finally {
+                            extractingMemory.set(false)
+                        }
+                    }, "memory-auto-extract").apply { isDaemon = true }.start()
+                    // 提取线程已启动，不在此处重置标志（由 finally 块处理）
+                } else {
+                    extractingMemory.set(false)
+                }
+            } else {
+                extractingMemory.set(false)
+            }
+        }
+
         agent?.ctx?.let { ctx ->
             synchronized(ctx.historyLock) { ctx.conversationHistory.clear() }
             ctx.lastInputTokens = 0
@@ -487,33 +516,6 @@ class ChatViewModel {
         pendingApprovals.clear()
         activity = Activity.Idle
         isThinking = false
-
-        // 自动提取记忆（仅当对话足够长时触发，防并发）
-        val MIN_MESSAGES_FOR_EXTRACT = 6
-        if (messages.size >= MIN_MESSAGES_FOR_EXTRACT && extractingMemory.compareAndSet(false, true)) {
-            val memEngine = agent?.ctx?.memoryEngine
-            val apiKey = try { com.aiassistant.AppSettingsService.getInstance().getApiKey() } catch (_: Exception) { null }
-            if (memEngine != null && apiKey != null && apiKey.isNotBlank() && com.aiassistant.AppSettingsService.isMemoryEnabled()) {
-                val history = agent?.ctx?.conversationHistory?.toList() ?: emptyList()
-                if (history.isNotEmpty()) {
-                    Thread({
-                        try {
-                            com.aiassistant.agent.memory.MemoryAutoExtract(memEngine).extract(
-                                history.map { com.aiassistant.AnthropicMessage(it.role, it.content) },
-                                apiKey
-                            )
-                        } finally {
-                            extractingMemory.set(false)
-                        }
-                    }, "memory-auto-extract").apply { isDaemon = true }.start()
-                    // 提取线程已启动，不在此处重置标志（由 finally 块处理）
-                } else {
-                    extractingMemory.set(false)
-                }
-            } else {
-                extractingMemory.set(false)
-            }
-        }
 
         // SessionEnd hook
         val hookBus = agent?.ctx?.hookEventBus

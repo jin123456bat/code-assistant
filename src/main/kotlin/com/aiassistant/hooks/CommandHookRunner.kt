@@ -12,12 +12,13 @@ object CommandHookRunner {
             process.outputStream.bufferedWriter().use { it.write(stdinJson); it.newLine() }
             val finished = process.waitFor(timeoutSec.toLong(), TimeUnit.SECONDS)
             if (!finished) { process.destroyForcibly(); return null }
-            if (process.exitValue() != 0) {
-                com.aiassistant.AppLogger.warn("Hook 命令非零退出: ${process.exitValue()}")
-                return null  // 非零退出码视为失败
-            }
             val stdout = process.inputStream.bufferedReader().use { it.readText() }
             val trimmed = stdout.trim()
+            if (process.exitValue() != 0) {
+                com.aiassistant.AppLogger.warn("Hook 命令非零退出: ${process.exitValue()}, stdout=${trimmed.take(200)}")
+                return if (trimmed.isEmpty()) null
+                else try { Gson().fromJson(trimmed, HookDecision::class.java) } catch (_: Exception) { HookDecision(content = trimmed) }
+            }
             if (trimmed.isEmpty()) null
             else try { Gson().fromJson(trimmed, HookDecision::class.java) } catch (_: Exception) { HookDecision(content = trimmed) }
         } catch (_: Exception) { null }

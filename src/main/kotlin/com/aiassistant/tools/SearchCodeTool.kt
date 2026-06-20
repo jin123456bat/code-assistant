@@ -27,8 +27,10 @@ class SearchCodeTool : AgentTool {
         val caseSensitive = params["case_sensitive"]?.toBoolean() ?: false
         val maxResults = params["max_results"]?.toIntOrNull() ?: 30
 
-        val isWindows = System.getProperty("os.name").lowercase().contains("win")
-        return if (isWindows) searchJava(query, basePath, filePattern, caseSensitive, maxResults)
+        val osName = System.getProperty("os.name").lowercase()
+        val isWindows = osName.contains("win")
+        val isMac = osName.contains("mac")
+        return if (isWindows || isMac) searchJava(query, basePath, filePattern, caseSensitive, maxResults)
                else searchGrep(query, basePath, filePattern, caseSensitive, maxResults)
     }
 

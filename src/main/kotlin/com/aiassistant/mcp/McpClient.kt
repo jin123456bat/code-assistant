@@ -231,8 +231,8 @@ class McpClient(private val config: McpServerConfig) {
             // HTTP+SSE 模式下，异步工具结果可能通过 SSE 推送到达
             val responseId = (id as? Number)?.toInt() ?: return
             if (disconnecting) return  // disconnect 正在进行，跳过写入防止孤条目
-            pendingResponses[responseId] = json
             synchronized(responseLock) {
+                pendingResponses[responseId] = json
                 responseLock.notifyAll()
             }
         } else {

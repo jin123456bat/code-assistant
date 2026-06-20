@@ -39,7 +39,7 @@ class ReviewEngine(private val projectBasePath: String?) {
             val latch = CountDownLatch(1)
             var resultText = ""
             client.createStreaming(
-                model = com.aiassistant.AppSettingsService.getInstance().getModel() ?: "deepseek-chat",
+                model = com.aiassistant.AppSettingsService.getInstance().getModel() ?: "deepseek-v4-pro",
                 systemPrompt = "",
                 messages = listOf(AnthropicMessage("user", prompt)),
                 tools = emptyList(),
