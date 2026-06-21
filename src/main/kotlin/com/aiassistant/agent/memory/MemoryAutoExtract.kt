@@ -46,8 +46,8 @@ class MemoryAutoExtract(private val engine: MemoryEngine) {
             appendLine("JSON:")
         }
 
+        val client = AnthropicSdkClient(apiKey)
         return try {
-            val client = AnthropicSdkClient(apiKey)
             val latch = java.util.concurrent.CountDownLatch(1)
             var resultText = ""
             val messages = listOf(AnthropicMessage("user", prompt))
@@ -86,6 +86,8 @@ class MemoryAutoExtract(private val engine: MemoryEngine) {
         } catch (e: Exception) {
             AppLogger.warn("MemoryAutoExtract: 自动提取失败: ${e.message}")
             0
+        } finally {
+            client.close()
         }
     }
 

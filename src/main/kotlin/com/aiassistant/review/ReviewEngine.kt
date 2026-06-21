@@ -34,8 +34,8 @@ class ReviewEngine(private val projectBasePath: String?) {
     }
 
     private fun callLLM(apiKey: String, prompt: String): List<Finding> {
+        val client = AnthropicSdkClient(apiKey)
         return try {
-            val client = AnthropicSdkClient(apiKey)
             val latch = CountDownLatch(1)
             var resultText = ""
             client.createStreaming(
@@ -75,6 +75,8 @@ class ReviewEngine(private val projectBasePath: String?) {
             analyzer.parseResult(resultText)
         } catch (_: Exception) {
             emptyList()
+        } finally {
+            client.close()
         }
     }
 
