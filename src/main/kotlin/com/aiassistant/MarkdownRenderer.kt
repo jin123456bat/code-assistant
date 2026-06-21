@@ -261,7 +261,7 @@ class MarkdownRenderer {
                     font-size: ${fontSize - 1}px;
                     color: #$fgHex;
                     background: transparent;
-                    padding: 4px;
+                    padding: 0;
                     margin: 0;
                 }
                 pre {
