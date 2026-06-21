@@ -221,10 +221,19 @@ class MarkdownRenderer {
 
     private fun buildTextPane(bg: Color?): JTextPane = JTextPane().apply {
         isEditable = false
-        contentType = "text/html"
+        contentType = "text/html; charset=UTF-8"
         editorKit = HTMLEditorKit()
         border = JBUI.Borders.empty()
         isOpaque = false  // 不画背景，由 ContentPanel 统一提供 aiBg
+        // JTextPane 默认拦截滚轮事件导致父级 JScrollPane 无法滚动。
+        // 将滚轮事件转发到最近的祖先 JScrollPane 解决此问题。
+        addMouseWheelListener { e ->
+            var p: java.awt.Container? = this@apply.parent
+            while (p != null && p !is JScrollPane) { p = p.parent }
+            if (p != null) {
+                p.dispatchEvent(SwingUtilities.convertMouseEvent(this@apply, e, p))
+            }
+        }
     }
 
     private fun buildStyledHtml(htmlBody: String, textPane: JTextPane): String {

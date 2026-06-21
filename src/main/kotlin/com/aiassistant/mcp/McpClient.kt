@@ -171,7 +171,6 @@ class McpClient(private val config: McpServerConfig) {
             val sseEndpoint = config.sseUrl.ifBlank { config.url }
             while (sseRunning && initialized) {
                 try {
-                    // 尝试 GET SSE 流
                     val sseRequest = HttpRequest.newBuilder()
                         .uri(URI.create(sseEndpoint))
                         .header("Accept", "text/event-stream")
@@ -179,24 +178,26 @@ class McpClient(private val config: McpServerConfig) {
                         .GET()
                         .build()
                     val sseResponse = httpClient.send(sseRequest, HttpResponse.BodyHandlers.ofLines())
-                    sseResponse.body().forEach { line ->
-                        if (!sseRunning) return@forEach
-                        if (line.startsWith("data: ")) {
-                            val json = line.removePrefix("data: ").trim()
-                            if (json.isNotBlank()) {
-                                processMessage(json)
+                    // use {} 确保 Stream<String> 被关闭，避免 BodyHandlers.ofLines() 泄漏 BufferedReader fd
+                    sseResponse.body().use { lines ->
+                        lines.forEach { line ->
+                            if (!sseRunning) return@forEach
+                            if (line.startsWith("data: ")) {
+                                val json = line.removePrefix("data: ").trim()
+                                if (json.isNotBlank()) {
+                                    processMessage(json)
+                                }
                             }
                         }
                     }
-                    retryCount = 0  // 成功后重置重试计数
+                    retryCount = 0
                 } catch (e: Exception) {
                     retryCount++
                     if (retryCount >= maxRetries) {
                         com.aiassistant.AppLogger.warn("SSE 重连失败 $maxRetries 次，停止重连: $sseEndpoint")
                         break
                     }
-                    val delay = (1000L * retryCount).coerceAtMost(30000L)  // 指数退避 1s→30s
-                    // 短轮询代替长 sleep: disconnect() 后最多 1s 即可退出
+                    val delay = (1000L * retryCount).coerceAtMost(30000L)
                     val deadline = System.currentTimeMillis() + delay
                     while (sseRunning && System.currentTimeMillis() < deadline) {
                         Thread.sleep(1000)

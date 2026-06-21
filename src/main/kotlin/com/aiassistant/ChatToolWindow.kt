@@ -1331,7 +1331,7 @@ class ChatToolWindow(private val project: Project) {
                 streamingContentPane = entry.second
             }
             conversationContainer.revalidate()
-            scrollToBottom()
+            autoScrollIfAtBottom()
         } else {
             // 原地更新 JTextPane 文本，不 remove/add 组件
             val contentPane = streamingContentPane
@@ -1381,7 +1381,7 @@ class ChatToolWindow(private val project: Project) {
                 conversationContainer.add(row)
             }
             conversationContainer.revalidate()
-            scrollToBottom()
+            autoScrollIfAtBottom()
         } else {
             // 后续：原地更新 JTextArea 文本
             val area = streamingThinkingTextArea
