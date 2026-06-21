@@ -124,8 +124,6 @@ class MarkdownRenderer {
      */
     fun updateInPlace(container: JPanel, markdown: String): Boolean {
         if (container.componentCount == 0) return false
-        // 代码块场景：容器内组件不是纯 JTextPane，不支持原地更新，返回 false 触发完全重建
-        if (markdown.contains("```")) return false
         val textPane = container.components[0] as? JTextPane ?: return false
         val oldHeight = container.preferredSize?.height ?: 0
 

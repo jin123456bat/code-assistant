@@ -1341,7 +1341,9 @@ class ChatToolWindow(private val project: Project) {
                     // 自测量气泡：失效后按新内容自动重测尺寸，无需手动 fitWidth。
                     streamingBubble!!.revalidate()
                 } else if (viewModel.streamingContent.contains("```")) {
-                    // 内容包含代码块，updateInPlace 不支持。重置引用，下次调用走 render() 完整重建路径。
+                    // 内容包含代码块，updateInPlace 不支持，需完整重建。
+                    // 先将旧气泡从容器中移除，再重置引用，避免重复渲染。
+                    streamingBubble?.let { conversationContainer.remove(it) }
                     streamingBubble = null
                     streamingContentPane = null
                     updateStreamingBubble()  // 立即重建
