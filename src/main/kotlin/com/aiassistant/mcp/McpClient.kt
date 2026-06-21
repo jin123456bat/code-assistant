@@ -99,13 +99,16 @@ class McpClient(private val config: McpServerConfig) {
             val proc = process!!
             readExecutor.submit {
                 try {
-                    val reader = BufferedReader(InputStreamReader(proc.inputStream))
-                    while (proc.isAlive) {
-                        val line = reader.readLine() ?: break
-                        try {
-                            processMessage(line)
-                        } catch (_: Exception) {
-                            // 单条消息解析失败不终止整个读取循环
+                    // use {} 确保 BufferedReader、InputStreamReader、InputStream 在循环退出后被关闭
+                    // process?.destroyForcibly() 杀掉进程后 reader 仍然持有未关闭的文件描述符
+                    BufferedReader(InputStreamReader(proc.inputStream)).use { reader ->
+                        while (!disconnecting && proc.isAlive) {
+                            val line = reader.readLine() ?: break
+                            try {
+                                processMessage(line)
+                            } catch (_: Exception) {
+                                // 单条消息解析失败不终止整个读取循环
+                            }
                         }
                     }
                 } catch (_: Exception) {}

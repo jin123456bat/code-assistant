@@ -10,6 +10,35 @@ class AnthropicSdkClient(
     apiKey: String,
     baseUrl: String = "https://api.deepseek.com/anthropic"
 ) {
+    companion object {
+        /**
+         * 网络预检：DNS 解析 + TCP 443 连通性检查。
+         * 返回 null 表示正常，返回非 null 字符串展示给用户。
+         */
+        fun preflightCheck(baseUrl: String = "https://api.deepseek.com/anthropic"): String? {
+            val hostname = try {
+                java.net.URI(baseUrl).host ?: "api.deepseek.com"
+            } catch (_: Exception) {
+                "api.deepseek.com"
+            }
+            try {
+                val addr = java.net.InetAddress.getByName(hostname)
+                try {
+                    java.net.Socket().use { socket ->
+                        socket.connect(java.net.InetSocketAddress(addr, 443), 5000)
+                    }
+                } catch (e: Exception) {
+                    return "网络连接失败：无法连接到 $hostname:443 — ${e.message ?: "连接超时"}"
+                }
+            } catch (e: java.net.UnknownHostException) {
+                return "网络连接失败：无法解析 $hostname — 请检查 DNS 或网络设置"
+            } catch (e: Exception) {
+                return "网络连接失败：${e.message?.take(80) ?: e.javaClass.simpleName}"
+            }
+            return null
+        }
+    }
+
     private val client = AnthropicOkHttpClient.builder()
         .apiKey(apiKey)
         .baseUrl(baseUrl)

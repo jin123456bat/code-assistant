@@ -151,6 +151,15 @@ class AgentLoop(
             try {
                 com.aiassistant.mcp.McpManager.getInstance(project.basePath)?.healthCheck()
 
+                // 网络预检：在首次 API 调用前检测 DNS/TCP 连通性，失败时在 UI 横幅提示
+                val networkError = com.aiassistant.AnthropicSdkClient.preflightCheck()
+                if (networkError != null) {
+                    edt { onError?.invoke(networkError) }
+                    AppLogger.error("网络预检失败: $networkError")
+                    onStateChange?.invoke(false)
+                    return@Thread
+                }
+
                 if (shouldAutoCompact(history)) {
                     AppLogger.info("自动 Compact 触发: historySize=${history.size}")
                     autoCompact(apiKey)
@@ -576,7 +585,8 @@ class AgentLoop(
                             // 写操作（write_file/execute_command/edit_file 等）即使被 skill 声明也必须经用户审批。
                             // 原因：skill 定义来自项目文件（.claude/skills/**/SKILL.md），不可完全信任。
                             // 恶意仓库可通过 skill 声明 allowed-tools: [write_file, execute_command] 绕过审批。
-                            val skillAllowed = ctx.skillDefs[ctx.activatedSkill]?.allowedTools?.contains(tc.name) == true
+                            val skillAllowed = ctx.activatedSkill != null &&
+                                ctx.skillDefs[ctx.activatedSkill]?.allowedTools?.contains(tc.name) == true
                             // 仅当工具在 SAFE_TOOLS 中时，skill 声明才可免审批；写工具强制走审批流程
                             val skillSafeAllowed = skillAllowed && tc.name in SAFE_TOOLS
                             if (skillAllowed && !skillSafeAllowed) {
@@ -851,8 +861,13 @@ class AgentLoop(
                     doneLatch.countDown()
                 }
                 override fun onError(error: Throwable) {
-                    errorDetail = error.message?.take(500) ?: "SDK error: ${error.javaClass.simpleName}"
-                    AppLogger.error("SDK streaming error: ${error.message}\n${error.stackTraceToString().take(1000)}")
+                    // 递归展开 cause 链，暴露根因（如 ConnectException、SSLHandshakeException 等）
+                    val rootCause = generateSequence<Throwable>(error) { it.cause }.last()
+                    val causeChain = generateSequence<Throwable>(error) { it.cause }
+                        .joinToString(" → ") { "${it.javaClass.simpleName}: ${it.message?.take(120)}" }
+                    errorDetail = rootCause.message?.take(500)
+                        ?: "SDK error: ${rootCause.javaClass.simpleName}"
+                    AppLogger.error("SDK streaming error: $causeChain")
                     doneLatch.countDown()
                 }
             }

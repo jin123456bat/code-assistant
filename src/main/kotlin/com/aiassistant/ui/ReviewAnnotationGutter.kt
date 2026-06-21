@@ -47,6 +47,20 @@ class ReviewAnnotationGutter : LineMarkerProvider {
         elements: MutableList<out PsiElement>,
         result: MutableCollection<in LineMarkerInfo<*>>
     ) {
+        try {
+            doCollectSlowLineMarkers(elements, result)
+        } catch (_: Exception) {
+            // 静默降级：Kotlin sandbox 中 builtins LightVirtualFile 可能未完全初始化，
+            // PSI 访问（containingFile/virtualFile/viewProvider）会触发
+            // "Virtual file for builtin is not found" 异常。
+            // gutter 标记是辅助功能，不应阻塞文件分析。
+        }
+    }
+
+    private fun doCollectSlowLineMarkers(
+        elements: MutableList<out PsiElement>,
+        result: MutableCollection<in LineMarkerInfo<*>>
+    ) {
         val psiFile = elements.firstOrNull()?.containingFile ?: return
         val projectBasePath = psiFile.project.basePath ?: return
 

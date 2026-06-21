@@ -38,7 +38,7 @@
             id="com.aiassistant.settings"
             displayName="Code Assistant"/>
 
-        <postStartupActivity
+        <projectActivity
             implementation="com.aiassistant.actions.OpenAiToolWindowOnStartup"/>
 
         <inline.completion.provider

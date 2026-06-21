@@ -6,8 +6,8 @@ import java.net.URI
 
 object HttpHookRunner {
     fun run(url: String, bodyJson: String, timeoutSec: Int): HookDecision? {
+        val conn = URI.create(url).toURL().openConnection() as HttpURLConnection
         return try {
-            val conn = URI.create(url).toURL().openConnection() as HttpURLConnection
             conn.instanceFollowRedirects = true
             conn.requestMethod = "POST"
             conn.doOutput = true
@@ -18,6 +18,10 @@ object HttpHookRunner {
             val response = conn.inputStream.bufferedReader().use { it.readText() }.trim()
             if (response.isEmpty()) null
             else try { Gson().fromJson(response, HookDecision::class.java) } catch (_: Exception) { HookDecision(content = response) }
-        } catch (_: Exception) { null }
+        } catch (_: Exception) {
+            null
+        } finally {
+            conn.disconnect()
+        }
     }
 }

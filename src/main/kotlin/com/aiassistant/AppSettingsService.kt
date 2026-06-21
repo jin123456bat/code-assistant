@@ -13,6 +13,26 @@ import com.intellij.openapi.components.service
 @Service(Service.Level.APP)
 class AppSettingsService {
 
+    private val credentialAttributes = CredentialAttributes(
+        "$SERVICE_NAME.API_KEY"
+    )
+
+    @Volatile
+    private var cachedApiKey: String? = null
+
+    @Volatile
+    private var apiKeyLoaded = false
+
+    init {
+        // 后台预加载 API Key，避免 EDT 调用 PasswordSafe 触发慢操作告警
+        com.intellij.openapi.application.ApplicationManager.getApplication().executeOnPooledThread {
+            if (!apiKeyLoaded) {
+                cachedApiKey = PasswordSafe.instance.get(credentialAttributes)?.getPasswordAsString()
+                apiKeyLoaded = true
+            }
+        }
+    }
+
     companion object {
         private const val SERVICE_NAME = "AI_Coding_Assistant"
         private const val PROMPT_KEY = "$SERVICE_NAME.PROMPT"
@@ -145,21 +165,25 @@ feat(新功能) | fix(修复) | chore(杂项) | docs(文档) | style(格式) | r
         """.trimIndent()
     }
 
-    private val credentialAttributes = CredentialAttributes(
-        "$SERVICE_NAME.API_KEY"
-    )
-
     fun getApiKey(): String? {
-        val credentials = PasswordSafe.instance.get(credentialAttributes)
-        return credentials?.getPasswordAsString()
+        // 如果后台预加载已完成，直接返回缓存（EDT 安全）
+        if (apiKeyLoaded) return cachedApiKey
+        // 预加载未完成时（极少发生：仅在 init 后极短时间内），
+        // 同步获取以确保 Settings 对话框正确显示已配置的 Key
+        val key = PasswordSafe.instance.get(credentialAttributes)?.getPasswordAsString()
+        cachedApiKey = key
+        apiKeyLoaded = true
+        return key
     }
 
     fun setApiKey(apiKey: String) {
+        cachedApiKey = apiKey
         val credentials = Credentials(null, apiKey)
         PasswordSafe.instance.set(credentialAttributes, credentials)
     }
 
     fun clearApiKey() {
+        cachedApiKey = null
         PasswordSafe.instance.set(credentialAttributes, null)
     }
 

@@ -2,26 +2,27 @@ package com.aiassistant.actions
 
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.startup.StartupActivity
+import com.intellij.openapi.startup.ProjectActivity
 import com.intellij.openapi.wm.ToolWindowManager
 
 /**
  * 项目完全加载后显示 Code Assistant 工具窗口。
- * 使用 StartupActivity（postStartupActivity 扩展点）确保在 COMPONENTS_LOADED 之后运行。
+ * 使用 ProjectActivity（替代已废弃的 StartupActivity/postStartupActivity）确保在 COMPONENTS_LOADED 之后运行。
  */
-class OpenAiToolWindowOnStartup : StartupActivity {
+class OpenAiToolWindowOnStartup : ProjectActivity {
 
-    override fun runActivity(project: Project) {
+    override suspend fun execute(project: Project) {
         val toolWindow = ToolWindowManager.getInstance(project).getToolWindow("Code Assistant") ?: return
-        if (toolWindow.isAvailable) {
-            ApplicationManager.getApplication().invokeLater {
-                if (!project.isDisposed && toolWindow.isAvailable) {
-                    toolWindow.show(null)
-                }
+        // 所有文件系统操作和 UI 操作统一延迟到 COMPONENTS_LOADED 之后，
+        // 避免在 CONFIGURATION_STORE_INITIALIZED 阶段触发 VFS 刷新导致 LoadingState 断言
+        ApplicationManager.getApplication().invokeLater {
+            if (project.isDisposed) return@invokeLater
+            if (toolWindow.isAvailable) {
+                toolWindow.show(null)
             }
+            // 自动追加 .code-assistant 到 .gitignore（幂等）
+            ensureGitignoreHasCodeAssistant(project)
         }
-        // 自动追加 .code-assistant 到 .gitignore（幂等）
-        ensureGitignoreHasCodeAssistant(project)
     }
 
     private fun ensureGitignoreHasCodeAssistant(project: Project) {
