@@ -1,6 +1,7 @@
 package com.aiassistant.actions
 
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.project.DumbService
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.startup.ProjectActivity
 import com.intellij.openapi.wm.ToolWindowManager
@@ -13,15 +14,16 @@ class OpenAiToolWindowOnStartup : ProjectActivity {
 
     override suspend fun execute(project: Project) {
         val toolWindow = ToolWindowManager.getInstance(project).getToolWindow("Code Assistant") ?: return
-        // 所有文件系统操作和 UI 操作统一延迟到 COMPONENTS_LOADED 之后，
-        // 避免在 CONFIGURATION_STORE_INITIALIZED 阶段触发 VFS 刷新导致 LoadingState 断言
         ApplicationManager.getApplication().invokeLater {
             if (project.isDisposed) return@invokeLater
             if (toolWindow.isAvailable) {
                 toolWindow.show(null)
             }
-            // 自动追加 .code-assistant 到 .gitignore（幂等）
-            ensureGitignoreHasCodeAssistant(project)
+            // 延迟到索引完成后执行：写 .gitignore 会触发 VFS 刷新 → 索引扫描，
+            // 此时若 Kotlin builtins 尚未就绪会报 "Virtual file for builtin is not found"
+            DumbService.getInstance(project).runWhenSmart {
+                ensureGitignoreHasCodeAssistant(project)
+            }
         }
     }
 
