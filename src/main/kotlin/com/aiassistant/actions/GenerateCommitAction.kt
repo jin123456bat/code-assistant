@@ -62,10 +62,21 @@ class GenerateCommitAction : AnAction() {
             return
         }
 
+        // EDT 上取 editor，避免后台线程操作 Swing 组件
+        val controlComponent = commitMessageControl as? Component ?: run {
+            Messages.showWarningDialog(project, AiAssistantBundle.message("action.generate.setfailed"), "Code Assistant")
+            return
+        }
+        val editor = findEditorField(controlComponent) ?: run {
+            Messages.showWarningDialog(project, AiAssistantBundle.message("action.generate.setfailed"), "Code Assistant")
+            return
+        }
+
         isGenerating = true
 
         ProgressManager.getInstance().run(object : Task.Backgroundable(project, AiAssistantBundle.message("action.generate.progress"), false) {
             override fun run(indicator: ProgressIndicator) {
+                val app = ApplicationManager.getApplication()
                 try {
                     val diffText = buildDiff(project)
                     if (diffText.isBlank()) {
@@ -73,20 +84,22 @@ class GenerateCommitAction : AnAction() {
                         return
                     }
                     val (systemPrompt, userPrompt) = buildPrompt(diffText)
-                    val message = callDeepSeek(apiKey, systemPrompt, userPrompt)
+                    // 同步清空编辑器，确保在流式输出前完成
+                    app.invokeAndWait {
+                        app.runWriteAction { editor.document?.setText("") }
+                    }
+                    val message = callDeepSeek(apiKey, systemPrompt, userPrompt) { delta ->
+                        app.invokeLater {
+                            try {
+                                app.runWriteAction {
+                                    editor.document?.insertString(editor.document.textLength, delta)
+                                }
+                            } catch (_: Exception) { }
+                        }
+                    }
                     if (message == null) {
                         showNotification(project, AiAssistantBundle.message("action.generate.failed"))
                         return
-                    }
-                    ApplicationManager.getApplication().invokeLater {
-                        try {
-                            val editor = findEditorField(commitMessageControl as? Component ?: return@invokeLater)
-                            ApplicationManager.getApplication().runWriteAction {
-                                editor?.document?.setText(message.trim())
-                            }
-                        } catch (ex: Exception) {
-                            showNotification(project, AiAssistantBundle.message("action.generate.setfailed"))
-                        }
                     }
                 } catch (ex: Exception) {
                     showNotification(project, ex.message ?: "Unknown error")
@@ -325,7 +338,7 @@ class GenerateCommitAction : AnAction() {
         return Pair(effectiveSystemPrompt, diffText)
     }
 
-    private fun callDeepSeek(apiKey: String, systemPrompt: String, userPrompt: String): String? {
+    private fun callDeepSeek(apiKey: String, systemPrompt: String, userPrompt: String, onDelta: ((String) -> Unit)? = null): String? {
         val model = try { AppSettingsService.getInstance().getModel() } catch (_: Exception) { null } ?: "deepseek-chat"
         val requestBody = Gson().toJson(mapOf(
             "model" to model,
@@ -333,19 +346,20 @@ class GenerateCommitAction : AnAction() {
                 mapOf("role" to "system", "content" to systemPrompt),
                 mapOf("role" to "user", "content" to userPrompt)
             ),
-            "stream" to false
+            "stream" to true
         ))
 
         val uri = URI.create("https://api.deepseek.com/v1/chat/completions")
         val conn = (uri.toURL().openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = 15_000
-            readTimeout = 30_000
+            readTimeout = 60_000
             doOutput = true
             setRequestProperty("Content-Type", "application/json")
             setRequestProperty("Authorization", "Bearer $apiKey")
         }
 
+        val result = StringBuilder()
         try {
             conn.outputStream.use { it.write(requestBody.toByteArray(Charsets.UTF_8)) }
             val statusCode = conn.responseCode
@@ -356,24 +370,32 @@ class GenerateCommitAction : AnAction() {
                 return null
             }
 
-            val response = conn.inputStream.bufferedReader().readText()
-            return parseResponse(response)
+            conn.inputStream.bufferedReader().use { reader ->
+                var line: String?
+                while (reader.readLine().also { line = it } != null) {
+                    val l = line ?: continue
+                    if (!l.startsWith("data: ")) continue
+                    val data = l.removePrefix("data: ")
+                    if (data == "[DONE]") break
+                    try {
+                        val chunk = Gson().fromJson(data, Map::class.java) as? Map<*, *> ?: continue
+                        val choices = chunk["choices"] as? List<*> ?: continue
+                        val choice = choices.firstOrNull() as? Map<*, *> ?: continue
+                        val delta = choice["delta"] as? Map<*, *> ?: continue
+                        val content = delta["content"] as? String ?: continue
+                        result.append(content)
+                        onDelta?.invoke(content)
+                    } catch (_: Exception) { /* skip malformed SSE line */ }
+                }
+            }
+            if (result.isEmpty()) return null
+            return result.toString()
         } catch (e: Exception) {
             AppLogger.requestFailed(0, e.message ?: "Connection failed")
             return null
         } finally {
             conn.disconnect()
         }
-    }
-
-    private fun parseResponse(json: String): String? {
-        return try {
-            val responseObj = Gson().fromJson(json, Map::class.java) as? Map<*, *> ?: return null
-            val choices = responseObj["choices"] as? List<*> ?: return null
-            val choice = choices.firstOrNull() as? Map<*, *> ?: return null
-            val message = choice["message"] as? Map<*, *> ?: return null
-            message["content"] as? String
-        } catch (_: Exception) { null }
     }
 
     private fun findEditorField(component: Component): EditorTextField? {

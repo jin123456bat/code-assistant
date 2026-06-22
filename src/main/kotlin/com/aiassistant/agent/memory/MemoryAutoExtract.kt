@@ -4,6 +4,7 @@ import com.aiassistant.AnthropicMessage
 import com.aiassistant.AnthropicSdkClient
 import com.aiassistant.AnthropicToolDef
 import com.aiassistant.AppLogger
+import com.aiassistant.UserMessage
 import com.google.gson.Gson
 
 /**
@@ -26,7 +27,14 @@ class MemoryAutoExtract(private val engine: MemoryEngine) {
 
         // 仅取最近 20 条，每条截断 500 字符防止 prompt 过长
         val convoText = conversationHistory.takeLast(20)
-            .joinToString("\n\n") { "[${it.role}]: ${it.content.take(500)}" }
+            .joinToString("\n\n") { msg ->
+                val (label, text) = when (msg) {
+                    is com.aiassistant.UserMessage -> "用户" to msg.content
+                    is com.aiassistant.AssistantMessage -> "AI" to msg.text
+                    is com.aiassistant.ToolResultMessage -> "工具结果" to msg.content
+                }
+                "[$label]: ${text.take(500)}"
+            }
 
         val prompt = buildString {
             appendLine("分析以下对话，提取值得跨会话记忆的关键信息。")
@@ -50,7 +58,7 @@ class MemoryAutoExtract(private val engine: MemoryEngine) {
         return try {
             val latch = java.util.concurrent.CountDownLatch(1)
             var resultText = ""
-            val messages = listOf(AnthropicMessage("user", prompt))
+            val messages = listOf(UserMessage(prompt))
             client.createStreaming(
                 model = com.aiassistant.AppSettingsService.getInstance().getModel() ?: "deepseek-v4-pro",
                 systemPrompt = "",

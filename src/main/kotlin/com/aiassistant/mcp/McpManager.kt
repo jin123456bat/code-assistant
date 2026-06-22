@@ -1,4 +1,5 @@
 package com.aiassistant.mcp
+import com.aiassistant.AppLogger
 
 import com.aiassistant.agent.AgentTool
 import com.intellij.openapi.project.Project
@@ -196,17 +197,17 @@ class McpManager(private val project: Project) {
         client.notificationHandler = object : McpNotificationHandler {
             override fun onToolsChanged() {
                 bgExecutor.submit {
-                    try { mgr.handleToolsChanged(serverName) } catch (_: Exception) {}
+                    try { mgr.handleToolsChanged(serverName) } catch (e: Exception) { AppLogger.warn("MCP handleToolsChanged 失败: ${e.message}") }
                 }
             }
             override fun onPromptsChanged() {
                 bgExecutor.submit {
-                    try { mgr.handlePromptsChanged() } catch (_: Exception) {}
+                    try { mgr.handlePromptsChanged() } catch (e: Exception) { AppLogger.warn("MCP handlePromptsChanged 失败: ${e.message}") }
                 }
             }
             override fun onResourcesChanged() {
                 bgExecutor.submit {
-                    try { mgr.handleResourcesChanged() } catch (_: Exception) {}
+                    try { mgr.handleResourcesChanged() } catch (e: Exception) { AppLogger.warn("MCP handleResourcesChanged 失败: ${e.message}") }
                 }
             }
         }

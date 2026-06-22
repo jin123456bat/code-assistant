@@ -40,32 +40,6 @@ intellijPlatform {
     }
 }
 
-// 检查文件描述符限制，避免 sandbox IDE 索引时触发 "Too many open files"
-val checkFdLimit by tasks.registering {
-    doLast {
-        val softLimit = try {
-            ProcessBuilder("bash", "-c", "launchctl limit maxfiles 2>/dev/null | awk '{print \$2}'")
-                .redirectErrorStream(true).start().inputStream.bufferedReader().readText().trim().toIntOrNull()
-        } catch (_: Exception) { null }
-        if (softLimit != null && softLimit < 1024) {
-            logger.warn("═══════════════════════════════════════════════════════════")
-            logger.warn("⚠️  系统文件描述符软限制: $softLimit（过低！最小需要 1024）")
-            logger.warn("")
-            logger.warn("   这是 macOS launchd 的系统默认值，Gradle Daemon 和 Sandbox IDE")
-            logger.warn("   都继承此限制。Shell 的 ulimit 设置对此无效。")
-            logger.warn("")
-            logger.warn("   永久修复（需要管理员密码）:")
-            logger.warn("     sudo launchctl limit maxfiles 65536 200000")
-            logger.warn("")
-            logger.warn("   临时绕过（不需要 sudo）:")
-            logger.warn("     ./gradlew --stop    # 杀所有 daemon")
-            logger.warn("     pkill -9 -f GradleDaemon  # 确保无残留")
-            logger.warn("     ./gradlew runIde    # 重新从终端启动")
-            logger.warn("═══════════════════════════════════════════════════════════")
-        }
-    }
-}
-
 tasks {
     withType<JavaCompile> {
         sourceCompatibility = "17"
@@ -75,7 +49,6 @@ tasks {
         kotlinOptions.jvmTarget = "17"
     }
     runIde {
-        dependsOn(checkFdLimit)
         jvmArgs(
             "-Dsun.net.inetaddr.ttl=30",
             "-Dsun.net.inetaddr.negative.ttl=0"

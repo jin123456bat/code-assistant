@@ -195,17 +195,17 @@ object ChatTheme {
     // 间距（逻辑 px，JBUI.scale() 自动缩放适配 HiDPI）
     // ═══════════════════════════════════════════════════════════════
 
-    /** 气泡之间垂直间距 — BubbleFactory、ChatToolWindow.rebuildConversation */
+    /** 气泡之间垂直间距 — BubbleFactory、ChatToolWindow.syncNewMessages */
     const val GAP_BUBBLE = 10
 
     /** 不同角色切换额外留白 — BubbleFactory */
     const val GAP_ROLE = 16
 
     /** 气泡内上下 padding — ChatBubble HTML body */
-    const val PAD_BUBBLE_V = 8
+    const val PAD_BUBBLE_V = 4
 
     /** 气泡内左右 padding — ChatBubble HTML body */
-    const val PAD_BUBBLE_H = 12
+    const val PAD_BUBBLE_H = 6
 
 
     // ═══════════════════════════════════════════════════════════════
@@ -243,8 +243,17 @@ object ChatTheme {
 
 
     // ═══════════════════════════════════════════════════════════════
-    // PlanBar 尺寸约束
+    // PlanBar 尺寸约束 & 计划审批颜色
     // ═══════════════════════════════════════════════════════════════
+
+    /** 计划审批卡片背景 */
+    val planBg = JBColor(0xF0F4FF, 0x1E2233)
+
+    /** 计划审批卡片边框 */
+    val planBorder = JBColor(0xB0C4DE, 0x3A4A5E)
+
+    /** 计划审批左栏竖线强调色 */
+    val planAccent = JBColor(0x4A90D9, 0x5A9FEF)
 
     /** PlanBar 弹出步骤列表最大高度 — PlanBar.buildStepList */
     const val PLAN_STEP_MAX_H = 168
@@ -284,21 +293,21 @@ object ChatTheme {
     // ═══════════════════════════════════════════════════════════════
 
     /** 正文字号 — ChatBubble HTML、对话内容 */
-    val bodyFont: Font get() = JBFont.regular()
+    val bodyFont: Font get() = JBFont.regular().deriveFont(JBFont.regular().size2D - 1f)
 
     /** 标签/工具行/元信息字号（~11pt）— ToolRowFactory、SelectionCard、PlanBar 标签 */
-    val metaFont: Font get() = JBFont.small()
+    val metaFont: Font get() = JBFont.small().deriveFont(JBFont.small().size2D - 1f)
 
     /** 代码等宽字体 — MarkdownRenderer、ToolRowFactory 结果区 */
-    val codeFont: Font get() = Font(Font.MONOSPACED, Font.PLAIN, JBFont.regular().size)
+    val codeFont: Font get() = Font(Font.MONOSPACED, Font.PLAIN, JBFont.regular().size - 1)
 
     /** Markdown 代码块语言标签/复制按钮字号（10pt）— MarkdownRenderer.buildCodeBlock */
-    const val CODE_LANG_FONT_SIZE = 10
+    const val CODE_LANG_FONT_SIZE = 9
 
     /** HTML CSS 中 heading 字号偏移 — MarkdownRenderer.buildStyledHtml h1/h2/h3 */
-    const val HEADING_FONT_OFFSET_H1 = 3
-    const val HEADING_FONT_OFFSET_H2 = 2
-    const val HEADING_FONT_OFFSET_H3 = 1
+    const val HEADING_FONT_OFFSET_H1 = 2
+    const val HEADING_FONT_OFFSET_H2 = 1
+    const val HEADING_FONT_OFFSET_H3 = 0
 
     /** 工具行字号相对于编辑器字号的偏移 — ToolRowFactory.toolFont/thinkFont */
     const val TOOL_FONT_OFFSET = 1
@@ -307,10 +316,10 @@ object ChatTheme {
     const val META_FONT_OFFSET = 2
 
     /** 标题/大按钮字号 — ChatToolWindow newSessionBtn/plusButton/lingmaSubmitBtn/welcome 标题 */
-    val largeFont: Font get() = JBFont.regular().deriveFont(Font.BOLD, JBFont.regular().size + 6f)
+    val largeFont: Font get() = JBFont.regular().deriveFont(Font.BOLD, JBFont.regular().size2D + 5f)
 
     /** 对话头字号 — ChatToolWindow conversationHeader 标题 */
-    val headerFont: Font get() = JBFont.regular().deriveFont(Font.BOLD)
+    val headerFont: Font get() = JBFont.regular().deriveFont(Font.BOLD, JBFont.regular().size2D - 1f)
 
 
     // ═══════════════════════════════════════════════════════════════

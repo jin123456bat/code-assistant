@@ -108,6 +108,7 @@ class BubbleFactory(
             bubble.setTokenUsage(message.inputTokens, message.outputTokens)
         }
         val row = rowPanel().apply {
+            border = JBUI.Borders.empty(ChatTheme.GAP_BUBBLE / 2, 0, ChatTheme.GAP_BUBBLE / 2, 4)
             add(bubble)                        // AI 气泡靠左
             add(Box.createHorizontalGlue())
         }

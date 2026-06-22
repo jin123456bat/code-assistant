@@ -120,14 +120,11 @@ class AgentLoop(
             val loadedRules = if (basePath != null) RulesEngine.loadAll(basePath) else emptyList()
             ctx.rules.clear()
             ctx.rules.addAll(loadedRules)
-            if (basePath != null) {
-                SkillEngine.startWatching(basePath) { reloadSkills() }
-            }
         }
         ctx.systemPrompt = buildSystemPrompt()
     }
 
-    private fun reloadSkills() {
+    fun reloadSkills() {
         val basePath = project.basePath ?: return
         val skillDefs = SkillEngine.loadProjectSkills(basePath)
         ctx.skillDefs.clear()
@@ -146,6 +143,16 @@ class AgentLoop(
         ctx.activatedSkill = activatedSkill
         ctx.systemPrompt = buildSystemPrompt()
         val history = ctx.conversationHistory
+
+        // 包装 callback 防止重复调用（while 循环内 break 路径已调用 callback，
+        // 循环后的兜底调用可能重复触发，导致 workflow/task 的 CountDownLatch 行为不确定）
+        var callbackCalled = false
+        val safeCallback: (String, String) -> Unit = { text, thinking ->
+            if (!callbackCalled) {
+                callbackCalled = true
+                callback(text, thinking)
+            }
+        }
 
         val t = Thread {
             try {
@@ -180,13 +187,13 @@ class AgentLoop(
 
                 synchronized(ctx.historyLock) {
                     if (forkHistory != null && forkHistory.isNotEmpty()) {
-                        if (forkHistory.last().role == "user") {
+                        if (forkHistory.last() is UserMessage) {
                             AppLogger.warn("fork历史末尾为 user 角色，跳过注入")
                         } else {
                             history.addAll(0, forkHistory)
                         }
                     }
-                    history.add(AnthropicMessage("user", effectiveUserMessage, images = images, groupId = roundGroupId))
+                    history.add(UserMessage(effectiveUserMessage, images = images, groupId = roundGroupId))
                 }
 
                 val subResults = SubAgentRegistry.drainCompleted()
@@ -205,7 +212,7 @@ class AgentLoop(
                         // 对齐 Claude Code：子 Agent 结果通过 toolCallId 关联到 task/workflow 工具调用。
                         // LLM 将其视为 tool_result 而非用户指令，消除信任边界混淆。
                         synchronized(ctx.historyLock) {
-                            history.add(AnthropicMessage("user", resultText, toolCallId = entry.toolCallId, groupId = roundGroupId))
+                            history.add(ToolResultMessage(resultText, entry.toolCallId ?: "", groupId = roundGroupId))
                         }
                     }
                 }
@@ -228,7 +235,7 @@ class AgentLoop(
                         if (text != null) {
                             // 对齐 Claude Code：子 Agent 结果通过 toolCallId 关联到 task/workflow 工具调用
                             synchronized(ctx.historyLock) {
-                                history.add(AnthropicMessage("user", text, toolCallId = entry.toolCallId, groupId = roundGroupId))
+                                history.add(ToolResultMessage(text, entry.toolCallId ?: "", groupId = roundGroupId))
                             }
                             AppLogger.info("AgentLoop: 注入子代理结果 ${entry.id} status=${entry.status} toolCallId=${entry.toolCallId}")
                         }
@@ -239,7 +246,7 @@ class AgentLoop(
                     val result = callAnthropic(apiKey, history)
                     if (result == null) {
                         edt { onError?.invoke("API 调用失败") }
-                        callback("", "")
+                        safeCallback("", "")
                         break
                     }
 
@@ -272,8 +279,7 @@ class AgentLoop(
                         }
                         consecutiveFailures = 0
 
-                        var firstToolCallTextAdded = false
-                        var thinkingBlockAdded = false
+                        var assistantMsgIndex = -1
 
                         for (tc in toolCalls) {
                             if (cancelled) break
@@ -288,16 +294,12 @@ class AgentLoop(
                             if (ctx.planMode && tc.name !in SAFE_TOOLS && tc.name !in META_TOOL_NAMES) {
                                 val denyMsg = "当前处于规划模式（EnterPlanMode），仅允许只读工具。请先调用 ExitPlanMode 提交方案并获得用户审批后，再执行写操作。"
                                 synchronized(ctx.historyLock) {
-                                    if (!firstToolCallTextAdded) {
-                                        if (!thinkingBlockAdded && thinking.isNotBlank()) {
-                                            history.add(AnthropicMessage("assistant", "", thinking = thinking, thinkingSignature = thinkingSignature))
-                                            thinkingBlockAdded = true
-                                        }
-                                        history.add(AnthropicMessage("assistant", textContent))
-                                        firstToolCallTextAdded = true
+                                    if (assistantMsgIndex < 0) {
+                                        assistantMsgIndex = history.size
+                                        history.add(AssistantMessage(textContent, thinking = thinking, thinkingSignature = thinkingSignature))
                                     }
-                                    history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments, thinking = thinking, thinkingSignature = thinkingSignature))
-                                    history.add(AnthropicMessage("user", denyMsg, toolCallId = tc.id, groupId = roundGroupId))
+                                    history.add(AssistantMessage("", thinking = thinking, thinkingSignature = thinkingSignature, toolUses = listOf(ToolUseParams(tc.id, tc.name, tc.arguments))))
+                                    history.add(ToolResultMessage(denyMsg, toolCallId = tc.id, groupId = roundGroupId))
                                 }
                                 edt { onToolResult?.invoke(tc.name, denyMsg) }
                                 continue
@@ -311,16 +313,12 @@ class AgentLoop(
                                 if (skillName == null) {
                                     val errMsg = "Skill 调用失败：缺少 skill 参数。可用 skill: ${ctx.skillDefs.keys.joinToString(", ")}"
                                     synchronized(ctx.historyLock) {
-                                        if (!firstToolCallTextAdded) {
-                                            if (!thinkingBlockAdded && thinking.isNotBlank()) {
-                                                history.add(AnthropicMessage("assistant", "", thinking = thinking, thinkingSignature = thinkingSignature))
-                                                thinkingBlockAdded = true
-                                            }
-                                            history.add(AnthropicMessage("assistant", textContent))
-                                            firstToolCallTextAdded = true
+                                        if (assistantMsgIndex < 0) {
+                                            assistantMsgIndex = history.size
+                                            history.add(AssistantMessage(textContent, thinking = thinking, thinkingSignature = thinkingSignature))
                                         }
-                                        history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments, thinking = thinking, thinkingSignature = thinkingSignature))
-                                        history.add(AnthropicMessage("user", errMsg, toolCallId = tc.id, groupId = roundGroupId))
+                                        history.add(AssistantMessage("", thinking = thinking, thinkingSignature = thinkingSignature, toolUses = listOf(ToolUseParams(tc.id, tc.name, tc.arguments))))
+                                        history.add(ToolResultMessage(errMsg, toolCallId = tc.id, groupId = roundGroupId))
                                     }
                                     edt { onToolResult?.invoke(tc.name, errMsg) }
                                     continue
@@ -341,16 +339,12 @@ class AgentLoop(
                                     "未知 Skill: $skillName。可用 skill: ${ctx.skillDefs.keys.joinToString(", ")}"
                                 }
                                 synchronized(ctx.historyLock) {
-                                    if (!firstToolCallTextAdded) {
-                                        if (!thinkingBlockAdded && thinking.isNotBlank()) {
-                                            history.add(AnthropicMessage("assistant", "", thinking = thinking, thinkingSignature = thinkingSignature))
-                                            thinkingBlockAdded = true
-                                        }
-                                        history.add(AnthropicMessage("assistant", textContent))
-                                        firstToolCallTextAdded = true
+                                    if (assistantMsgIndex < 0) {
+                                        assistantMsgIndex = history.size
+                                        history.add(AssistantMessage(textContent, thinking = thinking, thinkingSignature = thinkingSignature))
                                     }
-                                    history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments, thinking = thinking, thinkingSignature = thinkingSignature))
-                                    history.add(AnthropicMessage("user", skillResult, toolCallId = tc.id, groupId = roundGroupId))
+                                    history.add(AssistantMessage("", thinking = thinking, thinkingSignature = thinkingSignature, toolUses = listOf(ToolUseParams(tc.id, tc.name, tc.arguments))))
+                                    history.add(ToolResultMessage(skillResult, toolCallId = tc.id, groupId = roundGroupId))
                                 }
                                 edt { onToolResult?.invoke(tc.name, skillResult) }
                                 continue
@@ -361,16 +355,12 @@ class AgentLoop(
                                 ctx.planMode = true
                                 val msg = "已进入规划模式。现在只能使用只读工具（search_code、read_file、list_directory 等）探索代码库和设计方案。完成后调用 ExitPlanMode 提交方案。"
                                 synchronized(ctx.historyLock) {
-                                    if (!firstToolCallTextAdded) {
-                                        if (!thinkingBlockAdded && thinking.isNotBlank()) {
-                                            history.add(AnthropicMessage("assistant", "", thinking = thinking, thinkingSignature = thinkingSignature))
-                                            thinkingBlockAdded = true
-                                        }
-                                        history.add(AnthropicMessage("assistant", textContent))
-                                        firstToolCallTextAdded = true
+                                    if (assistantMsgIndex < 0) {
+                                        assistantMsgIndex = history.size
+                                        history.add(AssistantMessage(textContent, thinking = thinking, thinkingSignature = thinkingSignature))
                                     }
-                                    history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments, thinking = thinking, thinkingSignature = thinkingSignature))
-                                    history.add(AnthropicMessage("user", msg, toolCallId = tc.id, groupId = roundGroupId))
+                                    history.add(AssistantMessage("", thinking = thinking, thinkingSignature = thinkingSignature, toolUses = listOf(ToolUseParams(tc.id, tc.name, tc.arguments))))
+                                    history.add(ToolResultMessage(msg, toolCallId = tc.id, groupId = roundGroupId))
                                 }
                                 edt { onToolResult?.invoke(tc.name, msg); onTaskUpdate?.invoke() }
                                 continue
@@ -407,16 +397,12 @@ class AgentLoop(
                                     "方案被用户拒绝。请根据反馈调整方案，或回到规划模式继续研究。"
                                 }
                                 synchronized(ctx.historyLock) {
-                                    if (!firstToolCallTextAdded) {
-                                        if (!thinkingBlockAdded && thinking.isNotBlank()) {
-                                            history.add(AnthropicMessage("assistant", "", thinking = thinking, thinkingSignature = thinkingSignature))
-                                            thinkingBlockAdded = true
-                                        }
-                                        history.add(AnthropicMessage("assistant", textContent))
-                                        firstToolCallTextAdded = true
+                                    if (assistantMsgIndex < 0) {
+                                        assistantMsgIndex = history.size
+                                        history.add(AssistantMessage(textContent, thinking = thinking, thinkingSignature = thinkingSignature))
                                     }
-                                    history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments, thinking = thinking, thinkingSignature = thinkingSignature))
-                                    history.add(AnthropicMessage("user", planResult, toolCallId = tc.id, groupId = roundGroupId))
+                                    history.add(AssistantMessage("", thinking = thinking, thinkingSignature = thinkingSignature, toolUses = listOf(ToolUseParams(tc.id, tc.name, tc.arguments))))
+                                    history.add(ToolResultMessage(planResult, toolCallId = tc.id, groupId = roundGroupId))
                                 }
                                 edt { onToolResult?.invoke(tc.name, planResult) }
                                 continue
@@ -433,16 +419,12 @@ class AgentLoop(
                                 edt { onTaskUpdate?.invoke() }
                                 val msg = "任务 #$nextId 已创建: $subject"
                                 synchronized(ctx.historyLock) {
-                                    if (!firstToolCallTextAdded) {
-                                        if (!thinkingBlockAdded && thinking.isNotBlank()) {
-                                            history.add(AnthropicMessage("assistant", "", thinking = thinking, thinkingSignature = thinkingSignature))
-                                            thinkingBlockAdded = true
-                                        }
-                                        history.add(AnthropicMessage("assistant", textContent))
-                                        firstToolCallTextAdded = true
+                                    if (assistantMsgIndex < 0) {
+                                        assistantMsgIndex = history.size
+                                        history.add(AssistantMessage(textContent, thinking = thinking, thinkingSignature = thinkingSignature))
                                     }
-                                    history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments, thinking = thinking, thinkingSignature = thinkingSignature))
-                                    history.add(AnthropicMessage("user", msg, toolCallId = tc.id, groupId = roundGroupId))
+                                    history.add(AssistantMessage("", thinking = thinking, thinkingSignature = thinkingSignature, toolUses = listOf(ToolUseParams(tc.id, tc.name, tc.arguments))))
+                                    history.add(ToolResultMessage(msg, toolCallId = tc.id, groupId = roundGroupId))
                                 }
                                 edt { onToolResult?.invoke(tc.name, msg) }
                                 continue
@@ -471,16 +453,12 @@ class AgentLoop(
                                     }
                                 }
                                 synchronized(ctx.historyLock) {
-                                    if (!firstToolCallTextAdded) {
-                                        if (!thinkingBlockAdded && thinking.isNotBlank()) {
-                                            history.add(AnthropicMessage("assistant", "", thinking = thinking, thinkingSignature = thinkingSignature))
-                                            thinkingBlockAdded = true
-                                        }
-                                        history.add(AnthropicMessage("assistant", textContent))
-                                        firstToolCallTextAdded = true
+                                    if (assistantMsgIndex < 0) {
+                                        assistantMsgIndex = history.size
+                                        history.add(AssistantMessage(textContent, thinking = thinking, thinkingSignature = thinkingSignature))
                                     }
-                                    history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments, thinking = thinking, thinkingSignature = thinkingSignature))
-                                    history.add(AnthropicMessage("user", msg, toolCallId = tc.id, groupId = roundGroupId))
+                                    history.add(AssistantMessage("", thinking = thinking, thinkingSignature = thinkingSignature, toolUses = listOf(ToolUseParams(tc.id, tc.name, tc.arguments))))
+                                    history.add(ToolResultMessage(msg, toolCallId = tc.id, groupId = roundGroupId))
                                 }
                                 edt { onToolResult?.invoke(tc.name, msg) }
                                 continue
@@ -499,16 +477,12 @@ class AgentLoop(
                                     }
                                 }
                                 synchronized(ctx.historyLock) {
-                                    if (!firstToolCallTextAdded) {
-                                        if (!thinkingBlockAdded && thinking.isNotBlank()) {
-                                            history.add(AnthropicMessage("assistant", "", thinking = thinking, thinkingSignature = thinkingSignature))
-                                            thinkingBlockAdded = true
-                                        }
-                                        history.add(AnthropicMessage("assistant", textContent))
-                                        firstToolCallTextAdded = true
+                                    if (assistantMsgIndex < 0) {
+                                        assistantMsgIndex = history.size
+                                        history.add(AssistantMessage(textContent, thinking = thinking, thinkingSignature = thinkingSignature))
                                     }
-                                    history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments, thinking = thinking, thinkingSignature = thinkingSignature))
-                                    history.add(AnthropicMessage("user", msg, toolCallId = tc.id, groupId = roundGroupId))
+                                    history.add(AssistantMessage("", thinking = thinking, thinkingSignature = thinkingSignature, toolUses = listOf(ToolUseParams(tc.id, tc.name, tc.arguments))))
+                                    history.add(ToolResultMessage(msg, toolCallId = tc.id, groupId = roundGroupId))
                                 }
                                 edt { onToolResult?.invoke(tc.name, msg) }
                                 continue
@@ -530,16 +504,12 @@ class AgentLoop(
                                     }
                                 }
                                 synchronized(ctx.historyLock) {
-                                    if (!firstToolCallTextAdded) {
-                                        if (!thinkingBlockAdded && thinking.isNotBlank()) {
-                                            history.add(AnthropicMessage("assistant", "", thinking = thinking, thinkingSignature = thinkingSignature))
-                                            thinkingBlockAdded = true
-                                        }
-                                        history.add(AnthropicMessage("assistant", textContent))
-                                        firstToolCallTextAdded = true
+                                    if (assistantMsgIndex < 0) {
+                                        assistantMsgIndex = history.size
+                                        history.add(AssistantMessage(textContent, thinking = thinking, thinkingSignature = thinkingSignature))
                                     }
-                                    history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments, thinking = thinking, thinkingSignature = thinkingSignature))
-                                    history.add(AnthropicMessage("user", msg, toolCallId = tc.id, groupId = roundGroupId))
+                                    history.add(AssistantMessage("", thinking = thinking, thinkingSignature = thinkingSignature, toolUses = listOf(ToolUseParams(tc.id, tc.name, tc.arguments))))
+                                    history.add(ToolResultMessage(msg, toolCallId = tc.id, groupId = roundGroupId))
                                 }
                                 edt { onToolResult?.invoke(tc.name, msg) }
                                 continue
@@ -558,8 +528,12 @@ class AgentLoop(
                                 if (hookDecision.permissionDecision == "deny") {
                                     AppLogger.info("HookBus: PreToolUse 阻止执行 ${tc.name}")
                                     synchronized(ctx.historyLock) {
-                                        history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments))
-                                        history.add(AnthropicMessage("user", "Hook 阻止执行: ${hookDecision.content ?: "无原因"} (使用 /permissions 可添加白名单)", toolCallId = tc.id, groupId = roundGroupId))
+                                        if (assistantMsgIndex < 0) {
+                                            assistantMsgIndex = history.size
+                                            history.add(AssistantMessage(textContent, thinking = thinking, thinkingSignature = thinkingSignature))
+                                        }
+                                        history.add(AssistantMessage("", thinking = thinking, thinkingSignature = thinkingSignature, toolUses = listOf(ToolUseParams(tc.id, tc.name, tc.arguments))))
+                                        history.add(ToolResultMessage("Hook 阻止执行: ${hookDecision.content ?: "无原因"} (使用 /permissions 可添加白名单)", toolCallId = tc.id, groupId = roundGroupId))
                                     }
                                     edt { onToolResult?.invoke(tc.name, "Hook 阻止") }
                                     continue  // 跳过此工具
@@ -577,7 +551,7 @@ class AgentLoop(
                             params["_toolCallId"] = tc.id
                             workTreePath?.let { params["_worktree"] = it }
                             if (tc.name == "task") {
-                                params["_forkHistory"] = com.google.gson.Gson().toJson(history.toList())
+                                params["_forkHistory"] = com.aiassistant.AnthropicAdapter.createGson().toJson(history.toList())
                             }
                             val readFileOutside = tc.name == "read_file" && params["path"] != null &&
                                 !com.aiassistant.shared.PathUtils.isInsideProject(params["path"]!!, project.basePath)
@@ -631,21 +605,14 @@ class AgentLoop(
                             }
                             val resultText = if (toolResult.success) toolResult.content else "错误: ${toolResult.error}"
 
-                            if (!firstToolCallTextAdded) {
-                                synchronized(ctx.historyLock) {
-                                    if (!thinkingBlockAdded && thinking.isNotBlank()) {
-                                        AppLogger.info("AgentLoop: 添加thinking到history thinkingLen=${thinking.length} sigLen=${thinkingSignature.length}")
-                                        history.add(AnthropicMessage("assistant", "", thinking = thinking, thinkingSignature = thinkingSignature))
-                                        thinkingBlockAdded = true
-                                    }
-                                    history.add(AnthropicMessage("assistant", textContent))
-                                    firstToolCallTextAdded = true
-                                }
-                            }
-                            // 原子化 tool_use + tool_result 对，防止与 clearConversation/compactHistory 的 clear()+addAll() 交叠
+                            // 原子化 assistant + tool_result 对，防止与 clearConversation/compactHistory 的 clear()+addAll() 交叠
                             synchronized(ctx.historyLock) {
-                                history.add(AnthropicMessage("assistant", "", toolUseId = tc.id, toolName = tc.name, toolInput = tc.arguments, thinking = thinking, thinkingSignature = thinkingSignature))
-                                history.add(AnthropicMessage("user", resultText, toolCallId = tc.id, groupId = roundGroupId))
+                                if (assistantMsgIndex < 0) {
+                                    assistantMsgIndex = history.size
+                                    history.add(AssistantMessage(textContent, thinking = thinking, thinkingSignature = thinkingSignature))
+                                }
+                                history.add(AssistantMessage("", thinking = thinking, thinkingSignature = thinkingSignature, toolUses = listOf(ToolUseParams(tc.id, tc.name, tc.arguments))))
+                                history.add(ToolResultMessage(resultText, toolCallId = tc.id, groupId = roundGroupId))
                             }
 
                             // write/edit 执行成功后，收集 IDE Inspection 诊断并注入下一轮
@@ -682,39 +649,30 @@ class AgentLoop(
 
                         if (consecutiveFailures >= MAX_FAILURES) {
                             edt { onError?.invoke("连续失败超过 $MAX_FAILURES 次，已中止") }
-                            callback("", "")
+                            safeCallback("", "")
                             break
                         }
                         if (truncated && continuationCount >= MAX_CONTINUATIONS) {
                             AppLogger.warn("AgentLoop: 续写次数已达上限 $MAX_CONTINUATIONS（工具调用后），返回已有内容")
-                            callback(textContent, thinking)
+                            safeCallback(textContent, thinking)
                             break
                         }
                     } else {
                         if (truncated) {
                             synchronized(ctx.historyLock) {
-                                if (thinking.isNotBlank()) {
-                                    history.add(AnthropicMessage("assistant", textContent, thinking = thinking, thinkingSignature = thinkingSignature))
-                                } else {
-                                    history.add(AnthropicMessage("assistant", textContent))
-                                }
+                                history.add(AssistantMessage(textContent, thinking = thinking, thinkingSignature = thinkingSignature))
                             }
                             if (continuationCount >= MAX_CONTINUATIONS) {
                                 AppLogger.warn("AgentLoop: 续写次数已达上限 $MAX_CONTINUATIONS，返回已有内容")
-                                callback(textContent, thinking)
+                                safeCallback(textContent, thinking)
                                 break
                             }
                             AppLogger.info("AgentLoop: max_tokens 截断续写，textLen=${textContent.length}")
                             loopCount++
                             continue
                         }
-                        AppLogger.info("AgentLoop 最终回复: $textContent thinkingLen=${thinking.length} sigLen=${thinkingSignature.length}")
                         synchronized(ctx.historyLock) {
-                            if (thinking.isNotBlank()) {
-                                history.add(AnthropicMessage("assistant", textContent, thinking = thinking, thinkingSignature = thinkingSignature))
-                            } else {
-                                history.add(AnthropicMessage("assistant", textContent))
-                            }
+                            history.add(AssistantMessage(textContent, thinking = thinking, thinkingSignature = thinkingSignature))
                         }
                         if (ctx.goal != null) {
                             val goalAchieved = textContent.contains("目标已达成") ||
@@ -723,35 +681,40 @@ class AgentLoop(
                                     textContent.contains("目标已达到")
                             if (goalAchieved) {
                                 AppLogger.info("AgentLoop: 目标模式检测到目标达成标记，结束循环")
-                                callback(textContent, thinking)
+                                safeCallback(textContent, thinking)
                                 break
                             }
                             synchronized(ctx.historyLock) {
-                                history.add(AnthropicMessage("user",
+                                history.add(UserMessage(
                                     "继续朝着目标「${ctx.goal}」努力。如果目标已达成，请明确说明「目标已达成」并总结完成情况。",
                                     groupId = roundGroupId))
                             }
                             loopCount++
                             continue
                         }
-                        callback(textContent, thinking)
+                        safeCallback(textContent, thinking)
                         break
                     }
 
                     // 防止溢出：loopCount 达到 Int.MAX_VALUE 后不再递增（2^31-1 轮已远超实际可能）
                     if (loopCount < Int.MAX_VALUE) loopCount++
                 }
+                // 确保 callback 在所有退出路径上都被调用，防止 workflow/task 子 Agent 的 CountDownLatch 永久阻塞。
+                // cancelled 路径（stop/用户中止）到达此处时 loopCount < maxLoops（=Int.MAX_VALUE），
+                // 之前的 if 检查会漏掉，导致 latch 永不 countDown → 工作流卡死。
                 if (loopCount >= maxLoops) {
                     AppLogger.warn("AgentLoop: 达到最大轮次 $maxLoops")
-                    callback("", "")
+                }
+                if (!callbackCalled) {
+                    safeCallback("", "")
                 }
             } catch (e: InterruptedException) {
                 Thread.currentThread().interrupt()
-                callback("", "")  // 通知调用方（TaskTool 等）执行已被中断
+                safeCallback("", "")  // 通知调用方（TaskTool 等）执行已被中断
             } catch (e: Exception) {
                 AppLogger.error("AgentLoop 异常: ${e.message}\n${e.stackTraceToString()}")
                 edt { onError?.invoke("Agent 错误: ${e.message}") }
-                callback("", "")
+                safeCallback("", "")
             } finally {
                 onStateChange?.invoke(false)
                 edt { onThinking?.invoke(null) }
@@ -768,7 +731,6 @@ class AgentLoop(
         pendingConfirmLatch?.countDown()
         sdkClient?.close()
         SubAgentRegistry.stopAll()
-        SkillEngine.stopWatching(project.basePath ?: "")
     }
 
     /** 等待 agent 线程结束（最多 timeoutMs 毫秒） */
@@ -861,6 +823,12 @@ class AgentLoop(
                     doneLatch.countDown()
                 }
                 override fun onError(error: Throwable) {
+                    // 用户主动停止导致的流中断是预期行为，不记录为错误
+                    if (cancelled) {
+                        AppLogger.info("SDK streaming 因用户停止而中断")
+                        doneLatch.countDown()
+                        return
+                    }
                     // 递归展开 cause 链，暴露根因（如 ConnectException、SSLHandshakeException 等）
                     val rootCause = generateSequence<Throwable>(error) { it.cause }.last()
                     val causeChain = generateSequence<Throwable>(error) { it.cause }
@@ -950,19 +918,23 @@ class AgentLoop(
             append("\n请用 200-500 字输出摘要，不要使用标题或列表标记。\n\n")
             append("对话历史：\n")
             for (msg in messages) {
-                if (msg.thinking.isNotBlank() && msg.content.isBlank() && msg.toolUseId == null) continue
-                val prefix = when {
-                    msg.toolCallId != null -> "工具结果"
-                    msg.toolUseId != null -> "工具调用(${msg.toolName ?: ""})"
-                    msg.role == "user" -> "用户"
-                    else -> "AI"
+                when (msg) {
+                    is ToolResultMessage -> append("[工具结果] ${msg.content.take(2000)}\n")
+                    is AssistantMessage -> {
+                        if (msg.thinking.isNotBlank() && msg.text.isBlank() && msg.toolUses.isEmpty()) continue
+                        for (tu in msg.toolUses) {
+                            append("[工具调用(${tu.name})] ${tu.input.take(1000)}\n")
+                        }
+                        if (msg.text.isNotBlank()) {
+                            append("[AI] ${msg.text.take(2000)}\n")
+                        }
+                    }
+                    is UserMessage -> append("[用户] ${msg.content.take(2000)}\n")
                 }
-                val content = msg.content.take(2000)
-                append("[$prefix] $content\n")
             }
         }
 
-        val summaryHistory = listOf(AnthropicMessage("user", compactPrompt))
+        val summaryHistory = listOf(UserMessage(compactPrompt))
 
         val result = try {
             val compactLatch = java.util.concurrent.CountDownLatch(1)
@@ -1010,7 +982,13 @@ class AgentLoop(
         val threshold = (contextWindow * ratio).toLong()
         val tokens = ctx.lastInputTokens
         if (tokens > 0) return tokens > threshold
-        val allText = synchronized(ctx.historyLock) { history.joinToString("") { it.content + it.thinking } }
+        val allText = synchronized(ctx.historyLock) { history.joinToString("") { msg ->
+            when (msg) {
+                is UserMessage -> msg.content
+                is AssistantMessage -> msg.text + msg.thinking + msg.toolUses.joinToString("") { it.name + it.input }
+                is ToolResultMessage -> msg.content
+            }
+        } }
         val cjkCount = allText.count { it in '一'..'鿿' }
         val otherCount = allText.length - cjkCount
         val estimatedTokens = (cjkCount * 1.5 + otherCount * 0.25).toLong()
@@ -1139,7 +1117,14 @@ $claudeMdContent
             try {
                 val memEngine = ctx.memoryEngine
                 val recentMessages = synchronized(ctx.historyLock) { ctx.conversationHistory.takeLast(3) }
-                    .joinToString("\n") { "${it.role}: ${it.content.take(200)}" }
+                    .joinToString("\n") { msg ->
+                        val (label, preview) = when (msg) {
+                            is UserMessage -> "用户" to msg.content
+                            is AssistantMessage -> "AI" to msg.text
+                            is ToolResultMessage -> "工具结果" to msg.content
+                        }
+                        "$label: ${preview.take(200)}"
+                    }
                 val relevant = memEngine.getRelevantMemories(recentMessages)
                 if (relevant.isNotEmpty()) {
                     appendLine()

@@ -1,4 +1,5 @@
 package com.aiassistant.tools
+import com.aiassistant.AppLogger
 
 import com.aiassistant.agent.AgentTool
 import com.aiassistant.agent.ToolParameter
@@ -53,7 +54,7 @@ class SearchCodeTool : AgentTool {
             val readThread = Thread {
                 try {
                     outputRef.set(process.inputStream.bufferedReader().use { it.readText() })
-                } catch (_: Exception) {}
+                } catch (e: Exception) { AppLogger.warn("SearchCode: 读取进程输出失败: ${e.message}") }
             }.apply { isDaemon = true; start() }
 
             val finished = process.waitFor(10, TimeUnit.SECONDS)
@@ -102,7 +103,7 @@ class SearchCodeTool : AgentTool {
                             }
                         }
                     }
-                } catch (_: Exception) {}
+                } catch (e: Exception) { AppLogger.warn("SearchCode: 文件搜索失败: ${e.message}") }
             }
             formatResults(results.joinToString("\n"), query, maxResults)
         } catch (e: Exception) {

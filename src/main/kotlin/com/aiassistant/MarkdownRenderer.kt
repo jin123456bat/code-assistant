@@ -329,7 +329,7 @@ class MarkdownRenderer {
             }
 
             val langLabel = JLabel(if (language.isNotEmpty()) language.uppercase() else "CODE").apply {
-                font = Font(Font.SANS_SERIF, Font.PLAIN, 10)
+                font = Font(Font.SANS_SERIF, Font.PLAIN, 9)
                 foreground = ChatTheme.textMuted
             }
 
@@ -348,7 +348,7 @@ class MarkdownRenderer {
 
         private fun buildCopyButton(): JLabel {
             val btn = JLabel("复制").apply {
-                font = Font(Font.SANS_SERIF, Font.PLAIN, 10)
+                font = Font(Font.SANS_SERIF, Font.PLAIN, 9)
                 foreground = ChatTheme.textSecondary
                 // 默认透明度低 — 通过颜色而非 alpha（Swing alpha paint 有坑）
                 cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)

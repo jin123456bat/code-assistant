@@ -20,3 +20,5 @@ gradle.properties
 .DS_Store
 
 .claude/
+.intellijPlatform/
+.kotlin/

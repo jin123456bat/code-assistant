@@ -14,7 +14,7 @@ import com.intellij.openapi.project.Project
 import javax.swing.SwingUtilities
 
 /**
- * v3 UI 桥接 — 轻量 ViewModel，委托给 AgentLoop。
+ * UI 桥接 — 轻量 ViewModel，委托给 AgentLoop。
  */
 data class ApprovalState(val latch: java.util.concurrent.CountDownLatch, val userChoice: java.util.concurrent.atomic.AtomicBoolean)
 
@@ -67,6 +67,7 @@ class ChatViewModel {
     var onMessagesChanged: (() -> Unit)? = null
     var onStreamingUpdate: ((String) -> Unit)? = null
     var onStreamingThinkingChanged: ((String) -> Unit)? = null
+    var onThinkingCompleted: (() -> Unit)? = null  // 思考流式结束，通知 UI 固化行（改标题"思考中..."→"思考过程"）
     var onStreamingStateChanged: ((Boolean) -> Unit)? = null
     var onError: ((String?) -> Unit)? = null
     var onRateLimitCountdown: ((Int) -> Unit)? = null
@@ -78,7 +79,6 @@ class ChatViewModel {
     var onModelRouted: ((String) -> Unit)? = null
     var onConfirmTool: ((String, String, CountDownLatch, AtomicBoolean) -> Unit)? = null
     var onConfirmPlan: ((String, CountDownLatch, AtomicBoolean) -> Unit)? = null  // Plan Mode 审批
-    var onThinkingContent: ((String) -> Unit)? = null
 
     private var agent: AgentLoop? = null
     private var project: Project? = null
@@ -105,12 +105,13 @@ class ChatViewModel {
 
     fun getSkillNames(): List<String> = getSkills().map { it.name }
 
-    /** 获取所有 skill 的名称和描述（用于 UI 菜单展示） */
-    /** UI 菜单中的 skill 列表：过滤掉 invoke-for="agent" 的（仅 LLM 可调用） */
     fun getSkills(): List<SkillInfo> = agent?.ctx?.skillDefs?.values
         ?.filter { it.invokeFor != "agent" }
         ?.map { SkillInfo(it.name, it.description) }
         ?: emptyList()
+
+    /** 手动重载 skills（/reload-skills 命令触发） */
+    fun reloadSkills() { agent?.reloadSkills() }
 
     fun getTokenStats(): AgentContext.TokenStats? = agent?.ctx?.tokenStats
 
@@ -167,6 +168,7 @@ class ChatViewModel {
             messages.add(AgentMessage("thinking", content))
         }
         streamingThinking = ""
+        onThinkingCompleted?.invoke()  // 通知 UI 固化流式思考行
     }
 
     private fun setupCallbacks(a: AgentLoop) {
@@ -307,11 +309,10 @@ class ChatViewModel {
             }
         }
         a.onCompact = { summary ->
+            // compact 只修改 conversationHistory（API 上下文），不改 messages（UI 显示）
+            // 对齐 Claude Code：对话历史压缩对用户透明
             runOnEdt {
-                val keep = messages.takeLast(8).toList()
-                messages.clear()
-                messages.add(AgentMessage("system", "📋 对话摘要：$summary"))
-                messages.addAll(keep)
+                messages.add(AgentMessage("system", "📋 对话已自动压缩（摘要注入 system prompt，UI 历史不变）"))
                 onMessagesChanged?.invoke()
             }
         }
@@ -478,7 +479,16 @@ class ChatViewModel {
                     Thread({
                         try {
                             com.aiassistant.agent.memory.MemoryAutoExtract(memEngine).extract(
-                                snapshotHistory.map { com.aiassistant.AnthropicMessage(it.role, it.content) },
+                                snapshotHistory.map { msg ->
+                                    when (msg) {
+                                        is com.aiassistant.AssistantMessage -> com.aiassistant.AssistantMessage(msg.text)
+                                        is com.aiassistant.UserMessage -> com.aiassistant.UserMessage(msg.content)
+                                        is com.aiassistant.ToolResultMessage -> com.aiassistant.UserMessage(
+                                            "[tool_result id=${msg.toolCallId}] ${msg.content}",
+                                            groupId = msg.groupId
+                                        )
+                                    }
+                                },
                                 apiKey
                             )
                         } finally {
@@ -545,23 +555,19 @@ class ChatViewModel {
 
     /**
      * 压缩对话历史：将旧消息替换为 LLM 生成的摘要，释放 token 预算。
-     * 对齐 Claude Code /compact：保留最近 8 条消息，其余压缩为一段摘要。
-     * 同步更新跨轮历史（ctx.conversationHistory）和 UI 消息列表（messages）。
+     * 对齐 Claude Code /compact：仅压缩 conversationHistory（API 上下文），
+     * UI 消息列表不变，session 数据不变。
      */
     fun compactConversation(apiKey: String) {
         if (!isCompacting.compareAndSet(false, true)) return
         val a = agent ?: run { isCompacting.set(false); return }
-        val recentMessages = messages.toList().takeLast(15)
-        stopGeneration()  // 防止 compact 与 agent 循环并发使用 sdkClient
+        stopGeneration()
         Thread {
             try {
                 val summary = a.compactHistory(15, apiKey)
                 if (summary != null) {
                     runOnEdt {
-                        messages.clear()
-                        messages.add(AgentMessage("system", "📋 对话摘要：$summary"))
-                        messages.addAll(recentMessages)
-                        lastSavedCount = messages.size  // 压缩后同步计数，防止重复保存
+                        messages.add(AgentMessage("system", "📋 对话已压缩（摘要注入 system prompt，最近 15 条保留在 API 上下文）"))
                         onMessagesChanged?.invoke()
                     }
                 }
@@ -583,7 +589,7 @@ class ChatViewModel {
         if (messages.isEmpty()) return
         val currentSize = messages.size
         if (currentSize == lastSavedCount) return  // 无新消息，跳过
-        val snapshot = messages.toList()
+        val snapshot = messages.filter { it.role == "user" || it.role == "assistant" }.toList()
         val sessionId = autoSaveSessionId
         val savedCount = currentSize
         val stats = agent?.ctx?.tokenStats
@@ -595,9 +601,12 @@ class ChatViewModel {
                 }
             )
         }
+        val chipSnapshot = messageRefChips.toMap().mapValues { (_, chips) ->
+            chips.map { com.aiassistant.session.SessionStore.ChipDTO(it.label, it.fullPath, it.startLine, it.endLine) }
+        }
         saveExecutor.submit {
             val name = snapshot.firstOrNull { it.role == "user" }?.content?.take(50) ?: "空会话"
-            com.aiassistant.session.SessionStore.save(path, sessionId, name, snapshot, statsDTO)
+            com.aiassistant.session.SessionStore.save(path, sessionId, name, snapshot, statsDTO, chipSnapshot)
             lastSavedCount = savedCount
         }
     }
@@ -607,22 +616,32 @@ class ChatViewModel {
         clearConversation()
         messages.addAll(data.messages.map { dto ->
             when (dto.role) {
-                "user" -> AgentMessage("user", dto.content)
-                "assistant" -> AgentMessage("assistant", dto.content)
+                "user" -> AgentMessage("user", dto.content, id = dto.id)
+                "assistant" -> AgentMessage("assistant", dto.content, id = dto.id)
                 "tool_call" -> AgentMessage(
                     "tool_call", dto.content,
                     toolCallId = dto.toolCallId,
                     toolName = dto.toolName,
-                    toolCalls = dto.toolCalls?.map { com.aiassistant.agent.ToolCallRequest(it.id, it.name, it.arguments) }
+                    toolCalls = dto.toolCalls?.map { com.aiassistant.agent.ToolCallRequest(it.id, it.name, it.arguments) },
+                    id = dto.id
                 )
                 "tool" -> AgentMessage(
                     "tool", dto.content,
                     toolCallId = dto.toolCallId,
-                    toolName = dto.toolName
+                    toolName = dto.toolName,
+                    id = dto.id
                 )
-                else -> AgentMessage(dto.role, dto.content)
+                else -> AgentMessage(dto.role, dto.content, id = dto.id)
             }
         })
+        // 恢复引用芯片
+        for (dto in data.messages) {
+            dto.chips?.let { chips ->
+                messageRefChips[dto.id] = chips.map {
+                    com.aiassistant.ChatToolWindow.RefChip(it.label, it.fullPath, it.startLine, it.endLine)
+                }
+            }
+        }
         // 恢复 token 统计数据
         data.tokenStats?.let { ts ->
             agent?.ctx?.tokenStats?.apply {

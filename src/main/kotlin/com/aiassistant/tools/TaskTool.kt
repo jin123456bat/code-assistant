@@ -106,7 +106,7 @@ class TaskTool : AgentTool {
             try {
                 val json = params["_forkHistory"]
                 if (json != null) {
-                    com.google.gson.Gson().fromJson(json, Array<com.aiassistant.AnthropicMessage>::class.java).toList()
+                    com.aiassistant.AnthropicAdapter.createGson().fromJson(json, Array<com.aiassistant.AnthropicMessage>::class.java).toList()
                 } else null
             } catch (_: Exception) { null }
         } else null

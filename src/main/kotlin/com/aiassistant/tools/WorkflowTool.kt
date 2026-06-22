@@ -92,7 +92,11 @@ class WorkflowTool : AgentTool {
                         resultRef.set(finalText)
                         latch.countDown()
                     }
-                    latch.await()
+                    val ok = latch.await(5, TimeUnit.MINUTES)
+                    if (!ok) {
+                        SubAgentRegistry.fail(subId, "子任务超时（5分钟）")
+                        return@runAsync
+                    }
                     val result = resultRef.get()?.takeIf { it.isNotBlank() } ?: "(未返回结果)"
                     SubAgentRegistry.complete(subId, result)
                 } catch (e: Throwable) {

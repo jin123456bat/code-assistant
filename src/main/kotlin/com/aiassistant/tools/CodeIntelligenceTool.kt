@@ -448,12 +448,24 @@ class CodeIntelligenceTool : AgentTool {
     ): ToolResult {
         val query = params["query"] ?: return ToolResult.err("缺少 query 参数")
 
-        // 通过 FilenameIndex 搜索文件名匹配
+        // 通过 FilenameIndex 搜索文件名匹配（全部放在 ReadAction 内）
         val scope = GlobalSearchScope.projectScope(project)
-        val matches = try {
-            FilenameIndex.getAllFilenames(project)
-                .filter { it.contains(query, ignoreCase = true) }
-                .take(maxResults)
+        val resultLines = try {
+            com.intellij.openapi.application.ApplicationManager.getApplication().runReadAction<List<String>> {
+                val matchedNames = FilenameIndex.getAllFilenames(project)
+                    .filter { it.contains(query, ignoreCase = true) }
+                    .take(maxResults)
+                    .toList()
+                val lines = mutableListOf<String>()
+                for (name in matchedNames) {
+                    val files = FilenameIndex.getVirtualFilesByName(name, scope).take(3)
+                    for (vf in files) {
+                        val relativePath = vf.path.removePrefix("$basePath${java.io.File.separator}")
+                        lines.add("  $relativePath")
+                    }
+                }
+                lines
+            }
         } catch (_: Exception) {
             return ToolResult.err("无法访问文件索引")
         }
@@ -463,20 +475,14 @@ class CodeIntelligenceTool : AgentTool {
         sb.appendLine("搜索词: $query")
         sb.appendLine()
 
-        if (matches.isEmpty()) {
+        if (resultLines.isEmpty()) {
             sb.appendLine("未找到匹配的文件名")
             return ToolResult.ok(sb.toString())
         }
 
-        sb.appendLine("匹配的文件名 (${matches.size}):")
+        sb.appendLine("匹配的文件名:")
         sb.appendLine()
-        for (name in matches) {
-            val files = FilenameIndex.getVirtualFilesByName(name, scope).take(3)
-            for (vf in files) {
-                val relativePath = vf.path.removePrefix("$basePath${java.io.File.separator}")
-                sb.appendLine("  $relativePath")
-            }
-        }
+        resultLines.forEach { sb.appendLine(it) }
 
         return ToolResult.ok(sb.toString())
     }

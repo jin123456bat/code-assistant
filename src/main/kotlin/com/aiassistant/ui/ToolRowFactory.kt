@@ -246,23 +246,26 @@ class ToolRowFactory(
     }
 
     /**
-     * 工具结果行：
-     * - 失败时（content 以 "错误:" / "错误：" / "Error:" 开头）渲染红色错误卡。
-     * - 成功时默认折叠，摘要 "结果 · <toolName>"；展开显示 content（超 2000 chars 截断）。
+     * 工具结果行（单 tout，展开后内部分两个子区域）：
+     * - 折叠时：箭头 + toolName + args 预览 + "✓ N 行"
+     * - 展开后：上方"调用详情"区域 + 下方"执行结果"区域，中间留空隙
+     * - 始终允许展开（执行中的工具也可点击查看参数）
      */
     fun toolResultRow(message: AgentMessage, approvalActions: ApprovalActions? = null,
-                     barColor: java.awt.Color? = null, bgColor: java.awt.Color? = null): JPanel {
+                     barColor: java.awt.Color? = null, bgColor: java.awt.Color? = null): ToolResultHandle {
         val toolName = message.toolName ?: "tool"
         val rawContent = message.content
+        val bar = barColor ?: ChatTheme.toolBar
+        val bg = bgColor ?: ChatTheme.toolBg
 
         // 检测失败前缀
         val contentTrimmed = rawContent.trimStart()
         val isError = contentTrimmed.startsWith("错误:") ||
                 contentTrimmed.startsWith("错误：") ||
                 contentTrimmed.startsWith("Error:")
-
         if (isError) {
-            return errorCardRow(toolName, contentTrimmed)
+            val errPanel = errorCardRow(toolName, contentTrimmed)
+            return ToolResultHandle(errPanel, errPanel, { _, _ -> }, AtomicBoolean(false))
         }
 
         // 拆分 args 和 result
@@ -271,20 +274,20 @@ class ToolRowFactory(
         val argsPart = if (hasResult) rawContent.substringBefore(sep) else rawContent
         val resultPart = if (hasResult) rawContent.substringAfter(sep) else ""
 
-        // 检测 write_file diff 标记：提取旧/新内容，清洗显示文本
+        val argsPreview = argsPart.replace('\n', ' ').replace('\r', ' ').take(40)
+            .let { if (argsPart.length > 40) "$it…" else it }
+
+        // 检测 write_file diff 标记
         val oldMarker = "[OLD_CONTENT]"
-        val endOldMarker = "[/OLD_CONTENT]"
         val newMarker = "[NEW_CONTENT]"
-        val endNewMarker = "[/NEW_CONTENT]"
         val isWriteFileDiff = (toolName == "write_file" || toolName == "edit_file") && resultPart.contains(newMarker)
         val diffData: DiffData? = if (isWriteFileDiff) {
             val oldStart = resultPart.indexOf(oldMarker)
-            val oldEnd = resultPart.indexOf(endOldMarker)
+            val endOld = resultPart.indexOf("[/OLD_CONTENT]")
             val newStart = resultPart.indexOf(newMarker)
-            val newEnd = resultPart.indexOf(endNewMarker)
-            val old = if (oldStart >= 0 && oldEnd > oldStart) resultPart.substring(oldStart + oldMarker.length, oldEnd).trim() else null
-            val new = if (newStart >= 0 && newEnd > newStart) resultPart.substring(newStart + newMarker.length, newEnd).trim() else null
-            // 清洗显示文本：移除 diff 标记块，保留文件头信息
+            val endNew = resultPart.indexOf("[/NEW_CONTENT]")
+            val old = if (oldStart >= 0 && endOld > oldStart) resultPart.substring(oldStart + oldMarker.length, endOld).trim() else null
+            val new = if (newStart >= 0 && endNew > newStart) resultPart.substring(newStart + newMarker.length, endNew).trim() else null
             val clean = resultPart
                 .replace(Regex("\\[OLD_CONTENT\\].*?\\[/OLD_CONTENT\\]\\s*", RegexOption.DOT_MATCHES_ALL), "")
                 .replace(Regex("\\[NEW_CONTENT\\].*?\\[/NEW_CONTENT\\]\\s*", RegexOption.DOT_MATCHES_ALL), "")
@@ -292,27 +295,31 @@ class ToolRowFactory(
             DiffData(old, new, clean)
         } else null
 
-        val cleanResult = diffData?.cleanDisplay ?: resultPart
-        val argsPreview = argsPart.replace('\n', ' ').replace('\r', ' ').take(40)
-            .let { if (argsPart.length > 40) "$it…" else it }
-        val isTruncated = cleanResult.length > ChatTheme.RESULT_MAX_CHARS
-        val displayText = if (isTruncated) cleanResult.take(ChatTheme.RESULT_MAX_CHARS) + "\n… (已截断)" else cleanResult
-        val lineCount = cleanResult.count { it == '\n' } + 1
+        // 运行中状态（结果可能后续才到达）
+        val hasResultNow = hasResult
+        var resultContent = if (hasResult) (diffData?.cleanDisplay ?: resultPart) else ""
+        fun resultDisplay() = if (resultContent.length > ChatTheme.RESULT_MAX_CHARS)
+            resultContent.take(ChatTheme.RESULT_MAX_CHARS) + "\n… (已截断)" else resultContent
+        fun resultLineCount() = resultContent.count { it == '\n' } + 1
 
         val outerRow = outerRow()
         val collapsed = AtomicBoolean(true)
-        val bubble = leftBarPanel(
-            bar = barColor ?: ChatTheme.toolBar,
-            bg = bgColor ?: ChatTheme.toolBg
-        )
+        val approvalResolved = AtomicBoolean(false)
+        val bubble = leftBarPanel(bar = bar, bg = bg)
 
-        fun rebuild(isCollapsed: Boolean) {
+        fun rebuild(isCollapsed: Boolean, resultOverride: String? = null) {
+            // 支持原地更新结果
+            if (resultOverride != null) {
+                resultContent = resultOverride
+            }
+            val hasResult = resultContent.isNotEmpty()
             bubble.removeAll()
 
+            // ---- header ----
             val infoPanel = JPanel().apply { layout = BoxLayout(this, BoxLayout.X_AXIS); isOpaque = false }
             val running = !hasResult && approvalActions == null
             if (running) {
-                infoPanel.add(BrailleSpinnerLabel(ChatTheme.toolBar))
+                infoPanel.add(BrailleSpinnerLabel(bar))
             } else {
                 infoPanel.add(arrowLabel(!isCollapsed))
             }
@@ -325,7 +332,7 @@ class ToolRowFactory(
 
             val rightPanel = JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0)).apply { isOpaque = false }
             if (approvalActions == null && isCollapsed) {
-                val status = if (hasResult) "✓ $lineCount 行" else "执行中..."
+                val status = if (hasResult) "✓ ${resultLineCount()} 行" else "执行中..."
                 val statusColor = if (hasResult) ChatTheme.textMuted else ChatTheme.toolFg
                 rightPanel.add(statusLabel(status).apply { foreground = statusColor })
             }
@@ -333,92 +340,115 @@ class ToolRowFactory(
             val headerRow = JPanel(BorderLayout(0, 0)).apply { isOpaque = false; border = JBUI.Borders.empty(4, 8, 4, 4) }
             headerRow.add(infoPanel, BorderLayout.CENTER)
             headerRow.add(rightPanel, BorderLayout.EAST)
-
-            headerRow.cursor = if (approvalActions == null && !running) Cursor.getPredefinedCursor(Cursor.HAND_CURSOR) else Cursor.getDefaultCursor()
+            // 始终允许展开
+            headerRow.cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
             headerRow.addMouseListener(object : MouseAdapter() {
                 override fun mouseClicked(e: MouseEvent) {
-                    if (approvalActions != null) return
-                    if (running) return
                     collapsed.set(!collapsed.get())
                     rebuild(collapsed.get())
-                    bubble.revalidate()
-                    bubble.repaint()
+                    bubble.revalidate(); bubble.repaint()
                 }
             })
             bubble.add(headerRow, BorderLayout.NORTH)
 
-            // 审批模式：选项行直接内联到 bubble 中，不创建独立卡片
-            if (approvalActions != null) {
-                bubble.add(buildApprovalOptions(approvalActions), BorderLayout.CENTER)
-                return
-            }
+            // CENTER 容器：展开内容 + 审批始终可见（折叠时仅显示审批）
+            val centerWrapper = JPanel().apply { layout = BoxLayout(this, BoxLayout.Y_AXIS); isOpaque = false }
 
-            if (!isCollapsed && hasResult) {
-                val codePanel = JPanel(BorderLayout()).apply {
-                    background = ChatTheme.codeBg
-                    border = BorderFactory.createCompoundBorder(
-                        BorderFactory.createMatteBorder(1, 0, 0, 0, ChatTheme.codeBorder),
-                        JBUI.Borders.empty(0, 0)
-                    )
+            if (!isCollapsed) {
+                // --- 子 tout 1：调用详情 ---
+                centerWrapper.add(buildSubTout("调用详情", argsPart, bar, bg, null))
+                // 空隙
+                centerWrapper.add(Box.createVerticalStrut(JBUI.scale(6)))
+                // --- 子 tout 2：执行结果 ---
+                if (hasResult) {
+                    centerWrapper.add(buildSubTout("执行结果", resultDisplay(), bar, bg,
+                        if (resultContent.length > ChatTheme.RESULT_MAX_CHARS) resultContent else null
+                    ))
                 }
                 // write_file diff 按钮
                 if (diffData != null && diffData.oldContent != null && diffData.newContent != null && project != null) {
-                    val proj = project
-                    val old = diffData.oldContent
-                    val new = diffData.newContent
+                    val proj = project; val old = diffData.oldContent; val new = diffData.newContent
                     val diffBtn = JLabel("  View Diff →  ").apply {
-                        font = toolFont
-                        foreground = ChatTheme.toolFg
-                        isOpaque = true
-                        background = ChatTheme.toolBg
+                        font = toolFont; foreground = ChatTheme.toolFg
+                        isOpaque = true; background = ChatTheme.toolBg
                         cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
                         border = BorderFactory.createCompoundBorder(
-                            BorderFactory.createMatteBorder(0, 0, 1, 0, ChatTheme.codeBorder),
+                            BorderFactory.createMatteBorder(0, 0, 0, 0, ChatTheme.codeBorder),
                             JBUI.Borders.empty(5, 6, 5, 6)
                         )
                         addMouseListener(object : MouseAdapter() {
-                            override fun mouseClicked(e: MouseEvent) {
-                                openDiffView(proj, old, new, toolName)
-                            }
+                            override fun mouseClicked(e: MouseEvent) { openDiffView(proj, old, new, toolName) }
                             override fun mouseEntered(e: MouseEvent) { foreground = ChatTheme.accentHover }
                             override fun mouseExited(e: MouseEvent) { foreground = ChatTheme.toolFg }
                         })
                     }
-                    codePanel.add(diffBtn, BorderLayout.NORTH)
+                    centerWrapper.add(diffBtn)
                 }
-                val textArea = JTextArea(displayText).apply {
-                    isEditable = false; lineWrap = true; wrapStyleWord = true
-                    font = toolCodeFont; background = ChatTheme.codeBg
-                    foreground = ChatTheme.textSecondary; border = JBUI.Borders.empty(4, 6)
-                }
-                if (project != null) FilePathNavigator.attach(textArea, project)
-                codePanel.add(textArea, BorderLayout.CENTER)
-                // 截断时添加"展开全部"按钮，保留完整 resultPart 引用
-                if (isTruncated) {
-                    val expandBtn = JLabel("展开全部 ▼").apply {
-                        font = ChatTheme.metaFont
-                        foreground = ChatTheme.toolFg
-                        cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
-                        border = JBUI.Borders.empty(4, 6, 4, 6)
-                        addMouseListener(object : java.awt.event.MouseAdapter() {
-                            override fun mouseClicked(e: java.awt.event.MouseEvent) {
-                                textArea.text = resultPart  // 完整原文
-                                codePanel.remove(this@apply)
-                                bubble.revalidate()
-                                bubble.repaint()
-                            }
-                        })
-                    }
-                    codePanel.add(expandBtn, BorderLayout.SOUTH)
-                }
-                bubble.add(codePanel, BorderLayout.CENTER)
+            }
+
+            // 审批按钮（仅在未完成时显示，完成后隐藏且不再出现）
+            if (approvalActions != null && !approvalResolved.get()) {
+                val wrappedActions = ApprovalActions(
+                    onAllowOnce = { approvalActions.onAllowOnce(); approvalResolved.set(true) },
+                    onAlwaysAllow = { approvalActions.onAlwaysAllow(); approvalResolved.set(true) },
+                    onReject = { approvalActions.onReject(); approvalResolved.set(true) }
+                )
+                centerWrapper.add(buildApprovalOptions(wrappedActions))
+            }
+
+            if (centerWrapper.componentCount > 0) {
+                bubble.add(centerWrapper, BorderLayout.CENTER)
             }
         }
 
         rebuild(true)
         outerRow.add(bubble)
         outerRow.add(Box.createHorizontalGlue())
-        return outerRow
+        return ToolResultHandle(outerRow, bubble, ::rebuild, collapsed)
+    }
+
+    /** 在展开的 tout 内构建一个子区域：标题 + 内容文本 */
+    private fun buildSubTout(title: String, content: String, bar: Color, bg: Color, fullContent: String?): JPanel {
+        val panel = JPanel(BorderLayout()).apply {
+            isOpaque = false
+            border = BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(0, 2, 0, 0, bar),
+                JBUI.Borders.empty(2, 10, 2, 4)
+            )
+        }
+        val titleLabel = JLabel(title).apply {
+            font = toolFont.deriveFont(Font.BOLD, toolFont.size - 1f)
+            foreground = bar
+            border = JBUI.Borders.empty(0, 0, 2, 0)
+        }
+        panel.add(titleLabel, BorderLayout.NORTH)
+
+        val textArea = JTextArea(content).apply {
+            isEditable = false; lineWrap = true; wrapStyleWord = true
+            font = toolCodeFont; background = bg
+            foreground = ChatTheme.textSecondary
+            border = JBUI.Borders.empty(2, 0, 2, 0)
+        }
+        panel.add(textArea, BorderLayout.CENTER)
+
+        // 截断时显示"展开全部"按钮
+        if (fullContent != null && fullContent.length > content.length) {
+            val expandBtn = JLabel("展开全部 ▼").apply {
+                font = ChatTheme.metaFont; foreground = ChatTheme.toolFg
+                cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                border = JBUI.Borders.empty(2, 0, 0, 0)
+                addMouseListener(object : MouseAdapter() {
+                    override fun mouseClicked(e: MouseEvent) {
+                        textArea.text = fullContent
+                        panel.remove(this@apply)
+                        panel.revalidate(); panel.repaint()
+                    }
+                })
+            }
+            panel.add(expandBtn, BorderLayout.SOUTH)
+        }
+
+        return panel
     }
 
     /**
@@ -474,8 +504,54 @@ class ToolRowFactory(
         val outerRow: JPanel,
         val contentArea: JPanel,
         val collapsed: java.util.concurrent.atomic.AtomicBoolean,
-        val stopIconLabel: JComponent? = null  // 仅 task 工具非空（StopIconLabel 实例），供外部清理引用
-    )
+        val stopIconLabel: JComponent? = null,  // 仅 task 工具非空（StopIconLabel 实例），供外部清理引用
+        private val headerLabel: JLabel? = null,
+        private val spinner: JComponent? = null,
+        private val chevron: JLabel? = null
+    ) {
+        /** 工具执行完成，原地切换状态：关 spinner、改标题、折叠 */
+        fun complete(resultContent: String) {
+            spinner?.isVisible = false
+            stopIconLabel?.let { it.isVisible = false }
+            headerLabel?.let {
+                it.text = "✓ ${it.text}".removePrefix("✓ ").removePrefix("执行中 · ")
+                it.foreground = ChatTheme.textMuted
+            }
+            // 追加最终结果到 contentArea 末尾
+            val resultLabel = JTextArea(resultContent.take(2000)).apply {
+                isEditable = false; lineWrap = true; wrapStyleWord = true
+                font = ChatTheme.metaFont; foreground = ChatTheme.textSecondary
+                background = contentArea.background
+                border = JBUI.Borders.empty(4, 10, 4, 8)
+            }
+            contentArea.add(resultLabel)
+            contentArea.revalidate()
+        }
+    }
+
+    /**
+     * 工具行句柄——创建后持有引用，支持原地更新执行结果。
+     * 工具行由本地渲染路径全权管理，不依赖消息路径 rebuild。
+     */
+    class ToolResultHandle(
+        val outerRow: JPanel,
+        private val bubble: JPanel,
+        private val rebuild: (isCollapsed: Boolean, resultContent: String?) -> Unit,
+        private val collapsed: AtomicBoolean,
+        stopIconLabel: JComponent? = null
+    ) {
+        val stopIcon: JComponent? = stopIconLabel
+        private var currentResult: String? = null
+
+        /** 原地更新执行结果，切换"执行中"→"✓ N 行" */
+        fun updateResult(result: String) {
+            currentResult = result
+            val wasCollapsed = collapsed.get()
+            rebuild(wasCollapsed, result)
+            bubble.revalidate()
+            bubble.repaint()
+        }
+    }
 
     /** 执行中行：带动态盲文 spinner，不可折叠 */
     fun runningRow(toolName: String): JPanel {
@@ -555,15 +631,22 @@ class ToolRowFactory(
             cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
         }
 
-        val outerRow = JPanel().apply {
+        val outerRow = object : JPanel() {
+            override fun getMaximumSize(): Dimension {
+                val maxW = availableWidth()
+                return Dimension(if (maxW > 10) maxW else Int.MAX_VALUE, preferredSize.height)
+            }
+        }.apply {
             layout = BoxLayout(this, BoxLayout.X_AXIS)
             isOpaque = false
+            alignmentX = Component.LEFT_ALIGNMENT
             add(leftBar)
             add(Box.createHorizontalGlue())
         }
 
         return StreamingToolRow(outerRow, contentArea, collapsed,
-            stopIconLabel = spinnerOrStop as? StopIconLabel)
+            stopIconLabel = spinnerOrStop as? StopIconLabel,
+            headerLabel = label, spinner = spinnerOrStop, chevron = chevron)
     }
 
     /** 切换流式工具行的折叠状态 */
@@ -574,8 +657,25 @@ class ToolRowFactory(
         bar.repaint()
     }
 
+    /** 子代理工具行句柄——支持"执行中"→"结果"原地更新 */
+    class SubAgentToolRow(
+        val outer: JPanel,
+        private val label: JLabel,
+        spinner: JComponent,
+        private val statusArea: JTextArea
+    ) {
+        private val spinnerRef = spinner
+
+        fun updateResult(resultText: String) {
+            spinnerRef.isVisible = false
+            label.text = "✓ ${label.text}".removePrefix("✓ ")
+            label.foreground = ChatTheme.toolFg
+            statusArea.text = resultText
+        }
+    }
+
     /** 子代理工具执行中行：agentBar 色 spinner + 工具名，默认折叠，展开显示状态提示 */
-    fun subAgentToolRunningRow(toolName: String): JPanel {
+    fun subAgentToolRunningRow(toolName: String): SubAgentToolRow {
         val collapsed = java.util.concurrent.atomic.AtomicBoolean(true)
         val chevron = JLabel("▸").apply {
             font = ChatTheme.metaFont
@@ -606,10 +706,11 @@ class ToolRowFactory(
             border = JBUI.Borders.empty(2, 16, 4, 8)
             isVisible = false
         }
-        val leftBar = JPanel(BorderLayout()).apply {
+        // 子代理行在 task 工具的 contentArea 内，已有一层 leftBar，不再套第二层
+        val container = JPanel(BorderLayout()).apply {
             isOpaque = false
             background = ChatTheme.agentBg
-            border = LeftBarBorder(ChatTheme.agentBar, 2, 4)
+            border = JBUI.Borders.empty(2, 8, 2, 4)
             add(header, BorderLayout.NORTH)
             add(statusArea, BorderLayout.CENTER)
             addMouseListener(object : java.awt.event.MouseAdapter() {
@@ -623,22 +724,28 @@ class ToolRowFactory(
             })
             cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
         }
-        val outer = JPanel().apply {
+        val outer = object : JPanel() {
+            override fun getMaximumSize(): Dimension {
+                val maxW = availableWidth()
+                return Dimension(if (maxW > 10) maxW else Int.MAX_VALUE, preferredSize.height)
+            }
+        }.apply {
             layout = BoxLayout(this, BoxLayout.X_AXIS)
             isOpaque = false
-            add(leftBar)
+            alignmentX = Component.LEFT_ALIGNMENT
+            add(container)
             add(Box.createHorizontalGlue())
         }
-        return outer
+        return SubAgentToolRow(outer, label, spinner, statusArea)
     }
 
-    /** 子代理工具结果行：agentBar 色左栏，默认折叠，可展开查看结果 */
+    /** 子代理工具结果行（不再使用，保留兼容） */
     fun subAgentToolResultRow(toolName: String, content: String): JPanel {
         val collapsed = java.util.concurrent.atomic.AtomicBoolean(true)
         val chevron = JLabel("▸").apply {
             font = ChatTheme.metaFont
             foreground = ChatTheme.agentBar
-            border = JBUI.Borders.empty(0, 12, 0, 4)
+            border = JBUI.Borders.empty(0, 4, 0, 4)
         }
         val label = JLabel("结果 · $toolName").apply {
             font = toolFont
@@ -658,13 +765,13 @@ class ToolRowFactory(
             isEditable = false
             lineWrap = true
             wrapStyleWord = true
-            border = JBUI.Borders.empty(2, 16, 4, 8)
+            border = JBUI.Borders.empty(2, 8, 4, 8)
             isVisible = false
         }
-        val leftBar = JPanel(BorderLayout()).apply {
+        val container = JPanel(BorderLayout()).apply {
             isOpaque = false
             background = ChatTheme.agentBg
-            border = LeftBarBorder(ChatTheme.agentBar, 2, 4)
+            border = JBUI.Borders.empty(2, 8, 2, 4)
             add(header, BorderLayout.NORTH)
             add(textArea, BorderLayout.CENTER)
             addMouseListener(object : java.awt.event.MouseAdapter() {
@@ -678,10 +785,16 @@ class ToolRowFactory(
             })
             cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
         }
-        val outer = JPanel().apply {
+        val outer = object : JPanel() {
+            override fun getMaximumSize(): Dimension {
+                val maxW = availableWidth()
+                return Dimension(if (maxW > 10) maxW else Int.MAX_VALUE, preferredSize.height)
+            }
+        }.apply {
             layout = BoxLayout(this, BoxLayout.X_AXIS)
             isOpaque = false
-            add(leftBar)
+            alignmentX = Component.LEFT_ALIGNMENT
+            add(container)
             add(Box.createHorizontalGlue())
         }
         return outer
@@ -694,7 +807,9 @@ class ToolRowFactory(
      * @param streaming 流式接收中时传 true，展开标题显示"思考中..."
      */
     /** @param textAreaRef 用于外部获取内部 JTextArea 引用，避免递归查找 */
-    fun thinkingRow(content: String, initiallyExpanded: Boolean = false, streaming: Boolean = false, textAreaRef: java.util.concurrent.atomic.AtomicReference<JTextArea>? = null): JPanel {
+    fun thinkingRow(content: String, initiallyExpanded: Boolean = false, streaming: Boolean = false,
+                     textAreaRef: java.util.concurrent.atomic.AtomicReference<JTextArea>? = null,
+                     headerLabelRef: java.util.concurrent.atomic.AtomicReference<JLabel>? = null): JPanel {
         val summary = content.lines().take(2).joinToString(" ").take(ChatTheme.THINKING_PREVIEW_MAX_CHARS)
             .let { if (content.length > ChatTheme.THINKING_PREVIEW_MAX_CHARS) "$it…" else it }
 
@@ -712,6 +827,7 @@ class ToolRowFactory(
             font = thinkFontItalic
             foreground = ChatTheme.textMuted
         }
+        headerLabelRef?.set(headerLabel)
 
         // 自测量 textArea：只创建一次，通过 visibility 切换
         val textArea = object : JTextArea(content) {
@@ -771,7 +887,10 @@ class ToolRowFactory(
     /** 外层行面板：X 轴 BoxLayout，不透明，统一间距，左对齐 */
     /** 外层行面板：X 轴 BoxLayout，hug content 高度（同 ChatBubble 不拉伸策略） */
     private fun outerRow(): JPanel = object : JPanel() {
-        override fun getMaximumSize(): Dimension = Dimension(Int.MAX_VALUE, preferredSize.height)
+        override fun getMaximumSize(): Dimension {
+            val maxW = availableWidth()
+            return Dimension(if (maxW > 10) maxW else Int.MAX_VALUE, preferredSize.height)
+        }
     }.apply {
         layout = BoxLayout(this, BoxLayout.X_AXIS)
         isOpaque = false

@@ -18,9 +18,11 @@ object SessionStore {
                           val timestamp: Long = System.currentTimeMillis(),
                           val id: Long = 0, val version: Int = 0,
                           val inputTokens: Int = 0, val outputTokens: Int = 0,
-                          val images: List<ImageDTO>? = null)
+                          val images: List<ImageDTO>? = null,
+                          val chips: List<ChipDTO>? = null)
     data class ToolCallDTO(val id: String, val name: String, val arguments: String)
     data class ImageDTO(val mediaType: String, val data: String)
+    data class ChipDTO(val label: String, val fullPath: String, val startLine: Int = 0, val endLine: Int = 0)
     data class TokenStatsDTO(val totalInput: Long, val totalOutput: Long, val roundCount: Int,
                              val perRound: List<RoundTokenDTO>)
     data class RoundTokenDTO(val inputTokens: Int, val outputTokens: Int, val timestamp: Long)
@@ -39,7 +41,7 @@ object SessionStore {
 
     @Synchronized
     fun save(projectBasePath: String, id: String, name: String, messages: List<AgentMessage>,
-             tokenStats: TokenStatsDTO? = null) {
+             tokenStats: TokenStatsDTO? = null, chips: Map<Long, List<ChipDTO>> = emptyMap()) {
         val target = File(dir(projectBasePath), "$id.json")
         // 保留原始创建时间：若已有会话文件则沿用其 createdAt，避免每次保存覆盖
         val existingCreatedAt = try {
@@ -60,7 +62,8 @@ object SessionStore {
                     version = msg.version,
                     inputTokens = msg.inputTokens,
                     outputTokens = msg.outputTokens,
-                    images = msg.images?.map { ImageDTO(it.mediaType, it.data) }
+                    images = msg.images?.map { ImageDTO(it.mediaType, it.data) },
+                    chips = chips[msg.id]
                 )
             },
             tokenStats = tokenStats

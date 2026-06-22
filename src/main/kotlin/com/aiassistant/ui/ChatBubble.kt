@@ -78,18 +78,19 @@ class ChatBubble(
         if (inputTokens <= 0 && outputTokens <= 0) return
         tokenLabel = JLabel(buildTokenText(inputTokens, outputTokens)).apply {
             font = ChatTheme.metaFont.deriveFont(8f)
-            foreground = Color(textMutedColor.red, textMutedColor.green, textMutedColor.blue, 128)
+            foreground = Color(textMutedColor.red, textMutedColor.green, textMutedColor.blue, 96)
+            isOpaque = false
             border = JBUI.Borders.empty(0, 0, 2, 4)
             isVisible = false
         }
-        val south = JPanel(FlowLayout(FlowLayout.RIGHT, 0, 0)).apply { isOpaque = false; add(tokenLabel) }
+        val south = JPanel(FlowLayout(FlowLayout.RIGHT, 0, 0)).apply { isOpaque = false; background = null; add(tokenLabel) }
         add(south, BorderLayout.SOUTH)
     }
 
     private fun buildTokenText(inputTokens: Int, outputTokens: Int): String {
         val parts = mutableListOf<String>()
-        if (inputTokens > 0) parts.add("←${formatTokens(inputTokens)}")
-        if (outputTokens > 0) parts.add("→${formatTokens(outputTokens)}")
+        if (inputTokens > 0) parts.add("↑${formatTokens(inputTokens)}")
+        if (outputTokens > 0) parts.add("↓${formatTokens(outputTokens)}")
         return parts.joinToString(" ")
     }
 
@@ -175,7 +176,9 @@ class ChatBubble(
             val root = pane.ui.getRootView(pane) ?: return budget to JBUI.scale(24)
             // 1) 自然首选宽 → hug（封顶 budget）
             root.setSize(budget.toFloat(), Short.MAX_VALUE.toFloat())
-            val naturalW = ceil(root.getPreferredSpan(View.X_AXIS).toDouble()).toInt() + JBUI.scale(2)
+            // +16px 缓冲：emoji (👋🙂等) 在 HTML renderer 中用 fallback font 渲染，
+            // 宽度可能大于 View.getPreferredSpan 的估值，缓冲不够会导致文字被挤出气泡右边界裁切
+            val naturalW = ceil(root.getPreferredSpan(View.X_AXIS).toDouble()).toInt() + JBUI.scale(16)
             val w = maxOf(minOf(naturalW, budget), JBUI.scale(40))
             // 2) 用确定宽度重新量高度，避免单行/换行下高度被低估导致纵向裁字。
             //    关键：用 getPreferredSpan（诚实渲染高），而非 getMinimumSpan（会偏小→裁字）。

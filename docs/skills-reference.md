@@ -1,6 +1,6 @@
 # Skills 参考手册
 
-> 生成日期: 2025-06-19 | 总计: 95+ skills
+> 生成日期: 2025-06-19 | 更新日期: 2026-06-22 | 总计: 101+ skills
 
 ---
 
@@ -207,7 +207,22 @@ PHP 开发工具。
 
 ---
 
-## 六、Claude Code 内置 Skills（8 个）
+## 六、Ponytail Skills（6 个）
+
+"懒惰高级开发"模式——强制最简方案。质疑需求、用标准库、删代码而非加代码。
+
+| Skill | 描述 | 触发场景 |
+|-------|------|---------|
+| `/ponytail` | 强制最简可行方案。质疑需求是否存在（YAGNI）、标准库优先、原生平台优先、一行代码优先。支持 lite/full/ultra 强度 | "ponytail"、"lazy mode"、"最简方案" |
+| `/ponytail-review` | 专注过度工程的代码审查。找可删除的东西：重造的标准库、不必要的依赖、投机性抽象、死代码 | "审查过度工程"、"哪些可以删" |
+| `/ponytail-audit` | 全仓库过度工程审计。扫描整个代码库，给出可删除/简化/替换为 stdlib 的排序清单。一次性报告，不执行修改 | "审计代码库"、"找膨胀" |
+| `/ponytail-debt` | 收割所有 `ponytail:` 注释生成技术债台账。让 ponytail 刻意的捷径和延后被追踪，不会变成"以后=永不" | "ponytail 债"、"列出快捷键" |
+| `/ponytail-gain` | 显示 ponytail 的可衡量影响：更少代码、更低成本、更快速度。一次性展示，非持久模式 | "ponytail 收益"、"节省了什么" |
+| `/ponytail-help` | 所有 ponytail 模式/skills/命令的速查卡。一次性展示 | "ponytail 帮助"、"怎么用 ponytail" |
+
+---
+
+## 七、Claude Code 内置 Skills（8 个）
 
 Claude Code CLI 自带的基础功能。
 
@@ -224,7 +239,7 @@ Claude Code CLI 自带的基础功能。
 
 ---
 
-## 七、其他 Skills（6 个）
+## 八、其他 Skills（6 个）
 
 | Skill | 描述 | 触发场景 |
 |-------|------|---------|
@@ -249,6 +264,8 @@ Claude Code CLI 自带的基础功能。
 | 📋 审查方案 | `/plan-ceo-review`（战略）/ `/plan-eng-review`（架构）/ `/plan-design-review`（UI） |
 | 🚀 要发布 | `/ship` → `/land-and-deploy` |
 | 🔍 代码审查 | `/review` 或 `/code-review` |
+| ✂️ 过度工程/简化 | `/ponytail-review` 或 `/ponytail-audit` |
+| 📉 技术债追踪 | `/ponytail-debt` |
 | ✅ 开发完成 | `/verification-before-completion` → `/requesting-code-review` |
 | 💾 中断/恢复 | `/context-save` → `/context-restore` |
 | 🎨 设计工作 | `/design-consultation` → `/design-shotgun` → `/design-review` |

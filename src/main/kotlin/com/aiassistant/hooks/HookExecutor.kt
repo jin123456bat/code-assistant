@@ -10,14 +10,14 @@ class HookExecutor(private val mcpManager: com.aiassistant.mcp.McpManager?) {
 
     fun execute(entries: List<HookEntry>, context: HookEventContext): List<HookDecision> {
         if (entries.isEmpty()) return emptyList()
-        val decisions = java.util.concurrent.ConcurrentLinkedQueue<HookDecision?>()
+        val decisions = java.util.Collections.synchronizedList(mutableListOf<HookDecision>())
         val latch = CountDownLatch(entries.size)
         val threads = mutableListOf<Thread>()
 
         for (entry in entries) {
             threads.add(Thread({
-                try { decisions.add(executeOne(entry, context)) }
-                catch (_: Exception) { decisions.add(null) }
+                try { executeOne(entry, context)?.let { decisions.add(it) } }
+                catch (_: Exception) { }
                 finally { latch.countDown() }
             }, "hook-${entry.type}").apply { isDaemon = true; start() })
         }
@@ -26,7 +26,7 @@ class HookExecutor(private val mcpManager: com.aiassistant.mcp.McpManager?) {
         if (!allDone) {
             threads.forEach { it.interrupt() }
         }
-        return decisions.toList().filterNotNull()
+        return decisions.toList()
     }
 
     private fun executeOne(entry: HookEntry, context: HookEventContext): HookDecision? {

@@ -1,8 +1,8 @@
 package com.aiassistant.review
 
-import com.aiassistant.AnthropicMessage
 import com.aiassistant.AnthropicSdkClient
 import com.aiassistant.AnthropicToolDef
+import com.aiassistant.UserMessage
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
@@ -41,7 +41,7 @@ class ReviewEngine(private val projectBasePath: String?) {
             client.createStreaming(
                 model = com.aiassistant.AppSettingsService.getInstance().getModel() ?: "deepseek-v4-pro",
                 systemPrompt = "",
-                messages = listOf(AnthropicMessage("user", prompt)),
+                messages = listOf(UserMessage(prompt)),
                 tools = emptyList(),
                 thinkingEnabled = false,
                 callback = object : AnthropicSdkClient.Callback {

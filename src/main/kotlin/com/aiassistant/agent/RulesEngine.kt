@@ -1,4 +1,5 @@
 package com.aiassistant.agent
+import com.aiassistant.AppLogger
 
 import java.io.File
 
@@ -28,9 +29,9 @@ object RulesEngine {
                     val content = file.readText()
                     val rule = parseRule(file.nameWithoutExtension, content)
                     if (rule != null) rules.add(rule)
-                } catch (_: Exception) {}
+                } catch (e: Exception) { AppLogger.warn("RulesEngine: 解析 ${file.name} 失败: ${e.message}") }
             }
-        } catch (_: Exception) {}
+        } catch (e: Exception) { AppLogger.warn("RulesEngine: 扫描 rules 目录失败: ${e.message}") }
     }
 
     private fun parseRule(name: String, content: String): AgentContext.RuleDef? {

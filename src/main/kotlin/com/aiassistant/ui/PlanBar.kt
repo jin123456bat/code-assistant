@@ -29,9 +29,10 @@ import javax.swing.SwingUtilities
  *   计划已批准，无任务 → 标题 +"已批准"+ 点击展开看全文
  *   有任务 → 任务列表 + 进度条 + 点击展开
  */
-class PlanBar : JPanel(BorderLayout()) {
+class PlanBar(private val availableWidth: () -> Int) : JPanel(BorderLayout()) {
 
     private var expanded = false
+    private var isAttached = false
 
     // 外部注入的状态（由 ChatToolWindow 在回调中更新）
     private var planMode: Boolean = false
@@ -133,10 +134,25 @@ class PlanBar : JPanel(BorderLayout()) {
                 overlay = content
                 val rootPane = SwingUtilities.getRootPane(this)
                 if (rootPane != null) {
+                    val maxW = availableWidth() + 20  // viewport 宽度 + 少许 padding
                     val pt = SwingUtilities.convertPoint(this, 0, height, rootPane.layeredPane)
-                    content.setBounds(pt.x, pt.y, rootPane.layeredPane.width, minOf(content.preferredSize.height, ChatTheme.PLAN_STEP_MAX_H))
+                    content.setBounds(pt.x, pt.y, minOf(rootPane.layeredPane.width, maxW), minOf(content.preferredSize.height, ChatTheme.PLAN_STEP_MAX_H))
                     rootPane.layeredPane.add(content, JLayeredPane.POPUP_LAYER)
                     rootPane.layeredPane.revalidate(); rootPane.layeredPane.repaint()
+
+                    // 窗口 resize 时重新定位 overlay
+                    if (!isAttached) {
+                        isAttached = true
+                        rootPane.addComponentListener(object : java.awt.event.ComponentAdapter() {
+                            override fun componentResized(e: java.awt.event.ComponentEvent) {
+                                if (overlay != null) {
+                                    val w = minOf(rootPane.layeredPane.width, availableWidth() + 20)
+                                    overlay!!.setBounds(pt.x, pt.y, w, minOf(overlay!!.preferredSize.height, ChatTheme.PLAN_STEP_MAX_H))
+                                }
+                            }
+                        })
+                    }
+
                     overlayClickListener?.let { rootPane.layeredPane.removeMouseListener(it) }
                     overlayClickListener = object : MouseAdapter() {
                         override fun mouseClicked(e: MouseEvent) {
@@ -306,11 +322,15 @@ class PlanBar : JPanel(BorderLayout()) {
             maximumSize = Dimension(Int.MAX_VALUE, ChatTheme.PLAN_STEP_ROW_H)
         }
         val (marker, markerColor) = when (task.status) {
-            TaskStatus.COMPLETED -> "☑" to ChatTheme.doneCheck
-            TaskStatus.IN_PROGRESS -> "◉" to ChatTheme.toolBar
-            TaskStatus.PENDING -> "☐" to ChatTheme.textSecondary
+            TaskStatus.COMPLETED -> "✓" to ChatTheme.doneCheck       // ✓
+            TaskStatus.IN_PROGRESS -> "●" to ChatTheme.toolBar      // ●
+            TaskStatus.PENDING -> "○" to ChatTheme.textSecondary    // ○
         }
-        val markerLabel = JLabel("$marker  ").apply { font = ChatTheme.metaFont; foreground = markerColor }
+        val markerLabel = JLabel(marker).apply {
+            font = ChatTheme.metaFont
+            foreground = markerColor
+            border = JBUI.Borders.empty(0, 0, 0, 4)
+        }
         row.add(markerLabel)
         taskMarkerLabels[task.id] = markerLabel
 
@@ -319,8 +339,10 @@ class PlanBar : JPanel(BorderLayout()) {
             TaskStatus.IN_PROGRESS -> ChatTheme.textPrimary to Font.BOLD
             TaskStatus.PENDING -> ChatTheme.textSecondary to Font.PLAIN
         }
+        val labelFont = if (nameStyle == Font.BOLD) ChatTheme.metaFont.deriveFont(Font.BOLD) else ChatTheme.metaFont
         val nameLabel = JLabel("#${task.id} ${task.subject}").apply {
-            font = ChatTheme.metaFont.deriveFont(nameStyle.toFloat()); foreground = nameColor
+            font = labelFont
+            foreground = nameColor
         }
         row.add(nameLabel)
         taskNameLabels[task.id] = nameLabel
@@ -364,21 +386,19 @@ class PlanBar : JPanel(BorderLayout()) {
             prevTaskVersions[task.id] = TaskSnapshot(task.status, task.result)
 
             val (marker, markerColor) = when (task.status) {
-                TaskStatus.COMPLETED -> "☑" to ChatTheme.doneCheck
-                TaskStatus.IN_PROGRESS -> "◉" to ChatTheme.toolBar
-                TaskStatus.PENDING -> "☐" to ChatTheme.textSecondary
+                TaskStatus.COMPLETED -> "✓" to ChatTheme.doneCheck
+                TaskStatus.IN_PROGRESS -> "●" to ChatTheme.toolBar
+                TaskStatus.PENDING -> "○" to ChatTheme.textSecondary
             }
-            taskMarkerLabels[task.id]?.let { it.text = "$marker  "; it.foreground = markerColor }
+            taskMarkerLabels[task.id]?.let { it.text = marker; it.foreground = markerColor }
 
             val (nameColor, nameStyle) = when (task.status) {
                 TaskStatus.COMPLETED -> ChatTheme.textMuted to Font.PLAIN
                 TaskStatus.IN_PROGRESS -> ChatTheme.textPrimary to Font.BOLD
                 TaskStatus.PENDING -> ChatTheme.textSecondary to Font.PLAIN
             }
-            taskNameLabels[task.id]?.let {
-                it.font = ChatTheme.metaFont.deriveFont(nameStyle.toFloat())
-                it.foreground = nameColor
-            }
+            val lblFont = if (nameStyle == Font.BOLD) ChatTheme.metaFont.deriveFont(Font.BOLD) else ChatTheme.metaFont
+            taskNameLabels[task.id]?.let { it.font = lblFont; it.foreground = nameColor }
         }
 
         // 任务 ID 集合变化（新增/删除/替换）→ 全量重建

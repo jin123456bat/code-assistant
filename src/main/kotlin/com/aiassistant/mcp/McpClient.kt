@@ -1,4 +1,5 @@
 package com.aiassistant.mcp
+import com.aiassistant.AppLogger
 
 import com.aiassistant.agent.AgentTool
 import com.aiassistant.agent.ToolParameter
@@ -111,7 +112,7 @@ class McpClient(private val config: McpServerConfig) {
                             }
                         }
                     }
-                } catch (_: Exception) {}
+                } catch (e: Exception) { AppLogger.warn("MCP[${config.name}]: stdio 读取循环异常: ${e.message}") }
             }
 
             val (initId, initRequest) = buildJsonRpc("initialize", """
