@@ -1,8 +1,10 @@
 package com.aiassistant.completion
 
 import com.intellij.openapi.application.ReadAction
+import com.intellij.openapi.editor.Document
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.psi.PsiDocumentManager
 import com.intellij.psi.PsiFile
 
@@ -34,11 +36,20 @@ class CompletionContextCollector {
     }
 
     fun collect(editor: Editor, project: Project): CompletionContext {
-        val document = editor.document
-        val caretOffset = editor.caretModel.offset
-        val virtualFile = com.intellij.openapi.fileEditor.FileDocumentManager.getInstance().getFile(document)
-        val fileName = virtualFile?.name ?: "unknown"
-        val language = getLanguageFromExtension(virtualFile?.extension ?: "")
+        // editor model 访问必须在 EDT 或 ReadAction 中执行
+        val snapshot = ReadAction.compute<Snapshot, Throwable> {
+            val doc = editor.document
+            val offset = editor.caretModel.offset
+            val vf = com.intellij.openapi.fileEditor.FileDocumentManager.getInstance().getFile(doc)
+            val name = vf?.name ?: "unknown"
+            val lang = getLanguageFromExtension(vf?.extension ?: "")
+            Snapshot(doc, offset, name, lang, vf)
+        }
+        val document = snapshot.document
+        val caretOffset = snapshot.caretOffset
+        val fileName = snapshot.fileName
+        val language = snapshot.language
+        val virtualFile = snapshot.virtualFile
 
         val text = document.immutableCharSequence
 
@@ -110,4 +121,13 @@ class CompletionContextCollector {
         "kt", "kts" -> "kotlin"
         else -> ext.lowercase().ifBlank { "text" }
     }
+
+    /** ReadAction 中采集的 editor snapshot，避免跨线程访问 editor model */
+    private data class Snapshot(
+        val document: Document,
+        val caretOffset: Int,
+        val fileName: String,
+        val language: String,
+        val virtualFile: VirtualFile?
+    )
 }

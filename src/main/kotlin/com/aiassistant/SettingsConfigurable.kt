@@ -243,7 +243,7 @@ class SettingsConfigurable : Configurable {
         // ---- 统计卡片 ----
         gbc.gridy = 21; gbc.gridx = 0; gbc.gridwidth = 2
         gbc.insets = JBUI.insets(12, 16, 4, 8)
-        contentPanel.add(JLabel("<html><b>补全统计</b></html>"), gbc)
+        contentPanel.add(JLabel("<html><b>" + AiAssistantBundle.message("settings.completion.stats") + "</b></html>"), gbc)
 
         gbc.gridy = 22; gbc.insets = JBUI.insets(2, 16, 4, 8)
         contentPanel.add(completionStatsLabel, gbc)
@@ -252,7 +252,7 @@ class SettingsConfigurable : Configurable {
         gbc.insets = JBUI.insets(4, 16, 4, 8)
         gbc.fill = GridBagConstraints.NONE
         gbc.anchor = GridBagConstraints.WEST
-        val resetStatsBtn = JButton("重置统计")
+        val resetStatsBtn = JButton(AiAssistantBundle.message("settings.reset.stats"))
         resetStatsBtn.addActionListener {
             CompletionStats.reset()
             refreshCompletionStatsUI()

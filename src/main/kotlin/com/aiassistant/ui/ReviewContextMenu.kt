@@ -1,5 +1,6 @@
 package com.aiassistant.ui
 
+import com.aiassistant.AiAssistantBundle
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
@@ -93,8 +94,8 @@ class ReviewSelectedCodeAction : AnAction() {
             handler(file.path, code)
         } else {
             // 回退：发送到聊天窗口
-            val msg = if (code.isNotBlank()) "请审查以下选中代码（${file.name}）：\n```\n${code.take(3000)}\n```"
-            else "请审查文件 ${file.name}"
+            val msg = if (code.isNotBlank()) AiAssistantBundle.message("review.code.prompt", file.name, code.take(3000))
+            else AiAssistantBundle.message("review.file.prompt", file.name)
             com.aiassistant.ChatToolWindow.sendMessageToChat(project, msg)
         }
     }
@@ -112,7 +113,7 @@ class SecurityReviewFileAction : AnAction() {
         if (handler != null) {
             handler(file.path)
         } else {
-            com.aiassistant.ChatToolWindow.sendMessageToChat(project, "请对 ${file.name} 进行安全审查，检查注入向量、密钥泄漏、权限缺陷、不安全 API 和依赖漏洞。")
+            com.aiassistant.ChatToolWindow.sendMessageToChat(project, AiAssistantBundle.message("security.review.prompt", file.name))
         }
     }
 
@@ -132,8 +133,8 @@ class FixSelectedCodeAction : AnAction() {
             handler(file.path, code)
         } else {
             val msg = if (code.isNotBlank())
-                "请修复以下代码（${file.name}）：\n```\n${code.take(3000)}\n```"
-            else "请检查并修复 ${file.name} 中的问题"
+                AiAssistantBundle.message("fix.code.prompt", file.name, code.take(3000))
+            else AiAssistantBundle.message("fix.file.prompt", file.name)
             com.aiassistant.ChatToolWindow.sendMessageToChat(project, msg)
         }
     }
@@ -154,8 +155,8 @@ class ExplainSelectedCodeAction : AnAction() {
             handler(file.path, code)
         } else {
             val msg = if (code.isNotBlank())
-                "请解释以下代码（${file.name}）：\n```\n${code.take(3000)}\n```"
-            else "请解释 ${file.name} 的功能和设计思路"
+                AiAssistantBundle.message("explain.code.prompt", file.name, code.take(3000))
+            else AiAssistantBundle.message("explain.file.prompt", file.name)
             com.aiassistant.ChatToolWindow.sendMessageToChat(project, msg)
         }
     }
@@ -176,8 +177,8 @@ class OptimizeSelectedCodeAction : AnAction() {
             handler(file.path, code)
         } else {
             val msg = if (code.isNotBlank())
-                "请优化以下代码，提升可读性和性能（${file.name}）：\n```\n${code.take(3000)}\n```"
-            else "请分析 ${file.name} 并给出优化建议"
+                AiAssistantBundle.message("optimize.code.prompt", file.name, code.take(3000))
+            else AiAssistantBundle.message("optimize.file.prompt", file.name)
             com.aiassistant.ChatToolWindow.sendMessageToChat(project, msg)
         }
     }
@@ -198,8 +199,8 @@ class GenerateCommentAction : AnAction() {
             handler(file.path, code)
         } else {
             val msg = if (code.isNotBlank())
-                "请为以下代码生成中文注释（${file.name}）：\n```\n${code.take(3000)}\n```"
-            else "请为 ${file.name} 生成完整的类/方法注释"
+                AiAssistantBundle.message("comment.code.prompt", file.name, code.take(3000))
+            else AiAssistantBundle.message("comment.file.prompt", file.name)
             com.aiassistant.ChatToolWindow.sendMessageToChat(project, msg)
         }
     }
@@ -220,8 +221,8 @@ class GenerateTestAction : AnAction() {
             handler(file.path, code)
         } else {
             val msg = if (code.isNotBlank())
-                "请为以下代码生成单元测试（${file.name}）：\n```\n${code.take(3000)}\n```"
-            else "请为 ${file.name} 生成完整的单元测试"
+                AiAssistantBundle.message("test.code.prompt", file.name, code.take(3000))
+            else AiAssistantBundle.message("test.file.prompt", file.name)
             com.aiassistant.ChatToolWindow.sendMessageToChat(project, msg)
         }
     }

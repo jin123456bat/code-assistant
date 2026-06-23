@@ -1,5 +1,6 @@
 package com.aiassistant.ui
 
+import com.aiassistant.AiAssistantBundle
 import com.aiassistant.agent.AgentContext
 import java.time.Instant
 import java.time.ZoneId
@@ -40,12 +41,10 @@ object TokenTracker {
     }
 
     fun getTotalStats(stats: AgentContext.TokenStats): String = buildString {
-        append("总输入: ${fmt(stats.totalInput)} tokens\n")
-        append("总输出: ${fmt(stats.totalOutput)} tokens\n")
-        append("对话轮次: ${stats.roundCount}\n")
-        append("估算成本: \$")
-        append("%.4f".format((stats.totalInput * 0.14 + stats.totalOutput * 1.10) / 1_000_000))
-        append("  (DeepSeek V4)")
+        append(AiAssistantBundle.message("token.total.input", fmt(stats.totalInput)))
+        append(AiAssistantBundle.message("token.total.output", fmt(stats.totalOutput)))
+        append(AiAssistantBundle.message("token.rounds", stats.roundCount))
+        append(AiAssistantBundle.message("token.cost", "%.4f".format((stats.totalInput * 0.14 + stats.totalOutput * 1.10) / 1_000_000)))
     }
 
     private fun fmt(n: Long) = when {

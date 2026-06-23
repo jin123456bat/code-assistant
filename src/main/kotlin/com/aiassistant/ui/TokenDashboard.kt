@@ -1,5 +1,6 @@
 package com.aiassistant.ui
 
+import com.aiassistant.AiAssistantBundle
 import com.aiassistant.agent.AgentContext
 import com.intellij.util.ui.JBUI
 import java.awt.BorderLayout
@@ -16,7 +17,7 @@ import javax.swing.JTable
 /** Token 用量 Dashboard：天/周表格 + 顶部总览，模態窗口 */
 class TokenDashboard(
     private val stats: AgentContext.TokenStats
-) : JDialog(JOptionPane.getRootFrame(), "Token 用量", ModalityType.MODELESS) {
+) : JDialog(JOptionPane.getRootFrame(), AiAssistantBundle.message("token.dialog.title"), ModalityType.MODELESS) {
 
     private var mode: String = "daily"
     private val content = JPanel(BorderLayout(10, 10)).apply { border = JBUI.Borders.empty(16) }
@@ -47,13 +48,13 @@ class TokenDashboard(
         content.add(totalLabel, BorderLayout.NORTH)
 
         val togglePanel = JPanel(FlowLayout(FlowLayout.LEFT, 8, 4))
-        val dailyBtn = JButton("按天").apply { addActionListener { mode = "daily"; refreshContent() } }
-        val weeklyBtn = JButton("按周").apply { addActionListener { mode = "weekly"; refreshContent() } }
+        val dailyBtn = JButton(AiAssistantBundle.message("token.button.day")).apply { addActionListener { mode = "daily"; refreshContent() } }
+        val weeklyBtn = JButton(AiAssistantBundle.message("token.button.week")).apply { addActionListener { mode = "weekly"; refreshContent() } }
         togglePanel.add(dailyBtn); togglePanel.add(weeklyBtn)
         content.add(togglePanel, BorderLayout.CENTER)
 
         val summaries = if (mode == "weekly") TokenTracker.getWeeklyStats(stats) else TokenTracker.getDailyStats(stats)
-        val columns = arrayOf("日期", "输入", "输出", "轮次")
+        val columns = arrayOf(AiAssistantBundle.message("token.column.date"), AiAssistantBundle.message("token.column.input"), AiAssistantBundle.message("token.column.output"), AiAssistantBundle.message("token.column.rounds"))
         val data = summaries.map { arrayOf(it.date, fmt(it.inputTokens), fmt(it.outputTokens), it.rounds.toString()) }.toTypedArray()
         val table = JTable(data, columns).apply {
             setFillsViewportHeight(true)

@@ -147,7 +147,7 @@ class AiCompletionProvider : InlineCompletionProvider {
         val project = editor.project
 
         if (project == null || !settings.isCompletionEnabled()) {
-            return InlineCompletionSuggestion.Companion.empty()
+            return emptySuggestion()
         }
 
         // 上下文采集
@@ -194,11 +194,11 @@ class AiCompletionProvider : InlineCompletionProvider {
                 fimClient.complete(prompt, suffix)
             } catch (e: Exception) {
                 // 网络错误等异常静默返回空建议，不影响用户正常输入
-                return InlineCompletionSuggestion.Companion.empty()
+                return emptySuggestion()
             }
 
             if (response == null || response.choices.isNullOrEmpty()) {
-                return InlineCompletionSuggestion.Companion.empty()
+                return emptySuggestion()
             }
 
             candidates = CompletionPostProcessor.process(response.choices, context.prefix, context.suffix)
@@ -214,7 +214,7 @@ class AiCompletionProvider : InlineCompletionProvider {
         }
 
         if (candidates.isEmpty()) {
-            return InlineCompletionSuggestion.Companion.empty()
+            return emptySuggestion()
         }
 
         // 构建补全 Flow：将每个候选文本包装为 InlineCompletionGrayTextElement
@@ -224,11 +224,8 @@ class AiCompletionProvider : InlineCompletionProvider {
             }
         }
 
-        // withFlow 接受 suspend FlowCollector<InlineCompletionElement>.() -> Unit（无参扩展 lambda）
-        return InlineCompletionSuggestion.Companion.withFlow {
-            elementsFlow.collect { element ->
-                emit(element)
-            }
+        return buildSuggestion {
+            elementsFlow.collect { element -> emit(element) }
         }
     }
 
@@ -249,5 +246,26 @@ class AiCompletionProvider : InlineCompletionProvider {
     /** 取消进行中的 FIM 请求 */
     fun cancelPendingRequest() {
         fimClient.cancel()
+    }
+
+    /**
+     * 跨 IntelliJ 版本兼容的 empty() 调用。
+     * 2025.1+ 移除了 InlineCompletionSuggestion.Companion.empty()，回退到反射。
+     */
+    private fun emptySuggestion(): InlineCompletionSuggestion {
+        try {
+            return InlineCompletionSuggestion.Companion.empty()
+        } catch (_: NoSuchMethodError) {
+            try {
+                val companion = InlineCompletionSuggestion::class.java
+                    .getDeclaredField("Companion").apply { isAccessible = true }.get(null)
+                val method = companion.javaClass.getMethod("empty")
+                @Suppress("UNCHECKED_CAST")
+                return method.invoke(companion) as InlineCompletionSuggestion
+            } catch (e: Exception) {
+                // 最后的兜底：返回空 flow 建议
+                return InlineCompletionSuggestion.Companion.withFlow { }
+            }
+        }
     }
 }

@@ -12,6 +12,7 @@ import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.vcs.VcsDataKeys
+import com.intellij.openapi.vcs.changes.Change
 import com.intellij.openapi.vcs.changes.ChangeListManager
 import com.intellij.ui.EditorTextField
 import com.aiassistant.ui.DiffKind
@@ -38,7 +39,6 @@ class GenerateCommitAction : AnAction() {
         } ?: emptyList()
         val hasCommitControl = e.getData(VcsDataKeys.COMMIT_MESSAGE_CONTROL) != null
 
-        // 有变更即可见；有 commit 控件时可用
         e.presentation.isVisible = changes.isNotEmpty()
         e.presentation.isEnabled = hasCommitControl && !isGenerating
         if (isGenerating) e.presentation.text = AiAssistantBundle.message("action.generate.progress")
@@ -67,6 +67,9 @@ class GenerateCommitAction : AnAction() {
             Messages.showWarningDialog(project, AiAssistantBundle.message("action.generate.setfailed"), "Code Assistant")
             return
         }
+        // 通过反射从 CheckinProjectPanel 拿用户勾选的文件（该类在 vcs-impl，不可编译期引用）
+        val selectedChanges = getCheckedChanges(controlComponent)
+        if (selectedChanges.isEmpty()) return
         val editor = findEditorField(controlComponent) ?: run {
             Messages.showWarningDialog(project, AiAssistantBundle.message("action.generate.setfailed"), "Code Assistant")
             return
@@ -78,7 +81,7 @@ class GenerateCommitAction : AnAction() {
             override fun run(indicator: ProgressIndicator) {
                 val app = ApplicationManager.getApplication()
                 try {
-                    val diffText = buildDiff(project)
+                    val diffText = buildDiff(project, selectedChanges)
                     if (diffText.isBlank()) {
                         showNotification(project, AiAssistantBundle.message("action.generate.nochanges"))
                         return
@@ -101,6 +104,10 @@ class GenerateCommitAction : AnAction() {
                         showNotification(project, AiAssistantBundle.message("action.generate.failed"))
                         return
                     }
+                    // ponytail: 流式完成后兜底覆盖，防止 invokeLater 异步插入丢失内容
+                    app.invokeAndWait {
+                        app.runWriteAction { editor.document?.setText(message) }
+                    }
                 } catch (ex: Exception) {
                     showNotification(project, ex.message ?: "Unknown error")
                 } finally {
@@ -110,48 +117,55 @@ class GenerateCommitAction : AnAction() {
         })
     }
 
-    private fun buildDiff(project: Project): String {
+    /**
+     * 只对用户在 IDEA 提交对话框中勾选的文件生成 diff。
+     * 优先尝试 git diff（更准确的 unified diff），失败时降级到 ContentRevision 方案。
+     */
+    private fun buildDiff(project: Project, changes: List<Change>): String {
+        if (changes.isEmpty()) return ""
+
         val basePath = project.basePath
-        if (basePath != null) {
-            val stagedDiff = runGitCommand(basePath, "diff", "--staged")
-            val unstagedDiff = if (stagedDiff.isBlank()) runGitCommand(basePath, "diff") else ""
+        // 提取勾选文件的相对路径
+        val relativePaths = changes.mapNotNull { change ->
+            val vf = change.afterRevision?.file ?: change.beforeRevision?.file ?: return@mapNotNull null
+            val abs = vf.path
+            if (basePath != null && abs.startsWith(basePath)) abs.removePrefix(basePath).removePrefix("/") else abs
+        }
+
+        if (basePath != null && relativePaths.isNotEmpty()) {
+            // 尝试 git diff --staged，只针对勾选文件
+            val pathArgs = relativePaths.toTypedArray()
+            val stagedDiff = runGitCommand(basePath, "diff", "--staged", "--", *pathArgs)
+            val unstagedDiff = if (stagedDiff.isBlank()) {
+                runGitCommand(basePath, "diff", "--", *pathArgs)
+            } else ""
 
             val diffContent = when {
                 stagedDiff.isNotBlank() -> stagedDiff
                 unstagedDiff.isNotBlank() -> unstagedDiff
-                else -> buildSimpleDiff(project)
+                else -> ""
             }
-            if (diffContent.isBlank()) return ""
 
-            val fileList = if (stagedDiff.isNotBlank()) {
-                runGitCommand(basePath, "diff", "--staged", "--name-only")
-            } else {
-                runGitCommand(basePath, "diff", "--name-only")
-            }
-            val stat = if (stagedDiff.isNotBlank()) {
-                runGitCommand(basePath, "diff", "--staged", "--stat")
-            } else {
-                runGitCommand(basePath, "diff", "--stat")
-            }
-            val recentCommits = runGitCommand(basePath, "log", "--oneline", "-5")
+            if (diffContent.isNotBlank()) {
+                val fileList = relativePaths.joinToString("\n") { "  - $it" }
+                val stat = if (stagedDiff.isNotBlank()) {
+                    runGitCommand(basePath, "diff", "--staged", "--stat", "--", *pathArgs)
+                } else {
+                    runGitCommand(basePath, "diff", "--stat", "--", *pathArgs)
+                }
+                val recentCommits = runGitCommand(basePath, "log", "--oneline", "-5")
 
-            return buildString {
-                if (fileList.isNotBlank()) {
-                    append("Changed files:\n")
-                    fileList.lines().forEach { append("  - $it\n") }
-                    append("\n")
-                }
-                if (stat.isNotBlank()) {
-                    append("Changes summary:\n$stat\n\n")
-                }
-                append("Git diff:\n$diffContent")
-                if (recentCommits.isNotBlank()) {
-                    append("\n\nRecent commits for style reference:\n$recentCommits")
-                }
-            }.take(50000)
+                return buildString {
+                    append("Changed files:\n$fileList\n\n")
+                    if (stat.isNotBlank()) append("Changes summary:\n$stat\n\n")
+                    append("Git diff:\n$diffContent")
+                    if (recentCommits.isNotBlank()) append("\n\nRecent commits for style reference:\n$recentCommits")
+                }.take(50000)
+            }
         }
 
-        return buildSimpleDiff(project)
+        // git diff 无结果（文件未 staged，或 ContentRevision 才能访问），降级到 IntelliJ API
+        return buildSimpleDiffForChanges(changes)
     }
 
     private fun runGitCommand(basePath: String, vararg args: String): String {
@@ -172,11 +186,10 @@ class GenerateCommitAction : AnAction() {
     }
 
     /**
-     * 使用 [SimpleDiff]（Myers LCS 算法）生成真正的 unified diff，
-     * 替代原来只显示文件首尾行、LLM 无法判断实际变更的伪 diff。
+     * 使用 [SimpleDiff]（Myers LCS 算法）+ IntelliJ ContentRevision 生成 unified diff。
+     * 只处理传入的 [changes]，即用户在提交对话框中勾选的文件。
      */
-    private fun buildSimpleDiff(project: Project): String {
-        val changes = ChangeListManager.getInstance(project).defaultChangeList.changes
+    private fun buildSimpleDiffForChanges(changes: List<Change>): String {
         if (changes.isEmpty()) return ""
 
         return buildString {
@@ -388,7 +401,10 @@ class GenerateCommitAction : AnAction() {
                     } catch (_: Exception) { /* skip malformed SSE line */ }
                 }
             }
-            if (result.isEmpty()) return null
+            if (result.isEmpty()) {
+                AppLogger.requestFailed(200, "stream result empty — no content deltas received")
+                return null
+            }
             return result.toString()
         } catch (e: Exception) {
             AppLogger.requestFailed(0, e.message ?: "Connection failed")
@@ -396,6 +412,25 @@ class GenerateCommitAction : AnAction() {
         } finally {
             conn.disconnect()
         }
+    }
+
+    /**
+     * 通过反射从组件树中查找 CheckinProjectPanel 并拿取用户勾选的文件。
+     * CheckinProjectPanel 在 vcs-impl 模块，不可编译期引用，只能运行时反射。
+     */
+    private fun getCheckedChanges(controlComponent: Component): List<Change> {
+        var parent: Container? = controlComponent.parent
+        while (parent != null) {
+            if (parent.javaClass.name.contains("CheckinProjectPanel")) {
+                return try {
+                    val method = parent.javaClass.getMethod("getSelectedChanges")
+                    @Suppress("UNCHECKED_CAST")
+                    (method.invoke(parent) as? Collection<*>)?.filterIsInstance<Change>() ?: emptyList()
+                } catch (_: Exception) { emptyList() }
+            }
+            parent = parent.parent
+        }
+        return emptyList()
     }
 
     private fun findEditorField(component: Component): EditorTextField? {

@@ -1,5 +1,6 @@
 package com.aiassistant.ui
 
+import com.aiassistant.AiAssistantBundle
 import com.intellij.util.ui.JBUI
 import java.awt.*
 import java.awt.event.MouseAdapter
@@ -135,7 +136,7 @@ object SelectionCard {
         val checkedStates = Array(options.size) { false }
 
         // ---- 确认按钮（初始禁用，0 选时禁用）----
-        val confirmBtn = JButton("确认 (0)").apply {
+        val confirmBtn = JButton(AiAssistantBundle.message("ui.confirm.button", 0)).apply {
             font = ChatTheme.metaFont
             isEnabled = false
             cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
@@ -145,7 +146,7 @@ object SelectionCard {
         // 更新确认按钮文案 + 启用状态
         fun refreshConfirmBtn() {
             val count = checkedStates.count { it }
-            confirmBtn.text = "确认 ($count)"
+            confirmBtn.text = AiAssistantBundle.message("ui.confirm.button", count)
             confirmBtn.isEnabled = count > 0
             confirmBtn.repaint()
         }
@@ -419,7 +420,7 @@ object SelectionCard {
             isOpaque = false
             border = JBUI.Borders.empty(4, 14, 6, 10)
         }
-        confirmedRow.add(JLabel("已选择: $displayText ✓").apply {
+        confirmedRow.add(JLabel(AiAssistantBundle.message("ui.selected.label", displayText)).apply {
             font = ChatTheme.metaFont
             foreground = ChatTheme.doneCheck
         })

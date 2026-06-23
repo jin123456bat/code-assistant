@@ -197,7 +197,7 @@ class ChatToolWindow(private val project: Project) {
         font = ChatTheme.largeFont.deriveFont(18f)
         foreground = ChatTheme.codeLangFg
         cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
-        toolTipText = "新会话"
+        toolTipText = AiAssistantBundle.message("chat.tooltip.new.session")
         border = JBUI.Borders.empty(2, 6, 2, 6)
         addMouseListener(object : MouseAdapter() {
             override fun mouseClicked(e: MouseEvent) { renderedCount = 0; viewModel.clearConversation(); viewModel.messageRefChips.clear(); refChips.clear(); selectionRefChip = null; completedStreamingToolNames.clear(); rebuildChips(); planBar.updateState(false, null, null, emptyList()); syncNewMessages() }
@@ -209,7 +209,7 @@ class ChatToolWindow(private val project: Project) {
         font = ChatTheme.largeFont.deriveFont(14f)
         foreground = ChatTheme.codeLangFg
         cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
-        toolTipText = "Token 用量"
+        toolTipText = AiAssistantBundle.message("chat.tooltip.token.usage")
         border = JBUI.Borders.empty(2, 6, 2, 2)
         addMouseListener(object : MouseAdapter() {
             override fun mouseClicked(e: MouseEvent) {
@@ -223,7 +223,7 @@ class ChatToolWindow(private val project: Project) {
     private val conversationHeader = JPanel(BorderLayout()).apply {
         isOpaque = false
         border = JBUI.Borders.empty(4, 10, 4, 8)
-        add(JLabel("对话").apply {
+        add(JLabel(AiAssistantBundle.message("chat.label.conversation")).apply {
             font = ChatTheme.headerFont
             foreground = ChatTheme.headerTitleFg
         }, BorderLayout.WEST)
@@ -314,7 +314,7 @@ class ChatToolWindow(private val project: Project) {
 
     // ---- input area ----
     private val inputArea = object : JTextArea(3, 20) {
-        private val placeholder = "问点什么，或粘贴代码…"
+        private val placeholder = AiAssistantBundle.message("chat.input.placeholder")
         override fun paintComponent(g: java.awt.Graphics) {
             super.paintComponent(g)
             if (text.isEmpty() && !isFocusOwner) {
@@ -410,9 +410,9 @@ class ChatToolWindow(private val project: Project) {
     /** 文件引用芯片：仅存路径和行号，发送给 LLM 时才读取文件内容。快捷跳转使用 fullPath + startLine。 */
     data class RefChip(val label: String, val fullPath: String, val startLine: Int = 0, val endLine: Int = 0) {
         val displayName: String get() = when {
-            startLine > 0 && endLine > 0 && startLine != endLine -> "$label $startLine-$endLine"
-            startLine > 0 -> "$label $startLine"
-            else -> label
+            startLine > 0 && endLine > 0 && startLine != endLine -> "[$label:$startLine-$endLine]"
+            startLine > 0 -> "[$label:$startLine]"
+            else -> "[$label]"
         }
     }
     /** 带唯一 ID 的粘贴图片包装，用于去重和稳定删除 */
@@ -445,9 +445,9 @@ class ChatToolWindow(private val project: Project) {
             }.apply {
                 isOpaque = false
                 border = BorderFactory.createEmptyBorder(1, 6, 1, 4)
-                toolTipText = "已粘贴图片 (${img.mediaType})"
+                toolTipText = AiAssistantBundle.message("chat.tooltip.pasted.image", img.mediaType)
             }
-            chipComp.add(JLabel("图片 ${idx + 1}").apply {
+            chipComp.add(JLabel(AiAssistantBundle.message("chat.label.image", idx + 1)).apply {
                 font = ChatTheme.metaFont
                 foreground = ChatTheme.chipFg
             })
@@ -456,7 +456,7 @@ class ChatToolWindow(private val project: Project) {
                 foreground = ChatTheme.submitBtnFg
                 cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
                 border = BorderFactory.createEmptyBorder(0, 2, 0, 2)
-                toolTipText = "移除图片"
+                toolTipText = AiAssistantBundle.message("chat.tooltip.remove.image")
                 addMouseListener(object : MouseAdapter() {
                     override fun mouseClicked(e: MouseEvent) {
                         pastedImages.removeAll { it.id == imgId }
@@ -487,9 +487,9 @@ class ChatToolWindow(private val project: Project) {
             val fileName = chip.fullPath.substringAfterLast("/").ifEmpty { chip.fullPath }
             val displayText = if (chip.startLine > 0) {
                 val lineInfo = if (chip.startLine == chip.endLine || chip.endLine == 0) "${chip.startLine}" else "${chip.startLine}-${chip.endLine}"
-                "<html>$fileName <span style='color:#999'>$lineInfo</span></html>"
+                "[$fileName:$lineInfo]"
             } else {
-                fileName
+                "[$fileName]"
             }
             chipComp.add(JLabel(displayText).apply {
                 font = ChatTheme.metaFont
@@ -500,7 +500,7 @@ class ChatToolWindow(private val project: Project) {
                 foreground = ChatTheme.submitBtnFg
                 cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
                 border = BorderFactory.createEmptyBorder(0, 2, 0, 2)
-                toolTipText = "移除引用"
+                toolTipText = AiAssistantBundle.message("chat.tooltip.remove.ref")
                 addMouseListener(object : MouseAdapter() {
                     override fun mouseClicked(e: MouseEvent) {
                         if (chip === selectionRefChip) selectionRefChip = null
@@ -529,18 +529,18 @@ class ChatToolWindow(private val project: Project) {
     private fun buildRefContent(): String {
         if (refChips.isEmpty()) return ""
         return buildString {
-            append("用户引用了以下文件：\n")
+            append(AiAssistantBundle.message("chat.ref.intro"))
             for (chip in refChips) {
                 val lineInfo = when {
                     chip.startLine > 0 && chip.endLine > 0 && chip.startLine != chip.endLine ->
-                        " 第 ${chip.startLine}-${chip.endLine} 行"
+                        AiAssistantBundle.message("chat.ref.line.range", chip.startLine, chip.endLine)
                     chip.startLine > 0 ->
-                        " 第 ${chip.startLine} 行"
+                        AiAssistantBundle.message("chat.ref.line.single", chip.startLine)
                     else -> ""
                 }
                 append("- `${chip.fullPath}`$lineInfo\n")
             }
-            append("\n如需查看文件内容，请使用 read_file 工具。")
+            append(AiAssistantBundle.message("chat.ref.read.hint"))
         }
     }
 
@@ -554,8 +554,12 @@ class ChatToolWindow(private val project: Project) {
         }
         for (ref in refs) {
             val fileName = ref.fullPath.substringAfterLast('/')
-            val lineSuffix = if (ref.startLine > 0) ":$ref.startLine" else ""
-            val chipText = "📄 $fileName$lineSuffix"
+            val chipText = if (ref.startLine > 0) {
+                val lineInfo = if (ref.startLine == ref.endLine || ref.endLine == 0) "${ref.startLine}" else "${ref.startLine}-${ref.endLine}"
+                "📄 [$fileName:$lineInfo]"
+            } else {
+                "📄 [$fileName]"
+            }
             val chip = object : JLabel(chipText) {
                 override fun paintComponent(g: java.awt.Graphics) {
                     val g2 = g.create() as java.awt.Graphics2D
@@ -571,7 +575,7 @@ class ChatToolWindow(private val project: Project) {
                 border = JBUI.Borders.empty(2, 8, 2, 8)
                 isOpaque = false
                 cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
-                toolTipText = "点击打开: ${ref.fullPath}${if (ref.startLine > 0) " (第${ref.startLine}行)" else ""}"
+                toolTipText = AiAssistantBundle.message("chat.tooltip.open.file", ref.fullPath + if (ref.startLine > 0) " (${ref.startLine})" else "")
             }
             val labelRef = chip
             val file = File(project.basePath ?: "", ref.fullPath)
@@ -641,7 +645,7 @@ class ChatToolWindow(private val project: Project) {
         minimumSize = Dimension(26, 26)
         preferredSize = Dimension(26, 26)
         maximumSize = Dimension(26, 26)
-        toolTipText = "添加文件引用"
+        toolTipText = AiAssistantBundle.message("chat.tooltip.add.ref")
     }
     // hover + click 全部挂在 label 上（Swing 父子组件 mouse 事件不冒泡）
     init { plusButton.addMouseListener(object : MouseAdapter() {
@@ -694,7 +698,7 @@ class ChatToolWindow(private val project: Project) {
         horizontalAlignment = SwingConstants.CENTER
         isOpaque = false
         border = null
-        toolTipText = "发送 (Enter)"
+        toolTipText = AiAssistantBundle.message("chat.tooltip.send")
         minimumSize = Dimension(28, 28)
         preferredSize = Dimension(28, 28)
         maximumSize = Dimension(28, 28)
@@ -881,7 +885,7 @@ class ChatToolWindow(private val project: Project) {
     private fun updateGoalBar() {
         val goal = viewModel.currentGoal
         if (goal != null) {
-            goalLabel.text = "🎯 ${goal.take(80)}${if (goal.length > 80) "…" else ""} · 第 ${viewModel.goalRound} 轮"
+            goalLabel.text = AiAssistantBundle.message("chat.goal.format", goal.take(80) + if (goal.length > 80) "…" else "", viewModel.goalRound)
             goalBar.isVisible = true
         } else {
             goalBar.isVisible = false
@@ -935,7 +939,7 @@ class ChatToolWindow(private val project: Project) {
         com.aiassistant.ui.ReviewActionBridge.register(project.basePath,
             onReviewSelectedCode = { filePath, selectedCode ->
                 if (selectedCode.isNotBlank()) {
-                    viewModel.addSystemMessage("🔍 审查选中代码: $filePath")
+                    viewModel.addSystemMessage(AiAssistantBundle.message("chat.review.selected", filePath))
                     Thread({
                         val result = reviewCommands.reviewAction()
                         ApplicationManager.getApplication().invokeLater {
@@ -946,7 +950,7 @@ class ChatToolWindow(private val project: Project) {
                 }
             },
             onSecurityReviewFile = { filePath ->
-                viewModel.addSystemMessage("🔒 安全审查: $filePath")
+                viewModel.addSystemMessage(AiAssistantBundle.message("chat.security.review", filePath))
                 Thread({
                     val result = reviewCommands.securityReviewAction()
                     ApplicationManager.getApplication().invokeLater {
@@ -1108,7 +1112,7 @@ class ChatToolWindow(private val project: Project) {
             ApplicationManager.getApplication().invokeLater {
                 inputArea.isEnabled = !streaming
                 lingmaSubmitBtn.text = if (streaming) "■" else "→"
-                lingmaSubmitBtn.toolTipText = if (streaming) "停止" else "发送 (Enter)"
+                lingmaSubmitBtn.toolTipText = if (streaming) AiAssistantBundle.message("chat.tooltip.stop") else AiAssistantBundle.message("chat.tooltip.send")
                 // 发送/停止按钮样式保持一致，仅文字切换
                 if (!streaming) {
                     // 流式结束，触发一次布局失效；自测量气泡会按最终内容/宽度重测。
@@ -1327,7 +1331,7 @@ class ChatToolWindow(private val project: Project) {
 
     private fun finalizeThinkingRow() {
         thinkingCompleted = true
-        streamingThinkingHeaderLabel?.text = "思考过程"
+        streamingThinkingHeaderLabel?.text = AiAssistantBundle.message("chat.label.thinking")
         streamingThinkingRow?.revalidate()
         streamingThinkingRow?.repaint()
     }
@@ -1686,19 +1690,19 @@ class ChatToolWindow(private val project: Project) {
 
         var commandText = ""  // executeCommand 中写入，供 /goal 等命令读取清空前的内容
         val commands = listOf(
-            Cmd("/new",   "新会话") { renderedCount = 0; viewModel.clearConversation(); viewModel.messageRefChips.clear(); refChips.clear(); selectionRefChip = null; completedStreamingToolNames.clear(); rebuildChips(); planBar.updateState(false, null, null, emptyList()); updateGoalBar(); syncNewMessages() },
-            Cmd("/plan",  "创建执行计划") { sendQuick("请先调用 EnterPlanMode 进入规划模式，探索代码库并设计方案，然后调用 ExitPlanMode 提交方案供审批。") },
-            Cmd("/goal",  "设置目标自动执行") {
+            Cmd("/new",   AiAssistantBundle.message("command.new")) { renderedCount = 0; viewModel.clearConversation(); viewModel.messageRefChips.clear(); refChips.clear(); selectionRefChip = null; completedStreamingToolNames.clear(); rebuildChips(); planBar.updateState(false, null, null, emptyList()); updateGoalBar(); syncNewMessages() },
+            Cmd("/plan",  AiAssistantBundle.message("command.plan")) { sendQuick("请先调用 EnterPlanMode 进入规划模式，探索代码库并设计方案，然后调用 ExitPlanMode 提交方案供审批。") },
+            Cmd("/goal",  AiAssistantBundle.message("command.goal")) {
                 val goal = commandText.substringAfter("/goal").trim()
-                if (goal.isBlank()) { showWarning("请输入目标描述，如：/goal 所有测试通过") }
+                if (goal.isBlank()) { showWarning(AiAssistantBundle.message("chat.warning.goal.hint")) }
                 else {
                     viewModel.setGoal(goal)
                     updateGoalBar()
                     sendQuick("目标：$goal。请持续工作直到达成目标，不要提前结束。如果目标已达成，请明确告知。")
                 }
             },
-            Cmd("/init",  "初始化项目文档") { sendQuick("请分析当前项目结构，创建 CLAUDE.md 文档，包含项目概述、常用命令、架构说明和关键约定。") },
-            Cmd("/review", "审查当前改动") {
+            Cmd("/init",  AiAssistantBundle.message("command.init")) { sendQuick("请分析当前项目结构，创建 CLAUDE.md 文档，包含项目概述、常用命令、架构说明和关键约定。") },
+            Cmd("/review", AiAssistantBundle.message("command.review")) {
                 Thread({
                     val result = reviewCommands.reviewAction()
                     edt {
@@ -1722,24 +1726,24 @@ class ChatToolWindow(private val project: Project) {
                     }
                 }, "sec-review-cmd").apply { isDaemon = true }.start()
             },
-            Cmd("/test", "运行测试") {
+            Cmd("/test", AiAssistantBundle.message("command.test")) {
                 Thread({
                     val result = reviewCommands.testAction()
                     edt { addSystemMessage(result) }
                 }, "test-cmd").apply { isDaemon = true }.start()
             },
-            Cmd("/stop",    "停止生成") { viewModel.stopGeneration() },
-            Cmd("/compact", "压缩对话释放 token") {
+            Cmd("/stop",    AiAssistantBundle.message("command.stop")) { viewModel.stopGeneration() },
+            Cmd("/compact", AiAssistantBundle.message("command.compact")) {
                 val apiKey = try { AppSettingsService.getInstance().getApiKey() } catch (_: Exception) { null }
-                if (apiKey.isNullOrBlank()) { showWarning("请先配置 API Key") }
+                if (apiKey.isNullOrBlank()) { showWarning(AiAssistantBundle.message("chat.warning.configure.key")) }
                 else { viewModel.compactConversation(apiKey) }
             },
-            Cmd("/context", "Token 用量") {
+            Cmd("/context", AiAssistantBundle.message("command.context")) {
                 val stats = viewModel.getTokenStats() ?: return@Cmd
                 com.aiassistant.ui.TokenDashboard.show(stats)
             },
-            Cmd("/resume", "恢复会话") { showSessionResumePopup() },
-            Cmd("/export", "导出对话") {
+            Cmd("/resume", AiAssistantBundle.message("command.resume")) { showSessionResumePopup() },
+            Cmd("/export", AiAssistantBundle.message("command.export")) {
                 val text = viewModel.messages.joinToString("\n\n") { "[${it.role}] ${it.content.take(500)}" }
                 val file = java.io.File(project.basePath, "conversation-export-${System.currentTimeMillis()}.md")
                 file.writeText(text)
@@ -2206,10 +2210,10 @@ class ChatToolWindow(private val project: Project) {
 
         val btnRow = JPanel().apply { layout = BoxLayout(this, BoxLayout.X_AXIS); isOpaque = false }
         btnRow.add(Box.createHorizontalGlue())
-        val rejectBtn = JButton("拒绝").apply {
+        val rejectBtn = JButton(AiAssistantBundle.message("chat.button.reject")).apply {
             addActionListener { userChoice.set(false); latch.countDown(); dialog.dispose() }
         }
-        val approveBtn = JButton("批准").apply {
+        val approveBtn = JButton(AiAssistantBundle.message("chat.button.approve")).apply {
             background = ChatTheme.toolBar; foreground = java.awt.Color.WHITE
             isOpaque = true; isBorderPainted = false
             addActionListener { userChoice.set(true); latch.countDown(); dialog.dispose() }

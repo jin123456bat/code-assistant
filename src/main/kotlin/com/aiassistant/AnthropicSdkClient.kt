@@ -28,12 +28,12 @@ class AnthropicSdkClient(
                         socket.connect(java.net.InetSocketAddress(addr, 443), 5000)
                     }
                 } catch (e: Exception) {
-                    return "网络连接失败：无法连接到 $hostname:443 — ${e.message ?: "连接超时"}"
+                    return AiAssistantBundle.message("error.connection.timeout", hostname, e.message ?: "timeout")
                 }
             } catch (e: java.net.UnknownHostException) {
-                return "网络连接失败：无法解析 $hostname — 请检查 DNS 或网络设置"
+                return AiAssistantBundle.message("error.connection.dns", hostname)
             } catch (e: Exception) {
-                return "网络连接失败：${e.message?.take(80) ?: e.javaClass.simpleName}"
+                return AiAssistantBundle.message("error.connection.generic", e.message?.take(80) ?: e.javaClass.simpleName)
             }
             return null
         }

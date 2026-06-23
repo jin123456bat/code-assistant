@@ -28,9 +28,11 @@ class PhpPsiStrategy : PsiCompletionStrategy {
         val sb = StringBuilder()
 
         val element = psiFile.findElementAt(offset) ?: return null
-        val containingFunction = com.intellij.psi.util.PsiTreeUtil.getParentOfType(
-            element, Class.forName("com.jetbrains.php.lang.psi.elements.Function") as Class<com.intellij.psi.PsiElement>
-        )
+        val containingFunction = try {
+            @Suppress("UNCHECKED_CAST")
+            val funcClass = Class.forName("com.jetbrains.php.lang.psi.elements.Function") as Class<com.intellij.psi.PsiElement>
+            com.intellij.psi.util.PsiTreeUtil.getParentOfType(element, funcClass)
+        } catch (_: Exception) { null }  // PHP 插件未安装时降级
         if (containingFunction != null) {
             sb.appendLine("// ${containingFunction.text.take(500)}\n")
         } else {

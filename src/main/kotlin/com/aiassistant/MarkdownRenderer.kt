@@ -1,5 +1,6 @@
 package com.aiassistant
 
+import com.aiassistant.AiAssistantBundle
 import com.aiassistant.ui.ChatTheme
 import com.intellij.openapi.editor.colors.EditorColorsManager
 import com.intellij.ui.EditorTextField
@@ -176,7 +177,7 @@ class MarkdownRenderer {
                 font = font.deriveFont(Font.BOLD, ChatTheme.CODE_LANG_FONT_SIZE.toFloat())
                 foreground = ChatTheme.codeLangFg
             }
-            val copyButton = JButton("Copy").apply {
+            val copyButton = JButton(AiAssistantBundle.message("ui.copy")).apply {
                 font = font.deriveFont(Font.PLAIN, ChatTheme.CODE_LANG_FONT_SIZE.toFloat())
                 addActionListener {
                     val clipboard = Toolkit.getDefaultToolkit().systemClipboard
@@ -190,6 +191,14 @@ class MarkdownRenderer {
                 setOneLineMode(false)
                 isViewer = true
                 background = ChatTheme.codeEditorBg
+                // 滚轮事件转发到祖先 JScrollPane，避免鼠标在代码块上时无法上下翻阅对话
+                addMouseWheelListener { e ->
+                    var p: java.awt.Container? = parent
+                    while (p != null && p !is javax.swing.JScrollPane) { p = p.parent }
+                    if (p != null) {
+                        p.dispatchEvent(javax.swing.SwingUtilities.convertMouseEvent(this, e, p))
+                    }
+                }
             }
             editorField.document.setText(code)
 
@@ -347,7 +356,7 @@ class MarkdownRenderer {
         }
 
         private fun buildCopyButton(): JLabel {
-            val btn = JLabel("复制").apply {
+            val btn = JLabel(AiAssistantBundle.message("ui.copy")).apply {
                 font = Font(Font.SANS_SERIF, Font.PLAIN, 9)
                 foreground = ChatTheme.textSecondary
                 // 默认透明度低 — 通过颜色而非 alpha（Swing alpha paint 有坑）
@@ -360,7 +369,7 @@ class MarkdownRenderer {
                     btn.foreground = ChatTheme.textPrimary
                 }
                 override fun mouseExited(e: MouseEvent) {
-                    if (btn.text == "复制") btn.foreground = ChatTheme.textSecondary
+                    if (btn.text == AiAssistantBundle.message("ui.copy")) btn.foreground = ChatTheme.textSecondary
                 }
                 override fun mouseClicked(e: MouseEvent) {
                     copyToClipboard()
@@ -382,13 +391,19 @@ class MarkdownRenderer {
                 border = JBUI.Borders.empty(6, 10)
                 // 禁用焦点边框
                 isFocusable = false
+                // JTextArea 默认拦截滚轮事件导致父级 conversationScrollPane 无法滚动
+                addMouseWheelListener { e ->
+                    var p: java.awt.Container? = parent
+                    while (p != null && p !is javax.swing.JScrollPane) { p = p.parent }
+                    if (p != null) {
+                        p.dispatchEvent(javax.swing.SwingUtilities.convertMouseEvent(this, e, p))
+                    }
+                }
             }
             // 水平滚动条按需出现，垂直不显示（让父容器决定高度）
             return JScrollPane(area).apply {
                 horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED
                 verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_NEVER
-                // 禁用代码块内 JScrollPane 的滚轮滚动，让滚轮事件向上冒泡到
-                // 父级 conversationScrollPane，否则鼠标在代码块上时无法上下翻阅对话。
                 setWheelScrollingEnabled(false)
                 border = null
                 isOpaque = false
@@ -413,12 +428,12 @@ class MarkdownRenderer {
         }
 
         private fun showCopiedFeedback(btn: JLabel) {
-            btn.text = "已复制"
+            btn.text = AiAssistantBundle.message("ui.copied")
             btn.foreground = ChatTheme.doneCheck
             // 1.5 秒后恢复。用 javax.swing.Timer（单 EDT 线程、回调在 EDT），
             // 而非 java.util.Timer —— 后者每次 new 都会泄漏一个不回收的后台线程。
             val swingTimer = javax.swing.Timer(1500) {
-                btn.text = "复制"
+                btn.text = AiAssistantBundle.message("ui.copy")
                 btn.foreground = ChatTheme.textSecondary
             }
             swingTimer.isRepeats = false

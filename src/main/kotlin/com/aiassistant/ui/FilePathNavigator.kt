@@ -1,5 +1,6 @@
 package com.aiassistant.ui
 
+import com.aiassistant.AiAssistantBundle
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.project.Project
@@ -76,7 +77,7 @@ object FilePathNavigator {
                 when {
                     link.startsWith("http://", ignoreCase = true) || link.startsWith("https://", ignoreCase = true) || link.startsWith("ftp://", ignoreCase = true) -> {
                         if (com.intellij.openapi.ui.Messages.showYesNoDialog(project,
-                                "将在浏览器中打开外部链接：\n$link", "打开外部链接",
+                                AiAssistantBundle.message("ui.open.link.prompt", link), AiAssistantBundle.message("ui.open.link.title"),
                                 com.intellij.openapi.ui.Messages.getQuestionIcon()
                             ) == com.intellij.openapi.ui.Messages.YES) {
                             com.intellij.ide.BrowserUtil.browse(link)
@@ -85,7 +86,7 @@ object FilePathNavigator {
                     link.startsWith("www.", ignoreCase = true) -> {
                         val url = "https://$link"
                         if (com.intellij.openapi.ui.Messages.showYesNoDialog(project,
-                                "将在浏览器中打开外部链接：\n$url", "打开外部链接",
+                                AiAssistantBundle.message("ui.open.link.prompt", url), AiAssistantBundle.message("ui.open.link.title"),
                                 com.intellij.openapi.ui.Messages.getQuestionIcon()
                             ) == com.intellij.openapi.ui.Messages.YES) {
                             com.intellij.ide.BrowserUtil.browse(url)

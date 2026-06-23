@@ -1,5 +1,6 @@
 package com.aiassistant.ui
 
+import com.aiassistant.AiAssistantBundle
 import com.aiassistant.review.Finding
 import com.aiassistant.review.Severity
 import java.awt.BorderLayout
@@ -10,7 +11,7 @@ import javax.swing.border.EmptyBorder
 
 class ReviewResultPanel : JPanel(BorderLayout()) {
 
-    private val titleLabel = JLabel("📋 审查结果").apply {
+    private val titleLabel = JLabel(AiAssistantBundle.message("review.result.title")).apply {
         font = ChatTheme.metaFont.deriveFont(14f)
         border = EmptyBorder(6, 10, 4, 10)
     }
@@ -30,7 +31,7 @@ class ReviewResultPanel : JPanel(BorderLayout()) {
 
     fun showResults(findings: List<Finding>, score: Int) {
         findingsList.removeAll()
-        titleLabel.text = "📋 审查结果 — $score/100 (${findings.size} 个问题)"
+        titleLabel.text = AiAssistantBundle.message("review.result.score", score, findings.size)
 
         for (f in findings) {
             val icon = when (f.severity) { Severity.CRITICAL -> "🔴"; Severity.WARNING -> "🟡"; else -> "🔵" }
@@ -45,7 +46,7 @@ class ReviewResultPanel : JPanel(BorderLayout()) {
             })
             row.add(label, BorderLayout.CENTER)
             if (f.suggestion.isNotBlank()) {
-                val fixBtn = JButton("修复").apply {
+                val fixBtn = JButton(AiAssistantBundle.message("review.fix.button")).apply {
                     font = ChatTheme.metaFont; margin = Insets(0, 6, 0, 6)
                 }
                 fixBtn.addActionListener { onFixRequest?.invoke(f) }

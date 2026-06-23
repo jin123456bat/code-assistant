@@ -68,21 +68,59 @@
             <add-to-group group-id="Vcs.MessageActionGroup" anchor="last"/>
         </action>
 
-        <action
-            id="AiAssistant.SendToChat"
-            class="com.aiassistant.actions.SendToChatAction"
-            text="action.send.to.chat"
-            description="action.send.to.chat.desc"
-            icon="/icons/icon.svg">
+        <group id="CodeAssistant.EditorPopupGroup" text="action.editor.popup.group" icon="/icons/icon.svg" popup="true" compact="true">
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
-            <keyboard-shortcut keymap="$default" first-keystroke="control shift SEMICOLON"/>
-        </action>
+            <action
+                id="AiAssistant.SendToChat"
+                class="com.aiassistant.actions.SendToChatAction"
+                text="action.send.to.chat"
+                description="action.send.to.chat.desc"
+                icon="/icons/icon.svg">
+                <keyboard-shortcut keymap="$default" first-keystroke="control shift SEMICOLON"/>
+            </action>
+            <separator/>
+            <action
+                id="CodeAssistant.ReviewSelectedCode"
+                class="com.aiassistant.ui.ReviewSelectedCodeAction"
+                text="action.review.selected"
+                description="action.review.selected.desc"/>
+            <action
+                id="CodeAssistant.SecurityReviewFile"
+                class="com.aiassistant.ui.SecurityReviewFileAction"
+                text="action.security.review"
+                description="action.security.review.desc"/>
+            <action
+                id="CodeAssistant.FixSelectedCode"
+                class="com.aiassistant.ui.FixSelectedCodeAction"
+                text="action.fix.code"
+                description="action.fix.code.desc"/>
+            <action
+                id="CodeAssistant.ExplainSelectedCode"
+                class="com.aiassistant.ui.ExplainSelectedCodeAction"
+                text="action.explain.code"
+                description="action.explain.code.desc"/>
+            <action
+                id="CodeAssistant.OptimizeSelectedCode"
+                class="com.aiassistant.ui.OptimizeSelectedCodeAction"
+                text="action.optimize.code"
+                description="action.optimize.code.desc"/>
+            <action
+                id="CodeAssistant.GenerateComment"
+                class="com.aiassistant.ui.GenerateCommentAction"
+                text="action.generate.comment"
+                description="action.generate.comment.desc"/>
+            <action
+                id="CodeAssistant.GenerateTest"
+                class="com.aiassistant.ui.GenerateTestAction"
+                text="action.generate.test"
+                description="action.generate.test.desc"/>
+        </group>
 
         <action
             id="AiAssistant.ManualCompletion"
             class="com.aiassistant.completion.ManualCompletionAction"
-            text="手动触发 AI 补全"
-            description="手动触发 AI 代码补全，跳过缓存">
+            text="action.manual.completion"
+            description="action.manual.completion.desc">
             <keyboard-shortcut keymap="Mac OS X" first-keystroke="meta P"/>
             <keyboard-shortcut keymap="Mac OS X 10.5+" first-keystroke="meta P"/>
             <keyboard-shortcut keymap="$default" first-keystroke="alt P"/>
@@ -91,8 +129,8 @@
         <action
             id="AiAssistant.NextCandidate"
             class="com.aiassistant.completion.NextCandidateAction"
-            text="下一个补全候选"
-            description="切换到下一个 AI 补全候选">
+            text="action.next.candidate"
+            description="action.next.candidate.desc">
             <keyboard-shortcut keymap="Mac OS X" first-keystroke="DOWN"/>
             <keyboard-shortcut keymap="Mac OS X 10.5+" first-keystroke="DOWN"/>
             <keyboard-shortcut keymap="$default" first-keystroke="DOWN"/>
@@ -101,61 +139,11 @@
         <action
             id="AiAssistant.PrevCandidate"
             class="com.aiassistant.completion.PrevCandidateAction"
-            text="上一个补全候选"
-            description="切换到上一个 AI 补全候选">
+            text="action.prev.candidate"
+            description="action.prev.candidate.desc">
             <keyboard-shortcut keymap="Mac OS X" first-keystroke="UP"/>
             <keyboard-shortcut keymap="Mac OS X 10.5+" first-keystroke="UP"/>
             <keyboard-shortcut keymap="$default" first-keystroke="UP"/>
-        </action>
-
-        <action
-            id="CodeAssistant.ReviewSelectedCode"
-            class="com.aiassistant.ui.ReviewSelectedCodeAction"
-            text="审查选中代码"
-            description="将选中代码发送给 AI 审查">
-            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
-        </action>
-        <action
-            id="CodeAssistant.SecurityReviewFile"
-            class="com.aiassistant.ui.SecurityReviewFileAction"
-            text="安全审查此文件"
-            description="对当前文件进行安全五维度审查">
-            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
-        </action>
-        <action
-            id="CodeAssistant.FixSelectedCode"
-            class="com.aiassistant.ui.FixSelectedCodeAction"
-            text="修复此代码"
-            description="让 AI 修复选中的代码">
-            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
-        </action>
-        <action
-            id="CodeAssistant.ExplainSelectedCode"
-            class="com.aiassistant.ui.ExplainSelectedCodeAction"
-            text="解释此代码"
-            description="让 AI 解释选中的代码">
-            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
-        </action>
-        <action
-            id="CodeAssistant.OptimizeSelectedCode"
-            class="com.aiassistant.ui.OptimizeSelectedCodeAction"
-            text="优化此代码"
-            description="让 AI 优化选中的代码">
-            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
-        </action>
-        <action
-            id="CodeAssistant.GenerateComment"
-            class="com.aiassistant.ui.GenerateCommentAction"
-            text="生成注释"
-            description="让 AI 为选中代码生成注释">
-            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
-        </action>
-        <action
-            id="CodeAssistant.GenerateTest"
-            class="com.aiassistant.ui.GenerateTestAction"
-            text="生成单元测试"
-            description="让 AI 为选中代码生成单元测试">
-            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
         </action>
     </actions>
 </idea-plugin>
