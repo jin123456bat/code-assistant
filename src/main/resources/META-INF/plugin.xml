@@ -4,18 +4,12 @@
     <vendor email="326550324@qq.com" url="https://github.com/jin123456bat/code-assistant">Code Assistant</vendor>
 
     <description><![CDATA[
-        Free, open-source AI coding agent for IntelliJ IDEA and JetBrains IDEs.
-        Powered by DeepSeek V4 models (deepseek-v4-flash / deepseek-v4-pro).
-        Bring your own API key.
+        AI-powered coding assistant for JetBrains IDEs.
+        Powered by DeepSeek V4. Bring your own API key.
 
         Features:
-        - Agent mode: AI autonomously plans and executes tasks using built-in tools
-        - 13 built-in tools: search_code, read_file, write_file, list_directory, execute_command, git_diff, git_log, git_status, ask_user, web_search, web_fetch, notebook_edit, task
-        - MCP support: connect to Model Context Protocol servers for extended tools
-        - Skills engine: load custom skills from .claude/skills/**/SKILL.md
-        - Plan mode: LLM autonomously decides whether to create execution plans
-        - Streaming chat with markdown rendering and syntax highlighting
-        - File references, auto code detection, image paste
+        - AI-powered git commit message generation
+        - FIM (Fill-in-the-Middle) code completion
 
         To get started, register for a DeepSeek API key at platform.deepseek.com,
         then configure it in Settings > Tools > Code Assistant.
@@ -23,42 +17,20 @@
 
     <depends>com.intellij.modules.platform</depends>
     <depends>com.intellij.modules.vcs</depends>
-    <depends optional="true" config-file="java-plugin.xml">com.intellij.modules.java</depends>
 
     <extensions defaultExtensionNs="com.intellij">
-        <toolWindow
-            id="Code Assistant"
-            anchor="right"
-            icon="/icons/icon.svg"
-            factoryClass="com.aiassistant.ChatToolWindowFactory"/>
-
         <applicationConfigurable
             parentId="tools"
             instance="com.aiassistant.SettingsConfigurable"
             id="com.aiassistant.settings"
             displayName="Code Assistant"/>
 
-        <projectActivity
-            implementation="com.aiassistant.actions.OpenAiToolWindowOnStartup"/>
-
         <inline.completion.provider
             id="ai-assistant"
             implementation="com.aiassistant.completion.AiCompletionProvider"/>
-
-        <codeInsight.lineMarkerProvider
-                language=""
-                implementationClass="com.aiassistant.ui.ReviewAnnotationGutter"/>
     </extensions>
 
     <actions resource-bundle="messages.AiAssistantBundle">
-        <action
-            id="AiAssistant.OpenChat"
-            class="com.aiassistant.actions.OpenChatAction"
-            text="action.open.chat"
-            description="action.open.chat.desc">
-            <add-to-group group-id="ToolsMenu" anchor="last"/>
-        </action>
-
         <action
             id="AiAssistant.GenerateCommit"
             class="com.aiassistant.actions.GenerateCommitAction"
@@ -67,54 +39,6 @@
             icon="/icons/icon.svg">
             <add-to-group group-id="Vcs.MessageActionGroup" anchor="last"/>
         </action>
-
-        <group id="CodeAssistant.EditorPopupGroup" text="action.editor.popup.group" icon="/icons/icon.svg" popup="true" compact="true">
-            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
-            <action
-                id="AiAssistant.SendToChat"
-                class="com.aiassistant.actions.SendToChatAction"
-                text="action.send.to.chat"
-                description="action.send.to.chat.desc"
-                icon="/icons/icon.svg">
-                <keyboard-shortcut keymap="$default" first-keystroke="control shift SEMICOLON"/>
-            </action>
-            <separator/>
-            <action
-                id="CodeAssistant.ReviewSelectedCode"
-                class="com.aiassistant.ui.ReviewSelectedCodeAction"
-                text="action.review.selected"
-                description="action.review.selected.desc"/>
-            <action
-                id="CodeAssistant.SecurityReviewFile"
-                class="com.aiassistant.ui.SecurityReviewFileAction"
-                text="action.security.review"
-                description="action.security.review.desc"/>
-            <action
-                id="CodeAssistant.FixSelectedCode"
-                class="com.aiassistant.ui.FixSelectedCodeAction"
-                text="action.fix.code"
-                description="action.fix.code.desc"/>
-            <action
-                id="CodeAssistant.ExplainSelectedCode"
-                class="com.aiassistant.ui.ExplainSelectedCodeAction"
-                text="action.explain.code"
-                description="action.explain.code.desc"/>
-            <action
-                id="CodeAssistant.OptimizeSelectedCode"
-                class="com.aiassistant.ui.OptimizeSelectedCodeAction"
-                text="action.optimize.code"
-                description="action.optimize.code.desc"/>
-            <action
-                id="CodeAssistant.GenerateComment"
-                class="com.aiassistant.ui.GenerateCommentAction"
-                text="action.generate.comment"
-                description="action.generate.comment.desc"/>
-            <action
-                id="CodeAssistant.GenerateTest"
-                class="com.aiassistant.ui.GenerateTestAction"
-                text="action.generate.test"
-                description="action.generate.test.desc"/>
-        </group>
 
         <action
             id="AiAssistant.ManualCompletion"

@@ -21,11 +21,6 @@ dependencies {
         bundledPlugin("com.intellij.java") // Java PSI for code_intelligence
     }
 
-    implementation("org.yaml:snakeyaml:2.3")
-    implementation("org.jetbrains:markdown:0.7.3")
-    implementation("com.anthropic:anthropic-java:2.40.1") {
-        exclude("org.jetbrains.kotlin", "kotlin-stdlib")
-    }
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlin:kotlin-test:2.0.21")
