@@ -1,0 +1,1082 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Assistant — UI 原型</title>
+    <style>
+        :root {
+          --primary:#3B82F6;--primary-hover:#2563EB;--primary-light:#EFF6FF;
+          --success:#22C55E;--warning:#F59E0B;--error:#EF4444;--error-light:#FEE2E2;
+          --g9:#111827;--g7:#374151;--g5:#6B7280;--g3:#D1D5DB;--g2:#E5E7EB;--g1:#F3F4F6;--g0:#F9FAFB;
+          --code-bg:#F6F8FA;--code-border:#E1E4E8;
+          --rb:12px;--rc:8px;--rbtn:6px;--rtag:4px;
+          --font:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+          --mono:"JetBrains Mono","Fira Code","Monospaced",monospace;
+        }
+        *{margin:0;padding:0;box-sizing:border-box}
+        body{font-family:var(--font);font-size:14px;line-height:1.6;color:var(--g9);background:#E5E7EB;display:flex;justify-content:center;padding:24px;}
+
+        .panel{width:740px;height:820px;background:#fff;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.12);display:flex;flex-direction:column;overflow:hidden}
+
+        /* TabBar */
+        .tab-bar{display:flex;border-bottom:1px solid var(--g2);background:#fff;flex-shrink:0}
+        .tab{padding:8px 16px;font-size:13px;color:var(--g5);cursor:pointer;border-bottom:2px solid transparent;transition:all .1s;white-space:nowrap;user-select:none}
+        .tab:hover{background:var(--g0);color:var(--g7)}
+        .tab.active{color:var(--primary);border-bottom-color:var(--primary);font-weight:600}
+
+        /* 页面容器 */
+        .page{flex:1;overflow-y:auto;display:none;flex-direction:column}
+        .page.active{display:flex}
+        .page-body{flex:1;overflow-y:auto;padding:16px;background:var(--g0);display:flex;flex-direction:column;gap:8px}
+
+        /* 聊天气泡 */
+        .bubble{max-width:85%;padding:12px 16px;border-radius:var(--rb);animation:fadeIn .15s ease-out}
+        @keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+        .bubble.user{align-self:flex-end;background:#E8F0FE;max-width:70%;border-bottom-right-radius:4px}
+        .bubble.agent{align-self:flex-start;background:#fff;border-left:3px solid var(--primary)}
+        .bubble.error{align-self:flex-start;background:var(--error-light);border-left:3px solid var(--error)}
+        .bubble h3{font-size:14px;font-weight:600;margin:8px 0 4px}
+        .bubble ul,.bubble ol{padding-left:20px;margin:4px 0}
+        .bubble p{margin:4px 0}
+        .bubble code.inline{font-family:var(--mono);font-size:13px;background:var(--code-bg);padding:1px 6px;border-radius:3px;border:1px solid var(--code-border)}
+
+        .msg-row{display:flex;flex-direction:column}
+        .msg-row.user{align-items:flex-end}
+        .msg-row.agent,.msg-row.error{align-items:flex-start}
+        .msg-ts{font-size:11px;color:var(--g5);margin:2px 4px 4px;display:flex;gap:12px}
+        .msg-row.user .msg-ts{justify-content:flex-end}
+        .msg-row.agent .msg-ts{justify-content:flex-start}
+
+        /* 代码块 */
+        .code-block{font-family:var(--mono);font-size:13px;line-height:1.5;background:var(--code-bg);border:1px solid var(--code-border);border-radius:var(--rc);padding:12px;margin:8px 0;overflow-x:auto}
+        .code-block .kw{color:#CF222E}.code-block .fn{color:#8250DF}.code-block .str{color:#0A3069}.code-block .cm{color:#6E7781}
+
+        /* 工具卡片 */
+        .tool-card{background:#fff;border:1px solid var(--g2);border-radius:var(--rc);align-self:flex-start;max-width:90%;width:100%;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+        .tool-card-header{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--g0);border-bottom:1px solid var(--g1);cursor:pointer;font-size:13px;font-weight:500}
+        .tool-card-header .state{margin-left:auto;font-size:12px}
+        .state-pending{color:var(--g5)}.state-awaiting{color:var(--warning)}.state-executing{color:var(--primary)}.state-done{color:var(--success)}.state-error-s{color:var(--error)}.state-rejected{color:var(--g5)}
+        .tool-approval{background:#FFFBEB;border:1px solid #FDE68A;border-radius:6px;padding:10px 12px;margin-top:8px;display:flex;align-items:center;gap:8px}
+        .tool-approval .msg{flex:1;font-size:13px;color:#92400E}
+        .tool-approval .timer{font-size:11px;color:#B45309}
+        .tool-card-body{padding:8px 12px}
+        .tool-card-params{font-family:var(--mono);font-size:12px;color:var(--g7);background:var(--g0);padding:6px 8px;border-radius:4px;margin-bottom:6px}
+        .tool-card-result{font-family:var(--mono);font-size:13px;background:var(--code-bg);padding:8px;border-radius:4px;max-height:200px;overflow-y:auto}
+        .tool-card-footer{font-size:11px;color:var(--g5);padding:6px 12px;border-top:1px solid var(--g1);display:flex;justify-content:space-between}
+
+        /* 计划卡片 */
+        .thinking-block{background:#FFF8F0;border:1px solid #FDE8D0;border-radius:var(--rc);margin:4px 0;align-self:flex-start;max-width:88%;width:100%}
+        .thinking-header{display:flex;align-items:center;gap:6px;padding:6px 10px;font-size:12px;color:#B45309;cursor:pointer;user-select:none}
+        .thinking-body{display:none;padding:6px 10px 10px;font-size:12px;color:#92400E;border-top:1px solid #FDE8D0;line-height:1.5;max-height:200px;overflow-y:auto;font-style:italic}
+        .thinking-body.show{display:block}
+        .thinking-header.expanded .arrow{transform:rotate(90deg)}
+
+        /* === 选项组件 === */
+        .options-block{background:#fff;border:1px solid var(--g2);border-radius:var(--rc);padding:0;align-self:flex-start;max-width:85%;width:100%}
+        .options-block .opt-header{padding:8px 12px;font-size:13px;color:var(--g7);border-bottom:1px solid var(--g1);background:var(--g0)}
+        .options-block .opt-item{display:flex;align-items:center;gap:8px;padding:8px 12px;cursor:pointer;font-size:13px;border-bottom:1px solid var(--g1);transition:background .1s}
+        .options-block .opt-item:last-child{border-bottom:none}
+        .options-block .opt-item:hover{background:var(--primary-light)}
+        .options-block .opt-item.selected{background:var(--primary-light);border-left:3px solid var(--primary)}
+        .options-block .opt-item .opt-letter{width:20px;height:20px;border-radius:50%;border:2px solid var(--g3);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:var(--g5);flex-shrink:0}
+        .options-block .opt-item.selected .opt-letter{background:var(--primary);border-color:var(--primary);color:#fff}
+        .options-block .opt-item .opt-text{flex:1}
+        .options-block .opt-item .opt-desc{font-size:11px;color:var(--g5);margin-top:1px}
+        .options-block .opt-footer{padding:8px 12px;display:flex;gap:8px;border-top:1px solid var(--g1)}
+        .multi-agent-block{background:#F0F7FF;border:1px solid #BFDBFE;border-radius:var(--rc);padding:12px;align-self:flex-start;max-width:92%;width:100%;margin:4px 0}
+        .ma-header{font-size:13px;font-weight:600;color:var(--primary);margin-bottom:8px}
+        .ma-sub{display:flex;align-items:center;gap:8px;padding:6px 10px;background:#fff;border-radius:4px;margin-bottom:4px;font-size:12px;border:1px solid var(--g1)}
+        .ma-sub .ma-status{font-size:11px;margin-left:auto}
+        .plan-card{background:#fff;border-bottom:1px solid var(--g2);padding:10px 16px;width:100%;flex-shrink:0}
+        .plan-card.pinned{position:sticky;top:0;z-index:10;box-shadow:0 2px 8px rgba(0,0,0,.08)}
+        .plan-card h3{font-size:14px;margin-bottom:4px}
+        .plan-meta{font-size:12px;color:var(--g5);margin-bottom:8px}
+        .plan-step{display:flex;align-items:flex-start;gap:8px;padding:6px 0;border-bottom:1px solid var(--g1);font-size:13px}
+        .plan-step .status{flex-shrink:0;width:20px}
+        .plan-step .info{flex:1}
+        .plan-step .files{font-size:11px;color:var(--g5);margin-top:2px}
+        .step-pending .status{color:var(--g5)}.step-executing{background:var(--primary-light);border-radius:4px;padding:6px 8px}.step-executing .status{color:var(--primary)}.step-done .status{color:var(--success)}
+        .plan-actions{display:flex;gap:8px;margin-top:8px}
+
+        /* 系统消息 */
+        .sys-msg{text-align:center;font-size:11px;color:#94A3B8;padding:12px 0}
+
+        /* 按钮 */
+        .btn{padding:6px 14px;border-radius:var(--rbtn);border:none;cursor:pointer;font-size:13px;font-family:inherit;transition:background .1s}
+        .btn-primary{background:var(--primary);color:#fff}.btn-primary:hover{background:var(--primary-hover)}
+        .btn-secondary{background:transparent;color:var(--g7);border:1px solid var(--g3)}.btn-secondary:hover{background:var(--g1)}
+        .btn-danger{background:transparent;color:var(--error)}.btn-danger:hover{background:var(--error-light)}
+        .btn-xs{padding:2px 8px;font-size:11px}
+
+        /* 输入区域 */
+        .input-area{border-top:1px solid var(--g2);padding:12px 16px;background:#fff;flex-shrink:0}
+        .input-area textarea{width:100%;border:1px solid var(--g3);border-radius:var(--rc);padding:8px 12px;font-family:inherit;font-size:13px;resize:none;height:52px;outline:none}
+        .input-area textarea:focus{border-color:var(--primary);box-shadow:0 0 0 2px rgba(59,130,246,.15)}
+        .tags-row{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+        .tag{font-size:11px;padding:2px 8px;border-radius:var(--rtag);background:var(--primary-light);border:1px solid #BFDBFE;display:flex;align-items:center;gap:4px;white-space:nowrap}
+        .tag .close{cursor:pointer;opacity:.5}.tag .close:hover{opacity:1}
+        .tag.img{background:var(--g1);border-color:var(--g3)}
+        .bottom-row{display:flex;justify-content:flex-end;align-items:center;margin-top:8px;gap:8px}
+
+        /* 通用页面样式 */
+        .page-title{font-size:18px;font-weight:700;margin-bottom:12px}
+        .section-title{font-size:14px;font-weight:600;color:var(--g7);margin:16px 0 8px}
+        .card{background:#fff;border:1px solid var(--g2);border-radius:var(--rc);padding:12px 16px}
+        .card-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--g1);font-size:13px}
+        .card-row:last-child{border-bottom:none}
+        .empty-state{text-align:center;padding:60px 20px;color:var(--g5)}
+        .empty-state .icon{font-size:40px;margin-bottom:12px}
+        .empty-state p{font-size:13px}
+
+        /* Search */
+        .search-box{border:1px solid var(--g3);border-radius:6px;padding:6px 12px;font-size:13px;width:100%;outline:none;margin-bottom:12px}
+        .search-box:focus{border-color:var(--primary)}
+
+        /* Sparkline */
+        .sparkline{display:flex;align-items:flex-end;gap:2px;height:80px;padding:8px 0}
+        .sparkline .bar{flex:1;background:var(--primary);border-radius:2px 2px 0 0;min-height:2px;opacity:.8}
+        .sparkline .bar:hover{opacity:1}
+
+        /* 状态指示灯 */
+        .status-dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px}
+        .dot-green{background:var(--success)}.dot-yellow{background:var(--warning)}.dot-red{background:var(--error)}
+
+        /* 指令列表 Popup */
+        .cmd-popup{position:absolute;bottom:100%;left:0;right:0;background:#fff;border:1px solid var(--g3);border-radius:var(--rc);box-shadow:0 -4px 16px rgba(0,0,0,.1);max-height:260px;overflow-y:auto;display:none;z-index:20;margin-bottom:4px}
+        .cmd-popup.show{display:block}
+        .cmd-popup .cmd-item{display:flex;align-items:center;gap:10px;padding:8px 12px;cursor:pointer;font-size:13px;border-bottom:1px solid var(--g1)}
+        .cmd-popup .cmd-item:last-child{border-bottom:none}
+        .cmd-popup .cmd-item:hover,.cmd-popup .cmd-item.active{background:var(--primary-light)}
+        .cmd-popup .cmd-item .slash{font-weight:700;color:var(--primary);min-width:70px;font-family:var(--mono);font-size:12px}
+        .cmd-popup .cmd-item .desc{font-size:11px;color:var(--g5)}
+        .cmd-group{font-size:10px;color:var(--g5);padding:6px 12px 2px;text-transform:uppercase;letter-spacing:.5px}
+
+        /* Toast/Banner */
+        .toast{position:fixed;bottom:24px;right:24px;padding:10px 20px;border-radius:8px;color:#fff;font-size:13px;z-index:100;animation:slideUp .3s ease-out;display:none}
+        .toast.success{background:var(--success)}.toast.error-t{background:var(--error)}
+        @keyframes slideUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+        .banner{padding:8px 16px;font-size:12px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--g2)}
+        .banner.info{background:var(--primary-light);color:var(--primary)}
+        .banner.warn{background:#FFFBEB;color:#92400E}
+        .banner.err{background:var(--error-light);color:var(--error)}
+
+        /* Switch toggle */
+        .switch{width:36px;height:20px;background:var(--g3);border-radius:10px;position:relative;cursor:pointer;transition:background .2s}
+        .switch.on{background:var(--success)}
+        .switch::after{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;background:#fff;border-radius:50%;transition:transform .2s}
+        .switch.on::after{transform:translateX(16px)}
+
+        /* 滚动条 */
+        .page-body::-webkit-scrollbar,.content::-webkit-scrollbar,.page::-webkit-scrollbar{width:6px}
+        .page-body::-webkit-scrollbar-thumb,.content::-webkit-scrollbar-thumb{background:var(--g3);border-radius:3px}
+
+        /* Form */
+        .form-group{margin-bottom:12px}.form-group label{display:block;font-size:12px;color:var(--g5);margin-bottom:4px}
+        .form-input{width:100%;border:1px solid var(--g3);border-radius:6px;padding:6px 10px;font-size:13px;font-family:inherit}
+        .form-input:focus{border-color:var(--primary);outline:none}
+    </style>
+</head>
+<body>
+
+<div class="panel">
+    <div class="tab-bar">
+        <div class="tab" onclick="switchPage('welcome')">🏠</div>
+        <div class="tab active" onclick="switchPage('chat')">💬 Chat</div>
+        <div class="tab" onclick="switchPage('sessions')">📁 Sessions</div>
+        <div class="tab" onclick="switchPage('usage')">📊 Usage</div>
+        <div class="tab" onclick="switchPage('mcp')">🔌 MCP</div>
+        <div class="tab" onclick="switchPage('skills')">🎯 Skills</div>
+        <div class="tab" onclick="switchPage('settings')">⚙</div>
+    </div>
+
+    <!-- ====== Welcome 页面 ====== -->
+    <div class="page" id="page-welcome">
+        <div class="page-body" style="justify-content:center;align-items:center;text-align:center">
+            <div style="font-size:48px;margin-bottom:16px">🤖</div>
+            <h1 style="font-size:20px;margin-bottom:8px">Welcome to Code Assistant</h1>
+            <p style="color:var(--g5);margin-bottom:24px">免费 AI 编程助手 · 代码补全 + Agent
+                对话</p>
+            <div class="card" style="text-align:left;max-width:420px;width:100%">
+                <p style="font-size:13px;margin-bottom:8px">① 获取 DeepSeek API Key</p>
+                <p style="font-size:12px;color:var(--primary);margin-bottom:16px">
+                    platform.deepseek.com/api_keys</p>
+                <div class="form-group">
+                    <label>② 粘贴 API Key</label>
+                    <input class="form-input" type="password" value="sk-03fb••••••••••••••••ed5fae"
+                           placeholder="sk-...">
+                </div>
+                <p style="font-size:12px;color:var(--g5);margin-bottom:16px">模型:
+                    deepseek-v4-pro（固定）</p>
+                <button class="btn btn-primary" style="width:100%"
+                        onclick="switchPage('chat');showToast('success','Key 已保存，正在验证...')">
+                    保存并开始使用 →
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====== Chat 页面 ====== -->
+    <div class="page active" id="page-chat">
+        <!-- 计划卡片：固定在顶部 -->
+        <div class="plan-card pinned" id="pinned-plan">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+                <strong style="font-size:13px">📋 执行计划</strong>
+                <span style="font-size:11px;color:var(--g5)">重构 findById | 5 个文件</span>
+                <span style="margin-left:auto;display:flex;gap:4px">
+          <button class="btn btn-primary btn-xs"
+                  style="font-size:10px;padding:2px 6px">▶ 继续</button>
+          <button class="btn btn-secondary btn-xs"
+                  style="font-size:10px;padding:2px 6px">⏸ 暂停</button>
+          <button class="btn btn-danger btn-xs"
+                  style="font-size:10px;padding:2px 6px">✕ 终止</button>
+        </span>
+            </div>
+            <div style="display:flex;gap:12px;font-size:11px">
+                <span class="step-done" style="display:flex;align-items:center;gap:2px"><span
+                        style="color:var(--success)">✅</span> Step 1</span>
+                <span class="step-done" style="display:flex;align-items:center;gap:2px"><span
+                        style="color:var(--success)">✅</span> Step 2</span>
+                <span class="step-executing"
+                      style="display:flex;align-items:center;gap:2px;background:var(--primary-light);padding:0 4px;border-radius:2px"><span
+                        style="color:var(--primary)">⏳</span> Step 3</span>
+                <span class="step-pending" style="display:flex;align-items:center;gap:2px"><span
+                        style="color:var(--g5)">⬜</span> Step 4</span>
+                <span class="step-pending" style="display:flex;align-items:center;gap:2px"><span
+                        style="color:var(--g5)">⬜</span> Step 5</span>
+            </div>
+        </div>
+        <div class="page-body">
+            <div class="sys-msg">── 14:30 ──</div>
+
+            <div class="msg-row user">
+                <div class="bubble user">帮我把 UserService 里的 findById 方法改成 suspend 函数
+                </div>
+                <div class="msg-ts">14:32</div>
+            </div>
+
+            <!-- 思考过程：默认展开 -->
+            <div class="thinking-block">
+                <div class="thinking-header"
+                     onclick="this.classList.toggle('expanded');this.nextElementSibling.classList.toggle('show')">
+                    <span class="arrow">▶</span> 💭 思考过程 <span
+                        style="margin-left:auto;font-size:11px;opacity:.7">1.2s</span>
+                </div>
+                <div class="thinking-body">
+                    用户要求将 UserService 里的 findById 方法改成 suspend
+                    函数。我需要先读取文件了解当前实现，然后修改方法签名和调用处。考虑到 Kotlin
+                    协程的特性，还需要检查调用链上的所有函数是否都已支持协程上下文。
+                </div>
+            </div>
+
+            <div class="msg-row agent">
+                <div class="bubble agent">
+                    <p>好的，让我先读取 <code class="inline">UserService.kt</code> 看看当前的实现。
+                    </p>
+                    <div class="tool-card" style="margin-top:8px">
+                        <div class="tool-card-header"><span>🔧</span> readFile <span
+                                class="state state-done">✅ 15ms</span></div>
+                        <div class="tool-card-body">
+                            <div class="tool-card-params">filePath: UserService.kt | startLine: 40 |
+                                endLine: 60
+                            </div>
+                            <div class="tool-card-result"><span class="cm">42:</span> <span
+                                    class="kw">fun</span> <span class="fn">findById</span>(id:
+                                Long): User? {<br><span class="cm">43:</span> <span class="kw">return</span>
+                                repository.findById(id)<br><span class="cm">44:</span> }
+                            </div>
+                        </div>
+                        <div class="tool-card-footer"><span>15ms</span><span>1 个文件，3 行</span>
+                        </div>
+                    </div>
+                    <p style="margin-top:8px">需要：</p>
+                    <ol>
+                        <li>加 <code class="inline">suspend</code> 关键字</li>
+                        <li>修改调用处为协程调用</li>
+                    </ol>
+                </div>
+                <div class="msg-ts"><span>14:33</span><span style="color:var(--g5);font-size:11px">↑1.2K ↓0.4K</span>
+                </div>
+            </div>
+
+            <!-- 选项组件 -->
+            <div class="options-block" id="opt1">
+                <div class="opt-header">选择下一步操作：</div>
+                <div class="opt-item" onclick="selectOption(this,'opt1')">
+                    <span class="opt-letter">A</span>
+                    <div class="opt-text">直接用 editFile 修改<span class="opt-desc">修改 UserService.kt + UserController.kt，不生成计划</span>
+                    </div>
+                </div>
+                <div class="opt-item" onclick="selectOption(this,'opt1')">
+                    <span class="opt-letter">B</span>
+                    <div class="opt-text">生成 Plan 确认后再执行<span class="opt-desc">列出详细步骤和涉及文件，逐步执行，可随时调整</span>
+                    </div>
+                </div>
+                <div class="opt-item" onclick="selectOption(this,'opt1')">
+                    <span class="opt-letter">C</span>
+                    <div class="opt-text">只改 UserService.kt<span class="opt-desc">其他调用处暂时不动，快速验证方案可行性</span>
+                    </div>
+                </div>
+                <div class="opt-footer">
+                    <button class="btn btn-primary btn-xs" onclick="confirmOption('opt1','B')">
+                        确认选择
+                    </button>
+                    <span style="font-size:11px;color:var(--g5);margin-left:8px">已选: <span
+                            class="selected-label">B</span></span>
+                </div>
+            </div>
+
+            <div class="msg-row user">
+                <div class="bubble user">先生成 Plan，确认后再执行</div>
+                <div class="msg-ts">14:34</div>
+            </div>
+
+            <div class="plan-card">
+                <h3>📋 执行计划</h3>
+                <div class="plan-meta">任务: 重构 findById | 5 个文件 | ~3K tokens</div>
+                <div class="plan-step step-done"><span class="status">✅</span>
+                    <div class="info">读取 UserService.kt
+                        <div class="files">工具: readFile | UserService.kt:40-60</div>
+                    </div>
+                </div>
+                <div class="plan-step step-done"><span class="status">✅</span>
+                    <div class="info">修改方法签名
+                        <div class="files">工具: editFile | UserService.kt:42</div>
+                    </div>
+                </div>
+                <div class="plan-step step-executing"><span class="status">⏳</span>
+                    <div class="info">修改调用处
+                        <div class="files">工具: editFile | UserController.kt:55,
+                            AuthService.kt:102
+                        </div>
+                    </div>
+                </div>
+                <div class="plan-step step-pending"><span class="status">⬜</span>
+                    <div class="info">编译检查
+                        <div class="files">工具: runShell | ./gradlew compileKotlin</div>
+                    </div>
+                </div>
+                <div class="plan-step step-pending"><span class="status">⬜</span>
+                    <div class="info">运行测试
+                        <div class="files">工具: runShell | ./gradlew test</div>
+                    </div>
+                </div>
+                <div class="plan-actions">
+                    <button class="btn btn-primary">▶ 继续执行</button>
+                    <button class="btn btn-secondary">⏸ 暂停</button>
+                    <button class="btn btn-danger">✕ 终止计划</button>
+                </div>
+            </div>
+
+            <!-- 多 Agent 调度 -->
+            <div class="multi-agent-block">
+                <div class="ma-header">🤖 多 Agent 协作 — 父 Agent 调度中</div>
+                <div class="ma-sub"><span>🔧</span><span
+                        class="ma-name">Agent-A: 重构 UserService</span><span class="ma-status"
+                                                                              style="color:var(--success)">✅ 完成 (sub-session #42)</span>
+                </div>
+                <div class="ma-sub"><span>🧪</span><span class="ma-name">Agent-B: 生成单元测试</span><span
+                        class="ma-status" style="color:var(--primary)">⏳ 执行中...</span></div>
+                <div class="ma-sub"><span>🔍</span><span
+                        class="ma-name">Agent-C: 代码审查</span><span class="ma-status"
+                                                                      style="color:var(--g5)">⏸ 排队等待</span>
+                </div>
+                <div style="font-size:11px;color:var(--g5);margin-top:4px">并发上限: 3 | 已完成 1/3
+                    | 文件锁: UserService.kt (Agent-A 持有)
+                </div>
+            </div>
+
+            <!-- AWAITING_APPROVAL -->
+            <div class="tool-card">
+                <div class="tool-card-header"><span>🔧</span> runShell <span
+                        class="state state-awaiting">🔒 等待授权</span></div>
+                <div class="tool-card-body">
+                    <div class="tool-card-params">command: ./gradlew compileKotlin | workDir: ./
+                    </div>
+                    <div class="tool-approval" id="approval1">
+                        <span class="msg">⚠ Agent 请求执行 Shell 命令。是否允许？</span>
+                        <span class="timer">等待用户操作</span>
+                        <button class="btn btn-primary btn-xs" onclick="approve('approval1')">批准
+                        </button>
+                        <button class="btn btn-secondary btn-xs" onclick="reject('approval1')">
+                            拒绝
+                        </button>
+                    </div>
+                </div>
+                <div class="tool-card-footer"><span>⏳</span><span>等待用户操作</span></div>
+            </div>
+
+            <!-- EXECUTING -->
+            <div class="tool-card">
+                <div class="tool-card-header"><span>🔄</span> editFile <span
+                        class="state state-executing">⏳ 执行中...</span></div>
+                <div class="tool-card-body">
+                    <div class="tool-card-params">filePath: UserController.kt | oldString:
+                        "userService.findById" | newString: "userService.findById"
+                    </div>
+                </div>
+                <div class="tool-card-footer"><span>⏳</span><span>UserController.kt:55</span></div>
+            </div>
+
+            <!-- 错误气泡 -->
+            <div class="msg-row error">
+                <div class="bubble error">
+                    <p><strong>❌ 请求失败</strong></p>
+                    <p style="font-size:12px;margin-top:4px">429 Too Many Requests — API 调用频率超限，请等待
+                        10 秒后重试</p>
+                    <div style="display:flex;gap:8px;margin-top:8px">
+                        <button class="btn btn-primary btn-xs">🔄 重试</button>
+                        <button class="btn btn-secondary btn-xs">📋 复制错误</button>
+                    </div>
+                </div>
+                <div class="msg-ts">14:35</div>
+            </div>
+
+            <!-- 流式 -->
+            <div class="msg-row agent">
+                <div class="bubble agent"><p>正在分析错误，尝试重新执行 Step 3...<span
+                        style="color:var(--primary);animation:blink .5s infinite">▍</span></p></div>
+                <div class="msg-ts"><span>14:36</span><span style="color:var(--g5);font-size:11px">↑0.8K ↓0.2K</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="input-area" style="position:relative">
+            <!-- 文件引用 Popup -->
+            <div class="cmd-popup" id="file-popup">
+                <div class="cmd-group">项目文件</div>
+                <div class="cmd-item" onclick="pickFile('UserService.kt')"><span class="slash">UserService.kt</span>src/main/kotlin/service/
+                </div>
+                <div class="cmd-item" onclick="pickFile('UserController.kt')"><span class="slash">UserController.kt</span>src/main/kotlin/controller/
+                </div>
+                <div class="cmd-item" onclick="pickFile('AuthService.kt')"><span class="slash">AuthService.kt</span>src/main/kotlin/service/
+                </div>
+                <div class="cmd-item" onclick="pickFile('Config.java')"><span class="slash">Config.java</span>src/main/java/config/
+                </div>
+                <div class="cmd-item" onclick="pickFile('build.gradle.kts')"><span class="slash">build.gradle.kts</span>项目根目录
+                </div>
+                <div class="cmd-item" onclick="pickFile('Application.kt')"><span class="slash">Application.kt</span>src/main/kotlin/
+                </div>
+                <div class="cmd-item" onclick="pickFile('UserRepository.kt')"><span class="slash">UserRepository.kt</span>src/main/kotlin/repo/
+                </div>
+            </div>
+            <!-- 指令列表 Popup -->
+            <div class="cmd-popup" id="cmd-popup">
+                <div class="cmd-group">内置指令</div>
+                <div class="cmd-item" onclick="pickCmd('/plan ')"><span class="slash">/plan</span>生成执行计划<span
+                        class="desc">先分析再逐步执行</span></div>
+                <div class="cmd-item" onclick="pickCmd('/clear ')"><span class="slash">/clear</span>清除会话上下文
+                </div>
+                <div class="cmd-group" style="margin-top:4px">Skills</div>
+                <div class="cmd-item" onclick="pickCmd('/review ')"><span
+                        class="slash">/review</span>审查代码质量<span
+                        class="desc">code-review skill</span></div>
+                <div class="cmd-item" onclick="pickCmd('/refactor ')"><span
+                        class="slash">/refactor</span>重构代码<span
+                        class="desc">refactor skill</span></div>
+                <div class="cmd-item" onclick="pickCmd('/test ')"><span class="slash">/test</span>生成单元测试<span
+                        class="desc">test-generator skill</span></div>
+                <div class="cmd-group" style="margin-top:4px">其他</div>
+                <div class="cmd-item" onclick="pickCmd('/files ')"><span class="slash">/files</span>添加文件到上下文
+                </div>
+                <div class="cmd-item" onclick="pickCmd('/model ')"><span class="slash">/retry</span>重新发送上一条消息
+                </div>
+            </div>
+            <textarea id="chat-input" placeholder="输入你的问题，或 Ctrl+V 粘贴图片..."
+                      oninput="handleInput(this)" onkeydown="handleKeyDown(event)"></textarea>
+            <div class="tags-row">
+                <div class="tag">📄 UserService.kt <span class="close">✕</span></div>
+                <div class="tag">📄 Config.java <span class="close">✕</span></div>
+                <div class="tag img">🖼 screenshot.png 34KB <span class="close">✕</span></div>
+            </div>
+            <div class="bottom-row">
+                <span style="font-size:11px;color:var(--g5)">Enter 发送</span>
+                <button class="btn btn-primary" onclick="showToast('success','消息已发送')">↲ 发送
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====== Sessions 页面 ====== -->
+    <div class="page" id="page-sessions">
+        <div class="page-body">
+            <input class="search-box" placeholder="🔍 搜索会话...">
+            <div id="sessions-list">
+                <div class="card" style="margin-bottom:8px">
+                    <div class="card-row" style="cursor:pointer"
+                         onclick="restoreSession('重构 UserService — 添加 suspend 支持')">
+                        <div style="display:flex;align-items:center;gap:8px"><input type="checkbox"
+                                                                                    class="session-cb"
+                                                                                    onchange="updateSelectAll()"
+                                                                                    onclick="event.stopPropagation()"><strong>📝
+                            重构 UserService — 添加 suspend 支持</strong></div>
+                        <div style="text-align:right;font-size:11px;color:var(--g5)">3 小时前 · 8.2K
+                            tokens · 12 次工具
+                        </div>
+                    </div>
+                    <div style="font-size:11px;color:var(--g5);padding:0 0 8px 24px">⏸ 计划暂停中
+                        (Step 3/5)
+                    </div>
+                </div>
+                <div class="card" style="margin-bottom:8px">
+                    <div class="card-row" style="cursor:pointer"
+                         onclick="restoreSession('关于 Kotlin 协程的讨论')">
+                        <div style="display:flex;align-items:center;gap:8px"><input type="checkbox"
+                                                                                    class="session-cb"
+                                                                                    onchange="updateSelectAll()"
+                                                                                    onclick="event.stopPropagation()"><strong>💬
+                            关于 Kotlin 协程的讨论</strong></div>
+                        <div style="text-align:right;font-size:11px;color:var(--g5)">昨天 · 1.5K
+                            tokens · 纯聊天
+                        </div>
+                    </div>
+                </div>
+                <div class="card" style="margin-bottom:8px">
+                    <div class="card-row" style="cursor:pointer"
+                         onclick="restoreSession('分析项目架构')">
+                        <div style="display:flex;align-items:center;gap:8px"><input type="checkbox"
+                                                                                    class="session-cb"
+                                                                                    onchange="updateSelectAll()"
+                                                                                    onclick="event.stopPropagation()"><strong>📝
+                            分析项目架构</strong></div>
+                        <div style="text-align:right;font-size:11px;color:var(--g5)">6 月 22 日 ·
+                            12.3K tokens · 8 次工具
+                        </div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-row" style="cursor:pointer"
+                         onclick="restoreSession('修复 NPE bug')">
+                        <div style="display:flex;align-items:center;gap:8px"><input type="checkbox"
+                                                                                    class="session-cb"
+                                                                                    onchange="updateSelectAll()"
+                                                                                    onclick="event.stopPropagation()"><strong>📝
+                            修复 NPE bug</strong></div>
+                        <div style="text-align:right;font-size:11px;color:var(--g5)">6 月 20 日 ·
+                            5.6K tokens · 3 次工具
+                        </div>
+                    </div>
+                </div>
+                <div style="font-size:11px;color:var(--g5);margin-top:8px">共 24 个会话 · 已选 <span
+                        id="selected-count">0</span> 个
+                </div>
+                <div style="display:flex;gap:8px;margin-top:8px">
+                    <button class="btn btn-secondary btn-xs" onclick="toggleSelectAll()"
+                            id="select-all-btn">全选
+                    </button>
+                    <button class="btn btn-danger btn-xs" onclick="deleteSelected()">删除选中
+                    </button>
+                    <button class="btn btn-secondary btn-xs">导出 JSON</button>
+                </div>
+            </div><!-- end sessions-list -->
+            <!-- 空状态 -->
+            <div id="sessions-empty" class="empty-state" style="display:none">
+                <div class="icon">📁</div>
+                <p><strong>还没有会话记录</strong></p>
+                <p style="margin-top:4px">开始一段 Agent 对话，会话将自动保存在这里</p>
+                <button class="btn btn-primary btn-xs" style="margin-top:12px"
+                        onclick="switchPage('chat')">开始新会话 →
+                </button>
+            </div>
+            <!-- 切换：模拟空状态 -->
+            <div style="text-align:center;margin-top:16px">
+                <button class="btn btn-secondary btn-xs" onclick="toggleSessionsEmpty()">🔄
+                    切换空状态/有数据
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====== Token Usage 页面 ====== -->
+    <div class="page" id="page-usage">
+        <div class="page-body">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+                <span class="page-title" style="margin:0">📊 Token 消耗</span>
+                <span style="font-size:12px;color:var(--g5)">总消耗: 128.5K · ¥0.87</span>
+            </div>
+            <div class="card" style="margin-bottom:12px">
+                <div style="font-size:12px;color:var(--g5);margin-bottom:8px">📈
+                    消耗趋势（本月，按日）
+                </div>
+                <div class="sparkline" id="spark"></div>
+                <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--g5)">
+                    <span>1日</span><span>15日</span><span>30日</span></div>
+            </div>
+            <div class="section-title">按会话</div>
+            <div class="card">
+                <div class="card-row"><span>📝 重构 UserService ⏸</span><span style="font-size:12px">45K · ¥0.32</span>
+                </div>
+            </div>
+            <div class="card" style="margin-top:4px">
+                <div class="card-row"><span>📝 分析项目架构</span><span style="font-size:12px">32K · ¥0.21</span>
+                </div>
+            </div>
+            <div class="card" style="margin-top:4px">
+                <div class="card-row"><span>📝 修复 NPE bug</span><span style="font-size:12px">18K · ¥0.12</span>
+                </div>
+            </div>
+            <div class="card" style="margin-top:4px">
+                <div class="card-row"><span>💬 Kotlin 协程讨论</span><span style="font-size:12px">3K · ¥0.01</span>
+                </div>
+            </div>
+            <div class="section-title">模型: deepseek-v4-pro（固定）</div>
+        </div>
+    </div>
+
+    <!-- ====== MCP 页面 ====== -->
+    <div class="page" id="page-mcp">
+        <div class="page-body">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+                <span class="page-title" style="margin:0">🔌 MCP Servers</span>
+                <button class="btn btn-primary btn-xs"
+                        onclick="document.getElementById('mcp-add-form').style.display='block'">➕ 添加
+                </button>
+            </div>
+            <!-- 添加表单 -->
+            <div class="card" id="mcp-add-form" style="margin-bottom:12px;display:none">
+                <div class="section-title" style="margin-top:0">添加 MCP Server</div>
+                <div class="form-group"><label>名称</label><input class="form-input"
+                                                                  placeholder="my-server"></div>
+                <div class="form-group"><label>命令</label><input class="form-input"
+                                                                  placeholder="npx -y @anthropic/mcp-server-xxx">
+                </div>
+                <div class="form-group"><label>参数（可选，空格分隔）</label><input class="form-input"
+                                                                                 placeholder="--port 8080">
+                </div>
+                <div class="form-group"><label>环境变量（可选，KEY=VALUE 每行一个）</label><textarea
+                        class="form-input" style="height:60px;resize:vertical"
+                        placeholder="DB_HOST=localhost&#10;DB_PORT=3306"></textarea></div>
+                <div style="display:flex;gap:8px">
+                    <button class="btn btn-primary btn-xs"
+                            onclick="addMcpServer();document.getElementById('mcp-add-form').style.display='none'">
+                        保存并连接
+                    </button>
+                    <button class="btn btn-secondary btn-xs"
+                            onclick="document.getElementById('mcp-add-form').style.display='none'">
+                        取消
+                    </button>
+                </div>
+            </div>
+            <div class="card" style="margin-bottom:8px">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span
+                        class="status-dot dot-green"></span><strong>mysql</strong><span
+                        style="margin-left:auto;font-size:12px;color:var(--g5)">RUNNING</span></div>
+                <div style="font-size:12px;color:var(--g5)">command: npx -y
+                    @anthropic/mcp-server-mysql
+                </div>
+                <div style="font-size:12px;color:var(--g5);margin-top:4px">tools: query,
+                    list_tables, describe, insert, update (5)
+                </div>
+                <div style="display:flex;gap:8px;margin-top:8px">
+                    <button class="btn btn-secondary btn-xs">▶ 测试连接</button>
+                    <button class="btn btn-secondary btn-xs">✏ 编辑</button>
+                    <button class="btn btn-secondary btn-xs">🔌 断开</button>
+                    <button class="btn btn-danger btn-xs" onclick="deleteMcpServer(this)">🗑 删除
+                    </button>
+                </div>
+            </div>
+            <div class="card" style="margin-bottom:8px">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span
+                        class="status-dot dot-yellow"></span><strong>filesystem</strong><span
+                        style="margin-left:auto;font-size:12px;color:var(--warning)">INITIALIZING</span>
+                </div>
+                <div style="font-size:12px;color:var(--g5)">command: npx -y
+                    @anthropic/mcp-server-filesystem
+                </div>
+                <div style="font-size:12px;color:var(--warning);margin-top:4px">正在安装依赖 (npm
+                    install)... 最多等待 3 分钟
+                </div>
+            </div>
+            <div class="card" style="margin-bottom:8px">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span
+                        class="status-dot dot-red"></span><strong>custom-server</strong><span
+                        style="margin-left:auto;font-size:12px;color:var(--error)">CRASHED</span>
+                </div>
+                <div style="font-size:12px;color:var(--g5)">command: python my_server.py</div>
+                <div style="font-size:12px;color:var(--error);margin-top:4px">错误: Process exited
+                    with code 1
+                </div>
+                <div style="display:flex;gap:8px;margin-top:8px">
+                    <button class="btn btn-primary btn-xs">🔄 重连</button>
+                    <button class="btn btn-secondary btn-xs">📋 查看日志</button>
+                    <button class="btn btn-secondary btn-xs">✏ 编辑</button>
+                    <button class="btn btn-danger btn-xs" onclick="deleteMcpServer(this)">🗑 删除
+                    </button>
+                </div>
+            </div>
+            <div style="font-size:11px;color:var(--g5);margin-top:8px">配置文件:
+                .code-assistant/mcp-config.json · .mcp.json · ~/.claude/.mcp.json<br><span
+                        style="font-size:11px;color:var(--g5)">兼容 Claude Code / Codex MCP 配置格式</span>
+            </div>
+            <!-- MCP 空状态 -->
+            <div id="mcp-empty" class="empty-state" style="display:none">
+                <div class="icon">🔌</div>
+                <p><strong>还没有 MCP Server</strong></p>
+                <p style="margin-top:4px">添加 MCP Server 连接外部工具服务（数据库、API、文件系统）</p>
+                <button class="btn btn-primary btn-xs" style="margin-top:12px"
+                        onclick="document.getElementById('mcp-add-form').style.display='block'">➕ 添加
+                    Server
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====== Skills 页面 ====== -->
+    <div class="page" id="page-skills">
+        <div class="page-body">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+                <span class="page-title" style="margin:0">🎯 Skills</span>
+                <button class="btn btn-primary btn-xs"
+                        onclick="document.getElementById('skill-add-form').style.display='block'">➕
+                    新建
+                </button>
+            </div>
+            <!-- 添加表单 -->
+            <div class="card" id="skill-add-form" style="margin-bottom:12px;display:none">
+                <div class="section-title" style="margin-top:0">新建 Skill</div>
+                <div class="form-group"><label>名称</label><input class="form-input"
+                                                                  placeholder="my-skill"></div>
+                <div class="form-group"><label>描述</label><input class="form-input"
+                                                                  placeholder="Skill 的功能描述">
+                </div>
+                <div class="form-group"><label>调用命令（/xxx）</label><input class="form-input"
+                                                                            placeholder="my-skill">
+                </div>
+                <div class="form-group"><label>依赖工具（逗号分隔）</label><input class="form-input"
+                                                                                placeholder="readFile, runShell">
+                </div>
+                <div class="form-group"><label>正文（Markdown）</label><textarea class="form-input"
+                                                                               style="height:80px;resize:vertical"
+                                                                               placeholder="# My Skill&#10;&#10;执行以下步骤：&#10;1. 读取目标文件&#10;2. ..."></textarea>
+                </div>
+                <div style="display:flex;gap:8px">
+                    <button class="btn btn-primary btn-xs"
+                            onclick="addSkill();document.getElementById('skill-add-form').style.display='none'">
+                        创建
+                    </button>
+                    <button class="btn btn-secondary btn-xs"
+                            onclick="document.getElementById('skill-add-form').style.display='none'">
+                        取消
+                    </button>
+                </div>
+            </div>
+            <div class="card" style="margin-bottom:8px">
+                <div class="card-row">
+                    <div style="display:flex;align-items:center;gap:8px">
+                        <div class="switch on" onclick="this.classList.toggle('on')"></div>
+                        <strong>code-review</strong></div>
+                    <span style="font-size:12px;color:var(--g5)">调用: /review 或 /code-review</span>
+                </div>
+                <div style="font-size:12px;color:var(--g5);padding:0 0 8px">审查代码质量，查找 bug
+                    和安全问题 · 工具: readFile, runShell
+                </div>
+            </div>
+            <div class="card" style="margin-bottom:8px">
+                <div class="card-row">
+                    <div style="display:flex;align-items:center;gap:8px">
+                        <div class="switch on" onclick="this.classList.toggle('on')"></div>
+                        <strong>refactor</strong></div>
+                    <span style="font-size:12px;color:var(--g5)">调用: /refactor</span></div>
+                <div style="font-size:12px;color:var(--g5);padding:0 0 8px">重构代码结构，改进可读性
+                    · 工具: readFile, editFile, writeFile
+                </div>
+            </div>
+            <div class="card" style="margin-bottom:8px">
+                <div class="card-row">
+                    <div style="display:flex;align-items:center;gap:8px">
+                        <div class="switch"
+                             onclick="showToast('error','该 Skill 声明的工具不存在，无法启用')"></div>
+                        <strong>docker-helper</strong></div>
+                    <span style="font-size:12px;color:var(--error)">⚠ 工具缺失</span></div>
+                <div style="font-size:12px;color:var(--g5);padding:0 0 8px">Docker 容器管理 · <span
+                        style="color:var(--error)">声明了不存在的工具: docker-compose</span></div>
+            </div>
+            <div class="card">
+                <div class="card-row">
+                    <div style="display:flex;align-items:center;gap:8px">
+                        <div class="switch on" onclick="this.classList.toggle('on')"></div>
+                        <strong>test-generator</strong></div>
+                    <span style="font-size:12px;color:var(--g5)">调用: /test 或 /generate-test</span>
+                </div>
+                <div style="font-size:12px;color:var(--g5);padding:0 0 8px">根据源代码自动生成单元测试
+                    · 工具: readFile, writeFile
+                </div>
+            </div>
+            <div style="font-size:11px;color:var(--g5);margin-top:8px">目录: .code-assistant/skills/
+                <span style="color:var(--primary);cursor:pointer">📂 打开</span></div>
+        </div>
+    </div>
+
+    <!-- ====== Settings 页面 ====== -->
+    <div class="page" id="page-settings">
+        <div class="page-body">
+            <span class="page-title">⚙ Settings</span>
+            <div class="card" style="margin-bottom:12px">
+                <div class="section-title" style="margin-top:0">API</div>
+                <div class="form-group"><label>API Key</label><input class="form-input"
+                                                                     type="password"
+                                                                     value="sk-03fb••••••••••••••••ed5fae">
+                </div>
+                <div style="font-size:12px;color:var(--success);margin-bottom:8px">🟢 已验证</div>
+                <button class="btn btn-secondary btn-xs">验证 Key</button>
+                <div style="font-size:12px;color:var(--g5);margin-top:8px">模型:
+                    deepseek-v4-pro（固定）
+                </div>
+            </div>
+            <div class="card" style="margin-bottom:12px">
+                <div class="section-title" style="margin-top:0">Agent</div>
+                <div class="form-group"><label>Shell 超时上限（秒，0=不限）</label><input
+                        class="form-input" value="0" style="width:100px"></div>
+                <div class="form-group"><label>最大轮次</label><input class="form-input" value="15"
+                                                                      style="width:100px"></div>
+                <div class="form-group"><label>多 Agent 并发上限</label><input class="form-input"
+                                                                               value="3"
+                                                                               style="width:100px">
+                </div>
+            </div>
+            <div class="card">
+                <div class="section-title" style="margin-top:0">快捷键</div>
+                <div class="card-row"><span>打开面板</span><span
+                        style="font-size:12px;color:var(--g5)">Ctrl+Shift+K</span></div>
+                <div class="card-row"><span>发送消息</span><span
+                        style="font-size:12px;color:var(--g5)">Enter</span></div>
+                <div class="card-row"><span>停止生成</span><span
+                        style="font-size:12px;color:var(--g5)">Escape</span></div>
+                <div class="card-row"><span>新建会话</span><span
+                        style="font-size:12px;color:var(--g5)">Ctrl+Shift+N</span></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="toast" class="toast success"></div>
+
+<script>
+    function switchPage(name) {
+      document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+      document.getElementById('page-'+name).classList.add('active');
+      document.querySelectorAll('.tab').forEach((t,i) => {
+        t.classList.remove('active');
+        const pages=['welcome','chat','sessions','usage','mcp','skills','settings'];
+        if(pages[i]===name) t.classList.add('active');
+      });
+    }
+    function showToast(type,msg){
+      const t=document.getElementById('toast');
+      t.className='toast '+(type==='error'?'error-t':type);
+      t.textContent=msg;t.style.display='block';
+      setTimeout(()=>t.style.display='none',3000);
+    }
+    function approve(id){
+      const el=document.getElementById(id);
+      el.innerHTML='<span style=font-size:13px;color:var(--success)>✅ 已批准 · 执行中...</span>';
+    }
+    function reject(id){
+      const el=document.getElementById(id);
+      el.innerHTML='<span style=font-size:13px;color:var(--error)>🚫 已拒绝</span>';
+    }
+
+    // Sessions 恢复/全选/删除
+    function restoreSession(title){
+      showToast('success','已恢复会话: ' + title);
+      switchPage('chat');
+    }
+    // Sessions 全选/删除
+    let selectAll = false;
+    function toggleSelectAll(){
+      selectAll = !selectAll;
+      document.querySelectorAll('.session-cb').forEach(cb => { cb.checked = selectAll; });
+      updateSelectAll();
+    }
+    function updateSelectAll(){
+      const cbs = document.querySelectorAll('.session-cb');
+      const checked = document.querySelectorAll('.session-cb:checked').length;
+      document.getElementById('selected-count').textContent = checked;
+      selectAll = checked === cbs.length && cbs.length > 0;
+      document.getElementById('select-all-btn').textContent = selectAll ? '取消全选' : '全选';
+    }
+    // Sessions 空状态切换
+    function toggleSessionsEmpty(){
+      const list = document.getElementById('sessions-list');
+      const empty = document.getElementById('sessions-empty');
+      if(list.style.display === 'none'){
+        list.style.display = 'block'; empty.style.display = 'none';
+      } else {
+        list.style.display = 'none'; empty.style.display = 'block';
+      }
+    }
+    // 键盘导航
+    function handleKeyDown(e){
+      const cmdP = document.getElementById('cmd-popup');
+      const fileP = document.getElementById('file-popup');
+      const activePopup = cmdP.classList.contains('show') ? cmdP : (fileP.classList.contains('show') ? fileP : null);
+      if(!activePopup) return;
+      const items = activePopup.querySelectorAll('.cmd-item');
+      const visibleItems = Array.from(items).filter(i => i.style.display !== 'none');
+      if(visibleItems.length === 0) return;
+      const activeIdx = visibleItems.findIndex(i => i.classList.contains('active'));
+
+      if(e.key === 'ArrowDown'){
+        e.preventDefault();
+        visibleItems.forEach(i => i.classList.remove('active'));
+        const next = (activeIdx + 1) % visibleItems.length;
+        visibleItems[next].classList.add('active');
+        visibleItems[next].scrollIntoView({block:'nearest'});
+      } else if(e.key === 'ArrowUp'){
+        e.preventDefault();
+        visibleItems.forEach(i => i.classList.remove('active'));
+        const prev = activeIdx <= 0 ? visibleItems.length - 1 : activeIdx - 1;
+        visibleItems[prev].classList.add('active');
+        visibleItems[prev].scrollIntoView({block:'nearest'});
+      } else if(e.key === 'Enter' && activeIdx >= 0){
+        e.preventDefault();
+        visibleItems[activeIdx].click();
+      } else if(e.key === 'Escape'){
+        cmdP.classList.remove('show');
+        fileP.classList.remove('show');
+      }
+    }
+    // @file 文件引用
+    const mockFiles = ['UserService.kt','UserController.kt','AuthService.kt','Config.java','build.gradle.kts','Application.kt','UserRepository.kt','AuthInterceptor.kt','CacheManager.kt','DatabaseConfig.java'];
+    function getFilePopup(){ return document.getElementById('file-popup'); }
+    // 指令列表 / @file
+    function handleInput(el){
+      const cmdPopup = document.getElementById('cmd-popup');
+      const filePopup = document.getElementById('file-popup');
+      const val = el.value;
+      const cursorPos = el.selectionStart;
+      const beforeCursor = val.substring(0, cursorPos);
+
+      // 检测 @ 文件引用
+      const fileMatch = beforeCursor.match(/(?:^|\s)@(\S*)$/);
+      if(fileMatch){
+        cmdPopup.classList.remove('show');
+        filePopup.classList.add('show');
+        const filter = fileMatch[1].toLowerCase();
+        let first = null;
+        filePopup.querySelectorAll('.cmd-item').forEach(item => {
+          const name = item.querySelector('.slash').textContent;
+          const visible = !filter || name.toLowerCase().includes(filter);
+          item.style.display = visible ? 'flex' : 'none';
+          if(visible && !first) first = item;
+        });
+        filePopup.querySelectorAll('.cmd-item').forEach(i => i.classList.remove('active'));
+        if(first) first.classList.add('active');
+        return;
+      }
+      filePopup.classList.remove('show');
+
+      // 检测 / 指令
+      const cmdMatch = beforeCursor.match(/(?:^|\s)\/(\S*)$/);
+      if(cmdMatch){
+        cmdPopup.classList.add('show');
+        const filter = cmdMatch[1].toLowerCase();
+        let first = null;
+        cmdPopup.querySelectorAll('.cmd-item').forEach(item => {
+          const cmd = item.querySelector('.slash').textContent;
+          const visible = !filter || cmd.includes(filter);
+          item.style.display = visible ? 'flex' : 'none';
+          if(visible && !first) first = item;
+        });
+        cmdPopup.querySelectorAll('.cmd-item').forEach(i => i.classList.remove('active'));
+        if(first) first.classList.add('active');
+      } else {
+        cmdPopup.classList.remove('show');
+      }
+    }
+    function pickFile(file){
+      const el = document.getElementById('chat-input');
+      const val = el.value; const cursorPos = el.selectionStart;
+      const beforeCursor = val.substring(0, cursorPos);
+      const afterCursor = val.substring(cursorPos);
+      const newBefore = beforeCursor.replace(/@(\S*)$/, '@'+file+' ');
+      el.value = newBefore + afterCursor;
+      el.focus(); el.selectionStart = el.selectionEnd = newBefore.length;
+      document.getElementById('file-popup').classList.remove('show');
+      // 添加 tag
+      const tagsRow = document.querySelector('.tags-row');
+      const existing = tagsRow.querySelectorAll('.tag');
+      if(existing.length < 5){
+        const tag = document.createElement('span');
+        tag.className='tag'; tag.innerHTML='📄 '+file+' <span class=close>✕</span>';
+        tag.querySelector('.close').onclick = () => tag.remove();
+        tagsRow.appendChild(tag);
+      }
+    }
+    function pickCmd(cmd){
+      const el = document.getElementById('chat-input');
+      const val = el.value;
+      const cursorPos = el.selectionStart;
+      const beforeCursor = val.substring(0, cursorPos);
+      const afterCursor = val.substring(cursorPos);
+      // 替换 /xxx 为选中的指令
+      const newBefore = beforeCursor.replace(/\/(\S*)$/, cmd);
+      el.value = newBefore + afterCursor;
+      el.focus();
+      el.selectionStart = el.selectionEnd = (newBefore).length;
+      document.getElementById('cmd-popup').classList.remove('show');
+    }
+    // 点击空白关闭 popup
+    document.addEventListener('click', function(e){
+      if(!e.target.closest('#cmd-popup') && !e.target.closest('#file-popup') && !e.target.closest('#chat-input')){
+        document.getElementById('cmd-popup').classList.remove('show');
+        document.getElementById('file-popup').classList.remove('show');
+      }
+    });
+    // 选项组件
+    function selectOption(el, blockId){
+      const block = document.getElementById(blockId);
+      block.querySelectorAll('.opt-item').forEach(i => i.classList.remove('selected'));
+      el.classList.add('selected');
+      const letter = el.querySelector('.opt-letter').textContent;
+      block.querySelector('.selected-label').textContent = letter;
+    }
+    function confirmOption(blockId, defaultOpt){
+      const block = document.getElementById(blockId);
+      const selected = block.querySelector('.opt-item.selected');
+      const letter = selected ? selected.querySelector('.opt-letter').textContent : defaultOpt;
+      showToast('success','已选择: ' + letter);
+    }
+    // MCP 添加/删除
+    function addMcpServer(){
+      showToast('success','MCP Server 已添加，正在连接...');
+    }
+    function deleteMcpServer(btn){
+      const card = btn.closest('.card');
+      const name = card.querySelector('strong').textContent;
+      card.remove();
+      showToast('success','已删除 ' + name);
+    }
+    // Skills 添加
+    function addSkill(){
+      showToast('success','Skill 已创建');
+    }
+    function deleteSelected(){
+      const checked = document.querySelectorAll('.session-cb:checked');
+      if(checked.length === 0) return showToast('error','请先选择会话');
+      checked.forEach(cb => cb.closest('.card').remove());
+      updateSelectAll();
+      showToast('success','已删除 ' + checked.length + ' 个会话');
+    }
+    // 默认滚动到顶部（确保思考过程和工具调用可见）
+    document.querySelector('#page-chat .page-body').scrollTop = 0;
+    // sparkline 渲染
+    (function(){
+      const data=[3,5,2,8,12,7,4,6,15,10,8,3,9,14,11,6,4,2,7,13,8,5,3,9,16,11,7,4,6,8];
+      const max=Math.max(...data);
+      const spark=document.getElementById('spark');
+      data.forEach(v=>{
+        const bar=document.createElement('div');
+        bar.className='bar';
+        bar.style.height=(v/max*80)+'px';
+        bar.title=v+'K tokens';
+        spark.appendChild(bar);
+      });
+    })();
+
+    const style=document.createElement('style');
+    style.textContent='@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}';
+    document.head.appendChild(style);
+</script>
+</body>
+</html>
