@@ -200,7 +200,16 @@ class ChatToolWindow(private val project: Project) {
         toolTipText = AiAssistantBundle.message("chat.tooltip.new.session")
         border = JBUI.Borders.empty(2, 6, 2, 6)
         addMouseListener(object : MouseAdapter() {
-            override fun mouseClicked(e: MouseEvent) { renderedCount = 0; viewModel.clearConversation(); viewModel.messageRefChips.clear(); refChips.clear(); selectionRefChip = null; completedStreamingToolNames.clear(); rebuildChips(); planBar.updateState(false, null, null, emptyList()); syncNewMessages() }
+            override fun mouseClicked(e: MouseEvent) {
+                renderedCount =
+                    0; viewModel.clearConversation(); viewModel.messageRefChips.clear(); refChips.clear(); selectionRefChip =
+                    null; msgComponentMap.clear(); msgContentMap.clear(); rebuildChips(); planBar.updateState(
+                    false,
+                    null,
+                    null,
+                    emptyList()
+                ); syncNewMessages()
+            }
             override fun mouseEntered(e: MouseEvent) { foreground = ChatTheme.accentHover }
             override fun mouseExited(e: MouseEvent) { foreground = ChatTheme.codeLangFg }
         })
@@ -817,6 +826,12 @@ class ChatToolWindow(private val project: Project) {
 
     private var welcomePanel: JPanel? = null
     private val bubbleSizeConstraints = mutableListOf<Pair<JPanel, JComponent>>()
+
+    /** 单管线渲染：消息 ID → 容器中的行组件 */
+    private val msgComponentMap = mutableMapOf<Long, JComponent>()
+
+    /** 消息 ID → 内容组件引用（避免组件树遍历查找），thinking=JTextArea, assistant=markdown容器 */
+    private val msgContentMap = mutableMapOf<Long, Any?>()
     // 流式气泡增量更新
     private var streamingBubble: JPanel? = null
     private var streamingContentPane: JComponent? = null
@@ -844,10 +859,8 @@ class ChatToolWindow(private val project: Project) {
     private val subToolRunningRows = mutableMapOf<String, com.aiassistant.ui.ToolRowFactory.SubAgentToolRow>()
     private var lastStreamingTextArea: JTextArea? = null
 
-    private fun clearSubToolTracking() {
-        subToolRunningRows.clear()
-        renderedToolNames.clear()
-    }
+    /** 已废弃——单管线 syncNewMessages 统一渲染 */
+    private fun clearSubToolTracking() {}
     // 已原地完成的工具名集合（createToolResultBubble 跳过，避免重复渲染）
     private val completedStreamingToolNames = mutableSetOf<String>()
 
@@ -1116,9 +1129,10 @@ class ChatToolWindow(private val project: Project) {
             syncNewMessages()
             checkEmptyState()
         }
-        viewModel.onStreamingUpdate = { updateStreamingBubble() }
-        viewModel.onStreamingThinkingChanged = { updateStreamingThinking() }
-        viewModel.onThinkingCompleted = { finalizeThinkingRow() }
+        // 流式 UI 操作已改为单管线（syncNewMessages 统一渲染），以下回调不再绑定
+        // viewModel.onStreamingUpdate = { updateStreamingBubble() }
+        // viewModel.onStreamingThinkingChanged = { updateStreamingThinking() }
+        // viewModel.onThinkingCompleted = { finalizeThinkingRow() }
         viewModel.onStreamingStateChanged = { streaming ->
             ApplicationManager.getApplication().invokeLater {
                 inputArea.isEnabled = !streaming
@@ -1143,16 +1157,12 @@ class ChatToolWindow(private val project: Project) {
                 if (countdown > 0) showWarning(AiAssistantBundle.message("chat.error.ratelimit", countdown)) else hideError()
             }
         }
-        viewModel.onToolExecute = { name, args ->
-            showStreamingToolRow(name, args)
-        }
+        // 流式 UI 操作已改为单管线（syncNewMessages 统一渲染），以下回调不再调用流式方法
+        viewModel.onToolExecute = { _, _ -> /* showStreamingToolRow 已废弃 */ }
         viewModel.onToolResult = { name, _ ->
-            if (name != "task") { completeStreamingToolRow(name) }
             if (name == "write_file" || name == "edit_file") invalidateFileCache()
         }
-        viewModel.onToolStreaming = { name, content ->
-            updateStreamingToolContent(content)
-        }
+        // viewModel.onToolStreaming = { name, content -> updateStreamingToolContent(content) }
         viewModel.onConfirmTool = { _, _, _, _ ->
             ApplicationManager.getApplication().invokeLater { syncNewMessages() }
         }
@@ -1198,299 +1208,165 @@ class ChatToolWindow(private val project: Project) {
 
     private var renderedCount = 0
 
+    /** 单管线渲染入口。遍历 messages，已有组件原地更新，新消息创建组件。 */
     private fun syncNewMessages() {
         val displayMessages = viewModel.messages.filter { it.role != "system" }
         if (displayMessages.isEmpty()) {
-            conversationContainer.removeAll()
-            bubbleSizeConstraints.clear()
-            streamingBubble = null; streamingContentPane = null
-            streamingThinkingRow = null; streamingThinkingTextArea = null
-            thinkingCompleted = false; assistantBubbleCompleted = false
-            cleanupStreamingToolRow()
+            conversationContainer.removeAll(); bubbleSizeConstraints.clear(); msgComponentMap.clear(); msgContentMap.clear()
             renderedCount = 0
             val hintPanel = JPanel(GridBagLayout())
             hintPanel.add(JLabel(AiAssistantBundle.message("chat.empty.hint")).apply {
-                font = font.deriveFont(Font.PLAIN, 13f)
-                foreground = ChatTheme.emptyHintFg; horizontalAlignment = SwingConstants.CENTER
+                font = font.deriveFont(Font.PLAIN, 13f); foreground =
+                ChatTheme.emptyHintFg; horizontalAlignment = SwingConstants.CENTER
             }, GridBagConstraints())
             conversationContainer.add(hintPanel)
             conversationContainer.revalidate(); conversationContainer.repaint()
             return
         }
-        // 流式路径可能使 renderedCount 超过 messages 数量，兜底复位避免跳过或重复渲染
-        if (renderedCount > displayMessages.size) renderedCount = 0
+        // 已不存在的消息（从 messages 中删除的）从映射中移除
+        val currentIds = displayMessages.map { it.id }.toSet()
+        msgComponentMap.keys.removeAll { it !in currentIds }; msgContentMap.keys.removeAll { it !in currentIds }
+
         if (renderedCount == 0) {
-            conversationContainer.removeAll()
-            bubbleSizeConstraints.clear()
-            streamingBubble = null; streamingContentPane = null
-            streamingThinkingRow = null; streamingThinkingTextArea = null
-            thinkingCompleted = false; assistantBubbleCompleted = false
+            conversationContainer.removeAll(); bubbleSizeConstraints.clear(); msgComponentMap.clear(); msgContentMap.clear()
         }
-        for (i in renderedCount until displayMessages.size) {
-            val msg = displayMessages[i]
-            val component = when (msg.role) {
-                "user" -> {
-                    val refs = viewModel.messageRefChips[msg.id]
-                    if (refs != null && refs.isNotEmpty()) createUserBubbleWithFooter(msg, buildRefChipFooter(refs))
-                    else createMessageBubble(msg)
-                }
-                else -> createMessageBubble(msg)
-            } ?: continue
-            conversationContainer.add(component)
-            renderedCount++
+
+        for ((i, msg) in displayMessages.withIndex()) {
+            val existing = msgComponentMap[msg.id]
+            if (existing != null) {
+                // 已渲染的消息也要检查更新（流式增量只改 content，不增加新消息）
+                updateComponentInPlace(existing, msg)
+            } else if (i >= renderedCount) {
+                // 新消息：创建组件
+                val component = when (msg.role) {
+                    "user" -> {
+                        val refs = viewModel.messageRefChips[msg.id]
+                        if (refs != null && refs.isNotEmpty()) createUserBubbleWithFooter(
+                            msg,
+                            buildRefChipFooter(refs)
+                        )
+                        else createMessageBubble(msg)
+                    }
+
+                    else -> createMessageBubble(msg)
+                } ?: continue
+                conversationContainer.add(component)
+                msgComponentMap[msg.id] = component
+                msgContentMap[msg.id] = extractContentRef(component, msg)
+                renderedCount = i + 1
+            }
         }
         conversationContainer.revalidate(); conversationContainer.repaint()
         scrollToBottom()
+    }
+
+    /** 原地重建组件（移除旧组件，在原位插入新组件） */
+    private fun rebuildComponent(oldComponent: JComponent, msg: AgentMessage) {
+        val idx = conversationContainer.components.indexOfFirst { it === oldComponent }
+        if (idx >= 0) {
+            conversationContainer.remove(oldComponent)
+            val newComponent = createMessageBubble(msg) ?: return
+            conversationContainer.add(newComponent, idx)
+            msgComponentMap[msg.id] = newComponent
+            msgContentMap[msg.id] = extractContentRef(newComponent, msg)
+        }
+    }
+
+    /** 原地更新已有的消息组件 */
+    private fun updateComponentInPlace(component: JComponent, msg: AgentMessage) {
+        val contentRef = msgContentMap[msg.id]
+        when (msg.role) {
+            "thinking" -> {
+                if (msg.status == AgentMessage.MessageStatus.NORMAL) rebuildComponent(
+                    component,
+                    msg
+                )
+                else (contentRef as? JTextArea)?.text = msg.content
+            }
+
+            "assistant" -> {
+                if (msg.status == AgentMessage.MessageStatus.NORMAL) {
+                    rebuildComponent(component, msg); return
+                }
+                val contentPane = contentRef as? JPanel
+                if (contentPane != null) {
+                    val changed = markdownRenderer.updateInPlace(contentPane, msg.content)
+                    if (changed) component.revalidate() else rebuildComponent(component, msg)
+                } else rebuildComponent(component, msg)
+            }
+
+            "tool" -> {
+                if (msg.status == AgentMessage.MessageStatus.NORMAL) rebuildComponent(
+                    component,
+                    msg
+                )
+            }
+        }
+        component.revalidate(); component.repaint()
+    }
+
+    /** 从新创建的消息组件中提取内容引用（创建时调用一次，避免后续树遍历） */
+    private fun extractContentRef(rowComponent: JComponent, msg: AgentMessage): Any? {
+        return when (msg.role) {
+            "thinking" -> findChildOfType(rowComponent)
+            "assistant" -> findFirstContentPane(rowComponent)
+            "tool" -> if (msg.status != AgentMessage.MessageStatus.RUNNING) {
+                // toolResultRow 返回 ToolResultHandle.outerRow，内容在 handle 中
+                null  // tool 不使用 content ref，通过 rebuildComponent 处理
+            } else null
+
+            else -> null
+        }
+    }
+
+    private fun findChildOfType(parent: Component): JTextArea? {
+        if (parent is JTextArea) return parent
+        if (parent is java.awt.Container) for (child in parent.components) {
+            val r = findChildOfType(child); if (r != null) return r
+        }
+        return null
+    }
+
+    private fun findFirstContentPane(component: JComponent): JComponent? {
+        var p: Component? = component
+        while (p != null) {
+            if (p is JPanel && p.layout is BorderLayout) {
+                val center = (p.layout as BorderLayout).getLayoutComponent(BorderLayout.CENTER)
+                if (center is JPanel && center.componentCount > 0) return center
+            }
+            p = (p as? java.awt.Container)?.getComponent(0)
+        }
+        return null
     }
 
     private val markdownRenderer = MarkdownRenderer()
     private val bubbleFactory = BubbleFactory(conversationScrollPane, project)
     private val toolRowFactory = ToolRowFactory({ conversationScrollPane.viewport.width }, project)
 
-    /** 流式更新时原地替换 JTextPane 文本，避免 remove/add 触发布局震荡 */
-    private fun updateStreamingBubble() {
-        // 防护：双重 invokeLater 可能导致本方法在 completion 之后才执行（此时 streamingContent
-        // 已被清空、isStreaming 已置 false），若不加守卫会创建一个空白 AI 气泡形成重复渲染。
-        if (!viewModel.isStreaming || viewModel.streamingContent.isEmpty()) return
-        // 上一轮已完成，新一轮需创建新气泡
-        if (assistantBubbleCompleted) {
-            streamingBubble = null; streamingContentPane = null; assistantBubbleCompleted = false
-        }
-        if (streamingBubble != null && streamingBubble!!.parent == null) {
-            streamingBubble = null; streamingContentPane = null
-        }
-        if (streamingBubble == null) {
-            val bubble = createAssistantBubble(AgentMessage("assistant", viewModel.streamingContent))
-            conversationContainer.add(bubble)
-            renderedCount++
-            // streamingBubble 必须存 row（container 的直接子组件），不能存 ChatBubble（row 的子组件），
-            // 否则 conversationContainer.remove(streamingBubble) 找不到直接子组件，流式气泡永远删不掉
-            streamingBubble = bubble
-            val entry = bubbleSizeConstraints.lastOrNull()
-            if (entry != null) {
-                streamingContentPane = entry.second
-            }
-            conversationContainer.revalidate()
-            autoScrollIfAtBottom()
-        } else {
-            // 原地更新 JTextPane 文本，不 remove/add 组件
-            val contentPane = streamingContentPane
-            if (contentPane is JPanel) {
-                val heightChanged = markdownRenderer.updateInPlace(contentPane, viewModel.streamingContent)
-                if (heightChanged) {
-                    // 自测量气泡：失效后按新内容自动重测尺寸，无需手动 fitWidth。
-                    streamingBubble!!.revalidate()
-                } else if (viewModel.streamingContent.contains("```")) {
-                    // 内容包含代码块，updateInPlace 不支持，需完整重建。
-                    // 先将旧气泡从容器中移除，再重置引用，避免重复渲染。
-                    streamingBubble?.let { conversationContainer.remove(it) }
-                    streamingBubble = null
-                    streamingContentPane = null
-                    updateStreamingBubble()  // 立即重建
-                    return
-                }
-                streamingBubble!!.repaint()
-            }
-            // 只在用户已在底部时才跟随
-            autoScrollIfAtBottom()
-        }
-    }
+    /** 流式气泡已改为单管线渲染（syncNewMessages），此方法保留仅防止编译报错 */
+    private fun updateStreamingBubble() {}
 
-    /** 流式思考原地更新：类似 updateStreamingBubble，避免每个 token 触发 removeAll 重建 */
-    private fun updateStreamingThinking() {
-        val content = viewModel.streamingThinking
-        if (content.isEmpty()) return
-        // 上一轮已完成 → 创建新行
-        if (thinkingCompleted) {
-            streamingThinkingRow = null; streamingThinkingTextArea = null; streamingThinkingHeaderLabel = null
-            thinkingCompleted = false
-        }
-        if (streamingThinkingRow != null && streamingThinkingRow!!.parent == null) {
-            streamingThinkingRow = null; streamingThinkingTextArea = null; streamingThinkingHeaderLabel = null
-            thinkingCompleted = false
-        }
-        if (streamingThinkingRow == null) {
-            val textAreaRef = java.util.concurrent.atomic.AtomicReference<JTextArea>()
-            val headerRef = java.util.concurrent.atomic.AtomicReference<JLabel>()
-            val collapseRef = java.util.concurrent.atomic.AtomicReference<() -> Unit>()
-            val row = toolRowFactory.thinkingRow(content, initiallyExpanded = true, streaming = true,
-                textAreaRef = textAreaRef,
-                headerLabelRef = headerRef,
-                onRequestCollapse = collapseRef
-            )
-            streamingThinkingRow = row
-            streamingThinkingTextArea = textAreaRef.get()
-            streamingThinkingHeaderLabel = headerRef.get()
-            streamingThinkingCollapseAction = collapseRef.get()
-            conversationContainer.add(row)
-            renderedCount++
-            conversationContainer.revalidate()
-            autoScrollIfAtBottom()
-        } else {
-            streamingThinkingTextArea?.let { it.text = content; streamingThinkingRow!!.revalidate(); streamingThinkingRow!!.repaint() }
-            autoScrollIfAtBottom()
-        }
-    }
+    /** 流式思考已改为单管线渲染（syncNewMessages），此方法保留仅防止编译报错 */
+    private fun updateStreamingThinking() {}
 
-    private fun finalizeThinkingRow() {
-        thinkingCompleted = true
-        streamingThinkingHeaderLabel?.text = AiAssistantBundle.message("chat.label.thinking")
-        streamingThinkingCollapseAction?.invoke()
-    }
+    /** 流式思考完成已改为单管线渲染（syncNewMessages），此方法保留仅防止编译报错 */
+    private fun finalizeThinkingRow() {}
 
-    /** 工具开始执行时创建可折叠运行行（默认折叠），清理上一个未清理的 */
-    private fun showStreamingToolRow(toolName: String, toolArgs: String = "") {
-        cleanupStreamingToolRow()
-        clearSubToolTracking()
-        lastStreamingTextArea = null
-        streamingToolName = toolName
-        completedStreamingToolNames.add(toolName)
-        val isTask = toolName == "task" || toolName == "workflow"
-
-        if (isTask) {
-            val onStop: () -> Unit = { stopSubAgentsByUser() }
-            val ref = toolRowFactory.streamingToolRow(toolName, isTask = true, onStop)
-            streamingToolRowRef = ref
-            streamingToolRow = ref.outerRow
-            streamingToolContentPanel = ref.contentArea
-            streamingToolCollapsed = ref.collapsed
-            streamingToolStopIcon = ref.stopIconLabel
-            val leftBar = ref.outerRow.components[0] as? JPanel ?: run {
-                streamingToolRow = null; streamingToolLeftBar = null; streamingToolChevron = null; return
-            }
-            streamingToolLeftBar = leftBar
-            val headerRow = leftBar.components[0] as? JPanel ?: run {
-                streamingToolRow = null; streamingToolLeftBar = null; streamingToolChevron = null; return
-            }
-            streamingToolChevron = headerRow.components[0] as? JLabel
-            conversationContainer.add(ref.outerRow)
-            renderedCount++
-        } else {
-            val msg = com.aiassistant.agent.AgentMessage("tool", toolArgs, toolName = toolName)
-            val handle = toolRowFactory.toolResultRow(msg, null,
-                barColor = ChatTheme.toolBar, bgColor = ChatTheme.toolBg)
-            streamingToolHandle = handle
-            conversationContainer.add(handle.outerRow)
-            renderedCount++
-        }
-        conversationContainer.revalidate()
-    }
+    /** 流式工具行已改为单管线渲染（syncNewMessages），此方法保留仅防止编译报错 */
+    private fun showStreamingToolRow(toolName: String, toolArgs: String = "") {}
 
     // 子代理工具事件标记
     private val TOOL_EXEC = Regex("""\[执行 (\S+)]\n""")
     private val TOOL_RESULT = Regex("""\[结果 (\S+)] (.+?)(?=\n\n|\n\[|$)""", RegexOption.DOT_MATCHES_ALL)
 
-    /** 工具执行期间的实时内容更新 — 增量解析子代理工具事件，不重建已有组件 */
-    private fun updateStreamingToolContent(content: String) {
-        val panel = streamingToolContentPanel ?: return
+    /** 流式工具内容更新已改为单管线渲染（syncNewMessages），此方法保留仅防止编译报错 */
+    private fun updateStreamingToolContent(content: String) {}
 
-        // 收集所有工具事件的位置信息
-        val events = mutableListOf<Pair<IntRange, String>>() // (range, type:name)
-        TOOL_EXEC.findAll(content).forEach { m -> events.add(m.range to "exec:${m.groupValues[1]}") }
-        TOOL_RESULT.findAll(content).forEach { m -> events.add(m.range to "result:${m.groupValues[1]}") }
-        events.sortBy { it.first.first }
+    /** 流式工具完成已改为单管线渲染（syncNewMessages），此方法保留仅防止编译报错 */
+    private fun completeStreamingToolRow(toolName: String) {}
 
-        // 找出新事件（尚未渲染的工具名）
-        val newEventNames = events.mapNotNull { e ->
-            val parts = e.second.split(":", limit = 2)
-            val type = parts[0]; val name = parts[1]
-            val key = "$type:$name"
-            if (key !in renderedToolNames) { renderedToolNames.add(key); Pair(type, name) } else null
-        }
-
-        if (newEventNames.isEmpty()) {
-            // 无新工具事件，仅更新最后的文本区域
-            val lastText = content.substringAfterLast("\n").trim()
-            lastStreamingTextArea?.let { area ->
-                area.text = lastText
-                area.revalidate(); area.repaint()
-            }
-            return
-        }
-
-        // 仅添加新工具事件对应的组件（插在最后一个文本区域之前或末尾）
-        val insertBaseIdx = if (lastStreamingTextArea != null) {
-            panel.components.indexOf(lastStreamingTextArea).let { if (it >= 0) it else panel.componentCount }
-        } else panel.componentCount
-
-        var offset = 0
-        for ((type, name) in newEventNames) {
-            if (type == "exec") {
-                val row = toolRowFactory.subAgentToolRunningRow(name)
-                subToolRunningRows[name] = row
-                if (insertBaseIdx > panel.componentCount) {
-                    panel.add(row.outer, panel.componentCount)
-                } else {
-                    panel.add(row.outer, insertBaseIdx + offset)
-                }
-            } else {
-                val resultText = TOOL_RESULT.findAll(content)
-                    .firstOrNull { it.groupValues[1] == name }?.groupValues?.get(2)?.trim() ?: ""
-                subToolRunningRows.remove(name)?.updateResult(resultText)
-            }
-            offset++
-        }
-
-        // 确保有且仅有一个文本区域在末尾（用于后续正文增量更新）
-        if (lastStreamingTextArea == null || lastStreamingTextArea?.parent != panel) {
-            lastStreamingTextArea = JTextArea("").apply {
-                font = ChatTheme.metaFont; foreground = ChatTheme.textSecondary
-                isEditable = false; lineWrap = true; wrapStyleWord = true
-                background = ChatTheme.agentBg
-                border = JBUI.Borders.empty(0, 10, 4, 8)
-            }
-            lastStreamingTextArea?.let { panel.add(it) }
-        }
-        val lastText = content.substringAfterLast("\n").trim()
-        lastStreamingTextArea?.text = lastText
-
-        panel.revalidate(); panel.repaint()
-    }
-
-    /** 工具执行完成——非 task 原地更新，task 调用 complete() */
-    private fun completeStreamingToolRow(toolName: String) {
-        if (toolName != streamingToolName) return
-
-        val handle = streamingToolHandle
-        if (handle != null) {
-            val resultMsg = viewModel.messages.lastOrNull { it.role == "tool" && it.toolName == toolName }
-            val resultContent = resultMsg?.content?.substringAfter("\n---\n") ?: resultMsg?.content ?: ""
-            if (resultContent.isNotBlank()) { handle.updateResult(resultContent) }
-            streamingToolHandle = null
-            streamingToolName = null
-            return
-        }
-
-        val ref = streamingToolRowRef ?: return
-        val resultMsg = viewModel.messages.lastOrNull { it.role == "tool" && it.toolName == toolName }
-        val resultContent = resultMsg?.content?.substringAfter("\n---\n") ?: resultMsg?.content ?: ""
-        if (resultContent.isNotBlank()) { ref.complete(resultContent) }
-        streamingToolRowRef = null
-        streamingToolRow = null
-        streamingToolContentPanel = null
-        streamingToolCollapsed = null
-        streamingToolLeftBar = null
-        streamingToolChevron = null
-        streamingToolStopIcon = null
-        streamingToolName = null
-        clearSubToolTracking()
-        lastStreamingTextArea = null
-    }
-
-    /** 重置流式工具行引用 */
-    private fun cleanupStreamingToolRow() {
-        streamingToolRow = null
-        streamingToolContentPanel = null
-        streamingToolCollapsed = null
-        streamingToolLeftBar = null
-        streamingToolChevron = null
-        streamingToolStopIcon = null
-        streamingToolRowRef = null
-        streamingToolHandle = null
-        streamingToolName = null
-        clearSubToolTracking()
-        lastStreamingTextArea = null
-    }
+    /** 流式工具清理已改为单管线渲染（syncNewMessages），此方法保留仅防止编译报错 */
+    private fun cleanupStreamingToolRow() {}
 
     /**
      * 用户通过 UI 停止按钮手动终止运行中的子代理。
@@ -1506,10 +1382,26 @@ class ChatToolWindow(private val project: Project) {
 
     private fun createMessageBubble(message: AgentMessage): JPanel? {
         return when (message.role) {
-            "thinking" -> createCollapsibleThinkingBubble(message.content)
-            "tool" -> createToolResultBubble(message)    // 工具调用+结果，可折叠
+            "thinking" -> {
+                val streaming = message.status == AgentMessage.MessageStatus.STREAMING
+                toolRowFactory.thinkingRow(
+                    message.content,
+                    initiallyExpanded = streaming,
+                    streaming = streaming
+                )
+            }
+
+            "tool" -> {
+                if (message.status == AgentMessage.MessageStatus.RUNNING) createToolRunningBubble(
+                    message.toolName ?: "tool"
+                )
+                else createToolResultBubble(message)
+            }
             "user" -> createUserBubble(message)
-            "assistant" -> createAssistantBubble(message)
+            "assistant" -> {
+                // STREAMING 状态：首次创建气泡，后续由 updateComponentInPlace 原地更新内容
+                createAssistantBubble(message)
+            }
             else -> createAssistantBubble(message)
         }
     }
@@ -1550,10 +1442,6 @@ class ChatToolWindow(private val project: Project) {
     /** 工具结果行 — 委托给 ToolRowFactory（默认折叠），待审批时附加审批按钮 */
     private fun createToolResultBubble(message: AgentMessage): JPanel? {
         val name = message.toolName ?: "tool"
-        // 流式路径已渲染此工具行，跳过消息路径避免重复。workflow 例外——流式只显示进度，最终汇总需要独立行
-        if (name in completedStreamingToolNames && name != "workflow") {
-            return null
-        }
         // 仅当审批尚未完成时才显示按钮（latch 未被 countDown）
         val state = if (message.approvalPending) viewModel.pendingApprovals[name] else null
         val approvals: ApprovalActions? = if (state != null && state.latch.getCount() > 0) {
@@ -1566,12 +1454,10 @@ class ChatToolWindow(private val project: Project) {
                 onReject = { state.userChoice.set(false); state.latch.countDown() }
             )
         } else null
-        // 子 Agent（task / workflow）结果用紫色左栏区分普通工具蓝色
-        val isTask = name == "task" || name == "workflow"
         return toolRowFactory.toolResultRow(
             message, approvals,
-            barColor = if (isTask) ChatTheme.agentBar else null,
-            bgColor = if (isTask) ChatTheme.agentBg else null
+            barColor = if (message.isTaskAgent) ChatTheme.agentBar else null,
+            bgColor = if (message.isTaskAgent) ChatTheme.agentBg else null
         ).outerRow
     }
 
@@ -1694,7 +1580,16 @@ class ChatToolWindow(private val project: Project) {
 
         var commandText = ""  // executeCommand 中写入，供 /goal 等命令读取清空前的内容
         val commands = listOf(
-            Cmd("/new",   AiAssistantBundle.message("command.new")) { renderedCount = 0; viewModel.clearConversation(); viewModel.messageRefChips.clear(); refChips.clear(); selectionRefChip = null; completedStreamingToolNames.clear(); rebuildChips(); planBar.updateState(false, null, null, emptyList()); updateGoalBar(); syncNewMessages() },
+            Cmd("/new", AiAssistantBundle.message("command.new")) {
+                renderedCount =
+                    0; viewModel.clearConversation(); viewModel.messageRefChips.clear(); refChips.clear(); selectionRefChip =
+                null; msgComponentMap.clear(); msgContentMap.clear(); rebuildChips(); planBar.updateState(
+                false,
+                null,
+                null,
+                emptyList()
+            ); updateGoalBar(); syncNewMessages()
+            },
             Cmd("/plan",  AiAssistantBundle.message("command.plan")) { sendQuick("请先调用 EnterPlanMode 进入规划模式，探索代码库并设计方案，然后调用 ExitPlanMode 提交方案供审批。") },
             Cmd("/goal",  AiAssistantBundle.message("command.goal")) {
                 val goal = commandText.substringAfter("/goal").trim()

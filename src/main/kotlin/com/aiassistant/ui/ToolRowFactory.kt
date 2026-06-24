@@ -254,7 +254,7 @@ class ToolRowFactory(
      */
     fun toolResultRow(message: AgentMessage, approvalActions: ApprovalActions? = null,
                       barColor: java.awt.Color? = null, bgColor: java.awt.Color? = null,
-                      showBar: Boolean = false
+                      showBar: Boolean = true
     ): ToolResultHandle {
         val toolName = message.toolName ?: "tool"
         val rawContent = message.content

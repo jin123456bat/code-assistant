@@ -54,6 +54,12 @@ class ChatViewModel {
     /** 每次 sendMessage/stopGeneration 递增，用于回调中校验是否已被新请求覆盖 */
     @Volatile private var generationId = 0L
 
+    /** 流式 assistant 消息 ID（单管线——流式增量原地更新此消息，不另存 streamingContent） */
+    private var streamingAssistantMsgId: Long = -1L
+
+    /** 流式 thinking 消息 ID（同上） */
+    private var streamingThinkingMsgId: Long = -1L
+
     /** Agent 活动状态。 */
     sealed class Activity {
         /** 空闲（无指示器）。 */
@@ -160,26 +166,85 @@ class ChatViewModel {
     }
 
     /** 添加 thinking 消息，若上一条也是 thinking 则合并，避免多个相邻思考行 */
-    private fun addThinkingMessage(content: String) {
-        messages.add(AgentMessage("thinking", content))
-        streamingThinking = ""
-        onThinkingCompleted?.invoke()
+    /** 获取或创建流式 assistant 消息（单管线：流式增量原地更新消息 content） */
+    private fun getOrCreateStreamingAssistant(): AgentMessage {
+        val idx = messages.indexOfLast { it.id == streamingAssistantMsgId }
+        if (idx >= 0) return messages[idx]
+        val msg = AgentMessage(
+            "assistant",
+            "",
+            status = AgentMessage.MessageStatus.STREAMING,
+            inputTokens = 0,
+            outputTokens = 0
+        )
+        messages.add(msg)
+        streamingAssistantMsgId = msg.id
+        return msg
+    }
+
+    /** 完成流式 assistant 消息（标记为 NORMAL） */
+    private fun finalizeStreamingAssistant(
+        textContent: String,
+        inputTokens: Int,
+        outputTokens: Int
+    ) {
+        val idx = messages.indexOfLast { it.id == streamingAssistantMsgId }
+        if (idx >= 0 && textContent.isNotEmpty()) {
+            messages[idx] = messages[idx].copy(
+                content = textContent,
+                status = AgentMessage.MessageStatus.NORMAL,
+                inputTokens = inputTokens,
+                outputTokens = outputTokens,
+                version = messages[idx].version + 1
+            )
+        } else if (idx < 0 && textContent.isNotEmpty()) {
+            messages.add(
+                AgentMessage(
+                    "assistant",
+                    textContent,
+                    inputTokens = inputTokens,
+                    outputTokens = outputTokens
+                )
+            )
+        }
+        streamingAssistantMsgId = -1L
+    }
+
+    /** 添加 thinking 消息（单管线：首次创建 STREAMING，后续原地更新 content，完成时标记 NORMAL） */
+    private fun upsertThinkingMessage(content: String, done: Boolean = false) {
+        val idx = messages.indexOfLast { it.id == streamingThinkingMsgId }
+        if (idx >= 0) {
+            messages[idx] = messages[idx].copy(
+                content = content,
+                version = messages[idx].version + 1,
+                status = if (done) AgentMessage.MessageStatus.NORMAL else AgentMessage.MessageStatus.STREAMING
+            )
+        } else {
+            val msg = AgentMessage(
+                "thinking",
+                content,
+                status = if (done) AgentMessage.MessageStatus.NORMAL else AgentMessage.MessageStatus.STREAMING
+            )
+            messages.add(msg)
+            streamingThinkingMsgId = msg.id
+        }
+        if (done) {
+            streamingThinkingMsgId = -1L
+            onThinkingCompleted?.invoke()
+        }
     }
 
     private fun setupCallbacks(a: AgentLoop) {
         a.onMessage = { msg ->
             val currentGen = generationId
             runOnEdt {
-                if (generationId != currentGen) return@runOnEdt  // 已被 stop/新请求覆盖
-                AppLogger.info("EDT onMessage role=${msg.role} contentLen=${msg.content.length} streamingThinking.len=${streamingThinking.length} streamingContent.len=${streamingContent.length}")
+                if (generationId != currentGen) return@runOnEdt
                 if (msg.role == "thinking") {
-                    addThinkingMessage(msg.content)
+                    upsertThinkingMessage(msg.content, done = true)
                 } else {
                     messages.add(msg)
-                    // 目标模式下，每收到 assistant 回复递增轮次
                     if (msg.role == "assistant" && currentGoal != null) {
-                        goalRound++
-                        onGoalUpdate?.invoke(currentGoal!!, goalRound)
+                        goalRound++; onGoalUpdate?.invoke(currentGoal!!, goalRound)
                     }
                 }
                 onMessagesChanged?.invoke()
@@ -188,8 +253,12 @@ class ChatViewModel {
         a.onStreaming = { text ->
             val currentGen = generationId
             runOnEdt {
-                if (generationId != currentGen) return@runOnEdt  // 已被 stop/新请求覆盖
-                streamingContent = text; onStreamingUpdate?.invoke(text)
+                if (generationId != currentGen) return@runOnEdt
+                val msg = getOrCreateStreamingAssistant()
+                val idx = messages.indexOfLast { it.id == msg.id }
+                if (idx >= 0) messages[idx] =
+                    messages[idx].copy(content = text, version = messages[idx].version + 1)
+                onMessagesChanged?.invoke()
             }
         }
         a.onThinkingDelta = { text ->
@@ -197,14 +266,21 @@ class ChatViewModel {
             runOnEdt {
                 if (generationId != currentGen) return@runOnEdt
                 isThinking = true
-                streamingThinking = text; onStreamingThinkingChanged?.invoke(text)
+                upsertThinkingMessage(text, done = false)
+                onMessagesChanged?.invoke()
             }
         }
         a.onToolStreaming = { name, partial ->
             val currentGen = generationId
             runOnEdt {
                 if (generationId != currentGen) return@runOnEdt
-                onToolStreaming?.invoke(name, partial)
+                val idx =
+                    messages.indexOfLast { it.toolName == name && it.status == AgentMessage.MessageStatus.RUNNING }
+                if (idx >= 0) messages[idx] = messages[idx].copy(
+                    content = messages[idx].content + partial,
+                    version = messages[idx].version + 1
+                )
+                onMessagesChanged?.invoke()
             }
         }
         a.onToolExecute = { name, args ->
@@ -213,7 +289,16 @@ class ChatViewModel {
                 if (generationId != currentGen) return@runOnEdt
                 activity = Activity.RunningTool(name)
                 currentToolName = name
-                messages.add(AgentMessage("tool", args, toolName = name))
+                val isTask = name == "task" || name == "workflow"
+                messages.add(
+                    AgentMessage(
+                        "tool",
+                        args,
+                        toolName = name,
+                        status = AgentMessage.MessageStatus.RUNNING,
+                        isTaskAgent = isTask
+                    )
+                )
                 onToolExecute?.invoke(name, args); onMessagesChanged?.invoke()
             }
         }
@@ -221,17 +306,27 @@ class ChatViewModel {
             val currentGen = generationId
             runOnEdt {
                 if (generationId != currentGen) return@runOnEdt
-                // 工具结束后 agent 仍在循环 → 回到"思考中"而非 Idle，避免指示器消失再出现的闪烁
                 activity = Activity.Thinking
                 currentToolName = null
-                // 找到对应的 tool 消息（由 onToolExecute 插入），追加结果并清除审批状态
                 val idx = messages.indexOfLast { it.role == "tool" && it.toolName == name }
                 if (idx >= 0) {
-                    messages[idx] = messages[idx].copy(content = messages[idx].content + "\n---\n" + result, approvalPending = false, version = messages[idx].version + 1)
+                    messages[idx] = messages[idx].copy(
+                        content = messages[idx].content + "\n---\n" + result,
+                        approvalPending = false,
+                        version = messages[idx].version + 1,
+                        status = AgentMessage.MessageStatus.NORMAL
+                    )
                 } else {
-                    messages.add(AgentMessage("tool", result, toolName = name))
+                    messages.add(
+                        AgentMessage(
+                            "tool",
+                            result,
+                            toolName = name,
+                            isTaskAgent = name == "task" || name == "workflow"
+                        )
+                    )
                 }
-                pendingApprovals.remove(name)  // 审批已完成，清理状态
+                pendingApprovals.remove(name)
                 onToolResult?.invoke(name, result); onMessagesChanged?.invoke()
             }
         }
@@ -245,11 +340,8 @@ class ChatViewModel {
         a.onConfirmPlan = { planText, latch, userChoice -> runOnEdt { onConfirmPlan?.invoke(planText, latch, userChoice) } }
         a.onError = { msg ->
             runOnEdt {
-                // 清理流式状态，防止残留的 streaming bubble 与错误消息重复渲染
-                isStreaming = false
-                streamingContent = ""
-                streamingThinking = ""
-                isThinking = false
+                isStreaming = false; isThinking = false
+                streamingAssistantMsgId = -1L; streamingThinkingMsgId = -1L
                 activity = Activity.Idle
                 // Rate Limit 检测：若错误消息包含 429 状态码，标记限流状态并在若干秒后自动恢复
                 if (msg.contains("429")) {
@@ -275,8 +367,11 @@ class ChatViewModel {
             runOnEdt {
                 isStreaming = streaming
                 // 运行开始→思考中；结束→空闲，清理所有流式状态防止残留渲染
-                if (streaming) { if (activity == Activity.Idle) activity = Activity.Thinking }
-                else { activity = Activity.Idle; currentToolName = null; streamingThinking = ""; streamingContent = ""; isThinking = false; autoSaveSession() }
+                if (streaming) { if (activity == Activity.Idle) activity = Activity.Thinking } else {
+                    activity = Activity.Idle; currentToolName = null; isThinking =
+                        false; autoSaveSession(); streamingAssistantMsgId =
+                        -1L; streamingThinkingMsgId = -1L
+                }
                 onStreamingStateChanged?.invoke(streaming)
             }
         }
@@ -321,73 +416,50 @@ class ChatViewModel {
     /** 发送用户消息，返回消息 ID（用于 messageRefChips 索引） */
     fun sendMessage(apiKey: String, content: String, images: List<ImageData>? = null, refContent: String = "", refChips: List<com.aiassistant.ChatToolWindow.RefChip> = emptyList()): Long {
         if ((content.isBlank() && images.isNullOrEmpty()) || isStreaming || isRateLimited) return -1L
-        generationId++  // 新轮次，DD旧回调
-        streamingContent = ""
-        streamingThinking = ""
+        generationId++
+        streamingAssistantMsgId = -1L; streamingThinkingMsgId = -1L  // 重置流式消息追踪
 
-        // 对齐 Claude Code：客户端拦截 /skill-name，注入 prompt 并从工具列表移除该 skill
         val resolved = resolveSkillInvocation(content)
-
-        // 气泡只显示用户可见文本（不含 skill prompt），引用内容以 chips 形式独立展示
         val msg = AgentMessage("user", resolved.displayContent, images = images)
         messages.add(msg)
         if (refChips.isNotEmpty()) {
             messageRefChips[msg.id] = refChips
         }
-        runOnEdt { onMessagesChanged?.invoke() }
-        isStreaming = true
-        // 立即显示"等待AI回复"指示器，消除用户发送消息后到首个 streaming 事件之间的空白等待感
-        streamingThinking = "等待 AI 回复..."
-        activity = Activity.Thinking
+
+        isStreaming = true; activity = Activity.Thinking
         runOnEdt {
-            onStreamingThinkingChanged?.invoke(streamingThinking)
+            onMessagesChanged?.invoke()
             onStreamingStateChanged?.invoke(true)
         }
 
         val llmContent = if (refContent.isNotEmpty()) "${resolved.llmContent}\n\n$refContent" else resolved.llmContent
-        AppLogger.info("用户消息: ${resolved.displayContent}")
         val a = agent
         if (a != null) {
-            // Skill 模型路由：客户端激活时应用 preferredModel
-            if (resolved.preferredModel != null) {
-                a.switchModel(resolved.preferredModel!!)
-            }
-            // 对齐 Claude Code：skill prompt 注入 system prompt
+            if (resolved.preferredModel != null) a.switchModel(resolved.preferredModel!!)
             a.ctx.activatedSkillPrompt = resolved.skillPrompt
-            val currentGen = generationId  // 捕获当前轮次的 generationId，防止过期回调污染
+            val currentGen = generationId
             a.run(llmContent, apiKey, images, resolved.skillName) { finalText, thinking ->
-                // thinking 与 assistant 消息在同一个 EDT 块中原子性地落地，
-                // 同时清空 streamingThinking/streamingContent，避免分两次 rebuild
-                // 导致 streamingContent 作为临时气泡重复渲染。
                 runOnEdt {
-                    if (generationId != currentGen) return@runOnEdt  // 过期回调，丢弃
-                    // 先清空流式状态并标记流式结束——防止 SDK 延迟到达的 onTextDelta
-                    // EDT 回调在 rebuild 之后重新设置 streamingContent，导致
-                    // updateStreamingBubble 又创建一个流式气泡与正式消息重复。
+                    if (generationId != currentGen) return@runOnEdt
                     isStreaming = false
-                    streamingContent = ""
-                    streamingThinking = ""
-                    if (thinking.isNotEmpty()) {
-                        addThinkingMessage(thinking)
-                    }
+                    if (thinking.isNotEmpty()) upsertThinkingMessage(thinking, done = true)
                     if (finalText.isNotEmpty()) {
-                        AppLogger.info("收到AI回复: $finalText")
-                        messages.add(AgentMessage("assistant", finalText))
+                        finalizeStreamingAssistant(
+                            finalText,
+                            a.ctx.lastInputTokens,
+                            a.ctx.lastOutputTokens
+                        )
                     }
                     activity = Activity.Idle
                     onMessagesChanged?.invoke()
-                    // 手动触发状态回调（AgentLoop finally 块也会触发，此处先触发确保输入框尽早恢复）
                     onStreamingStateChanged?.invoke(false)
                 }
             }
         } else {
-            // agent 未初始化（initialize() 未被调用），恢复状态并向用户展示错误
             isStreaming = false
-            streamingContent = ""
             runOnEdt {
                 messages.add(AgentMessage("assistant", "Agent 未初始化，请重新打开对话窗口"))
-                activity = Activity.Idle
-                onMessagesChanged?.invoke()
+                activity = Activity.Idle; onMessagesChanged?.invoke()
             }
         }
         return msg.id

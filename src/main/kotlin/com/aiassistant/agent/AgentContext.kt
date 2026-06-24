@@ -111,8 +111,11 @@ data class AgentMessage(
     val id: Long = nextId(),               // 消息唯一 ID，用于 messageRefChips 索引
     val version: Int = 0,                   // 消息版本号：原地更新（copy）时递增，用于增量渲染变更检测
     val inputTokens: Int = 0,               // 本条消息消耗的 input tokens（仅 assistant 消息有意义）
-    val outputTokens: Int = 0               // 本条消息消耗的 output tokens（仅 assistant 消息有意义）
+    val outputTokens: Int = 0,              // 本条消息消耗的 output tokens（仅 assistant 消息有意义）
+    val status: MessageStatus = MessageStatus.NORMAL,  // 消息状态（用于单管线渲染决定显示样式）
+    val isTaskAgent: Boolean = false        // 是否为子代理工具（task/workflow，紫色左栏）
 ) {
+    enum class MessageStatus { NORMAL, STREAMING, RUNNING }
     companion object {
         private val counter = java.util.concurrent.atomic.AtomicLong(0)
         fun nextId() = counter.incrementAndGet()
