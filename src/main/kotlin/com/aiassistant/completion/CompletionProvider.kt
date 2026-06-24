@@ -256,17 +256,41 @@ class AiCompletionProvider : InlineCompletionProvider {
         fimClient.cancel()
     }
 
-    /**
-     * 跨 IntelliJ 版本兼容的 empty() 调用。
-     * 2025.1+ 移除了 InlineCompletionSuggestion.Companion.empty()，回退到反射。
-     */
+    // ponytail: 反射兼容 2025.1+（empty/withFlow 已移除），升级到 2025.1 为最低版本后简化为单路径
     private fun emptySuggestion(): InlineCompletionSuggestion {
-        @Suppress("DEPRECATION")
-        return InlineCompletionSuggestion.Companion.empty()
+        try {
+            @Suppress("DEPRECATION")
+            return InlineCompletionSuggestion.Companion.empty()
+        } catch (_: NoSuchMethodError) {
+            try {
+                val companion = InlineCompletionSuggestion::class.java
+                    .getDeclaredField("Companion").apply { isAccessible = true }.get(null)
+                val method = companion.javaClass.getMethod("empty")
+                @Suppress("UNCHECKED_CAST")
+                return method.invoke(companion) as InlineCompletionSuggestion
+            } catch (e: Exception) {
+                return buildSuggestion { }
+            }
+        }
     }
 
     private fun buildSuggestion(block: suspend kotlinx.coroutines.flow.FlowCollector<InlineCompletionElement>.() -> Unit): InlineCompletionSuggestion {
-        @Suppress("DEPRECATION")
-        return InlineCompletionSuggestion.Companion.withFlow(block)
+        try {
+            @Suppress("DEPRECATION")
+            return InlineCompletionSuggestion.Companion.withFlow(block)
+        } catch (_: NoSuchMethodError) {
+            try {
+                val cls =
+                    Class.forName("com.intellij.codeInsight.inline.completion.InlineCompletionSingleSuggestion")
+                val companionField = cls.getDeclaredField("Companion").apply { isAccessible = true }
+                val companion = companionField.get(null)
+                val buildMethod =
+                    companion.javaClass.methods.first { it.name == "build" && it.parameterCount == 1 }
+                @Suppress("UNCHECKED_CAST")
+                return buildMethod.invoke(companion, block) as InlineCompletionSuggestion
+            } catch (e: Exception) {
+                throw RuntimeException("Cannot create InlineCompletionSuggestion", e)
+            }
+        }
     }
 }
