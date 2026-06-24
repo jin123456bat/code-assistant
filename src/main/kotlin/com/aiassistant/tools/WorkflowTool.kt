@@ -83,6 +83,18 @@ class WorkflowTool : AgentTool {
             val childLoop = createChildLoop(project, task.agentType)
             SubAgentRegistry.register(subId, task.description, childLoop, toolCallId)
 
+            // 流式子代理工具执行结果到 UI（对齐 TaskTool）
+            childLoop.onToolResult = { name, result ->
+                val line = "[结果 $name] $result".take(2000)
+                onProgress?.invoke(line)
+            }
+            childLoop.onToolExecute = { name, _ ->
+                onProgress?.invoke("[执行 $name]\n")
+            }
+            childLoop.onThinkingDelta = { text ->
+                onProgress?.invoke(text)
+            }
+
             val resultRef = AtomicReference<String>()
             val latch = CountDownLatch(1)
 

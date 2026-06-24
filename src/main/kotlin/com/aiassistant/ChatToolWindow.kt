@@ -1345,7 +1345,7 @@ class ChatToolWindow(private val project: Project) {
         lastStreamingTextArea = null
         streamingToolName = toolName
         completedStreamingToolNames.add(toolName)
-        val isTask = toolName == "task"
+        val isTask = toolName == "task" || toolName == "workflow"
 
         if (isTask) {
             val onStop: () -> Unit = { stopSubAgentsByUser() }
@@ -1550,8 +1550,8 @@ class ChatToolWindow(private val project: Project) {
     /** 工具结果行 — 委托给 ToolRowFactory（默认折叠），待审批时附加审批按钮 */
     private fun createToolResultBubble(message: AgentMessage): JPanel? {
         val name = message.toolName ?: "tool"
-        // 流式路径已渲染此工具行，跳过消息路径避免重复
-        if (name in completedStreamingToolNames) {
+        // 流式路径已渲染此工具行，跳过消息路径避免重复。workflow 例外——流式只显示进度，最终汇总需要独立行
+        if (name in completedStreamingToolNames && name != "workflow") {
             return null
         }
         // 仅当审批尚未完成时才显示按钮（latch 未被 countDown）
@@ -1566,8 +1566,8 @@ class ChatToolWindow(private val project: Project) {
                 onReject = { state.userChoice.set(false); state.latch.countDown() }
             )
         } else null
-        // 子 Agent（task）结果用紫色左栏区分普通工具蓝色
-        val isTask = name == "task"
+        // 子 Agent（task / workflow）结果用紫色左栏区分普通工具蓝色
+        val isTask = name == "task" || name == "workflow"
         return toolRowFactory.toolResultRow(
             message, approvals,
             barColor = if (isTask) ChatTheme.agentBar else null,
