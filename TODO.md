@@ -1,88 +1,46 @@
 # TODO — 功能待办清单
 
-对照 Claude Code 功能清单，按优先级排列。
+master 分支轻量路线：代码补全 + Git Message + Settings
 
 ---
 
-## P0 — 核心能力
+## P0 — 核心体验
 
-- [x] **Task 任务跟踪** ✅ 已完成
-  `TaskCreate` / `TaskList` / `TaskGet` / `TaskUpdate`，Agent 自动分解任务并跟踪进度，PlanBar UI 展示进度
+- [ ] **补全延迟优化** ✅ 已完成（2026-06-24）
+  连接超时 5s→2s、读取 10s→3s、callTimeout 3s、maxTokens 1024→256
 
-## P1 — 交互增强
+- [ ] **补全质量迭代**
+  收集 20 个 PHP 补全场景，人工评估接受率，针对性优化 prompt 和上下文策略
 
-- [x] **更多斜杠命令** ✅ 已完成
-  `/review`(审查+--fix+--comment)、`/test`(执行+解析)、`/diff`(变更摘要)、`/security-review`(安全五维度)、`/fix`(修复测试)
+- [ ] **Git Message 触发优化**
+  当前仅在 VCS Commit 对话框内可用，改为右键菜单也可触发
 
-- [x] **会话管理** ✅ 已完成
-  自动保存 + `/resume` 恢复 + `/export` 导出 Markdown
+## P1 — 快速增值
 
-- [x] **Token 精细化追踪** ✅ 已完成
-  气泡悬停显示 token 消耗，📊 Dashboard 天/周统计，设置中可关闭
+- [ ] **流式对话面板（轻量版）**
+  IDE 内置 Markdown 渲染对话框，不做 Agent 循环——只做 Q&A
 
-- [x] **Memory 记忆系统** ✅ 已完成
-  跨会话自动记忆(MemoryStore+Engine+Relevance+AutoExtract)，`/memory` 命令管理，对齐 Claude Code 文件格式
+- [ ] **补全统计面板**
+  Settings 面板中展示接受率、延迟分布，让用户看到价值
 
-## P2 — 代码智能增强
+- [ ] **黑暗模式自动跟随**
+  跟随 IDE 主题自动切换，无需手动配置
 
-- [x] **快速诊断反馈** ✅ 已完成
-  每次 `Write`/`Edit` 后自动注入 IDE Inspection 结果（DaemonCodeAnalyzer→Agent 上下文 `## 代码诊断`）
+## P2 — 扩展
 
-- [x] **调用层级 Call Hierarchy** ✅ 已完成
-  `code_intelligence` 新增 `incoming_calls`(ReferencesSearch) / `outgoing_calls`(PsiRecursiveElementVisitor)，不需额外 EP
+- [ ] **多 LLM 支持**
+  OpenAI/Claude API 切换，模型选择下拉扩展
 
-- [x] **代码审查 Review** ✅ 已完成
-  四维度审查引擎(正确性/简化/效率/安全)+ReviewResultPanel IDE集成+右键菜单+`--fix`+`--comment`
+- [ ] **补全触发方式可选**
+  保持列表式还是改为 Copilot 灰显式，待 UX 测试
 
-## P3 — 自动化
+- [ ] **Marketplace 发布**
+  JetBrains Marketplace 审核 + 发布
 
-- [x] **Hooks 事件系统** ✅ 已完成
-  13 事件(PreToolUse/PostToolUse/SessionStart/End/Stop…) + Command/HTTP/MCP/Prompt 4 种 hook 类型，对齐 Claude Code
+## P3 — 考虑中
 
-- [x] **Loop 循环模式** ⛔ wontfix
-  CLI 场景特有（终端定时轮询），IDE 插件用户无此场景
+- [ ] **开源**
+  GitHub 公开仓库，Apache 2.0 协议
 
-- [x] **后台代理** ⛔ wontfix
-  Agent 已在后台 Thread 运行，子 Agent（task/workflow 工具）满足并行需求。IDE 环境下独立多会话场景不存在。
-
-- [x] **Workflow 工作流编排** ✅ 已完成
-  `workflow` 工具：并行/串行多子 Agent + 自动结果合并
-
-## P4 — 安全与生态
-
-- [x] **Sandbox 沙箱** ⛔ wontfix
-  审批卡已提供有效防护，容器/VM 级沙箱实现极重
-
-- [x] **文件变更 Hook** ✅ 已完成
-  Hooks 系统已支持 `FileChanged`/`WorktreeCreate`/`WorktreeRemove` 事件
-
-- [x] **插件市场集成** ⛔ wontfix
-  Skills/Agents/MCP 已可通过文件系统和配置管理，Marketplace UI 非必需
-
-- [x] **Push 通知** ⛔ wontfix
-  需推送服务+移动端基础设施，IDE 插件场景不存在
-
-## P5 — 体验细节
-
-- [x] **交互式 Diff 查看器** ⛔ wontfix
-  IntelliJ 自带 diff 已满足需求，重复造轮子
-
-- [x] **Vim 模式** ⛔ wontfix
-  IntelliJ 已有 IdeaVim 插件，输入框 Vim 键位场景不存在
-
-- [x] **快捷键系统** ⛔ wontfix
-  IntelliJ Keymap EP + Action 注册即可绑定，无需额外系统
-
-- [x] **非交互/Headless 模式** ✅ 已完成
-  右键菜单 7 动作(审查/安全/修复/解释/优化/注释/测试)，不打开工具窗直接送 Agent
-
-- [x] **上下文可视化** ✅ 已完成
-  `/context` 查看 Token 用量 Dashboard，自动 compact
-
----
-
-共 22 项：已完成 13、wontfix 2、待做 7
-
-| P0 | P1 | P2 | P3 | P4 | P5 |
-|----|----|----|----|----|----|
-| 2/2 ✅ | 4/4 ✅ | 3/3 ✅ | 2/2 ✅ + 2 wontfix | 0/4 | 0/5 |
+- [ ] **插件改名**
+  "Code Assistant"太通用，需要更有辨识度的名称
