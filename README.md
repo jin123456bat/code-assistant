@@ -2,7 +2,7 @@
 
 [![English](https://img.shields.io/badge/English-README-blue)](README_EN.md)
 
-**免费 AI 编程助手插件，适用于 PhpStorm / IntelliJ IDEA 及所有 JetBrains IDE。**
+**免费 AI 编程助手插件，适用于 IntelliJ IDEA 及所有 JetBrains IDE。**
 
 基于 [DeepSeek](https://platform.deepseek.com) 大模型，提供智能代码补全和 Git Commit Message 自动生成。完全免费，自带 API Key 即可使用。
 

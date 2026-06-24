@@ -195,13 +195,13 @@ Kotlin 语言专业工具。
 
 ---
 
-## 五、PhpStorm Plugin Skills（3 个）
+## 五、JetBrains Plugin Skills（3 个）
 
 PHP 开发工具。
 
 | Skill | 描述 | 触发场景 |
 |-------|------|---------|
-| `php-code-review` | 使用 PhpStorm Inspections 审查 PHP 代码 | PHP 文件审查 |
+| `php-code-review` | 使用 JetBrains IDE Inspections 审查 PHP 代码 | PHP 文件审查 |
 | `php-project-guide` | PHP 项目基础指引：环境搭建、项目结构、编码规范、测试、Composer | PHP 项目入门 |
 | `upgrade-php` | PHP 升级助手：修复废弃特性、兼容性扫描 | PHP 版本升级 |
 

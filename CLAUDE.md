@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概述
 
-面向 PhpStorm/IntelliJ IDEA 的免费 AI 编程助手插件（IntelliJ Platform Plugin, type `IC`，兼容所有 JetBrains IDE）。基于 Kotlin + Swing，通过 DeepSeek API 提供代码补全和 Git commit message 自动生成。用户自带 DeepSeek API Key。
+面向 IntelliJ IDEA 及所有 JetBrains IDE 的免费 AI 编程助手插件（IntelliJ Platform Plugin, type `IC`）。通过 DeepSeek API 提供代码补全和 Git commit message 自动生成。用户自带 DeepSeek API Key。
 
 ## 常用命令
 
