@@ -58,9 +58,10 @@ class CompletionContextCollector {
         // 2. suffix：光标后全部内容
         var suffix = text.subSequence(caretOffset, text.length).toString()
 
-        // 3. 如果不够 16K，加兄弟文件（Jaccard 相似度排序，标签页优先）
+        // 3. 兄弟文件增强：仅当上下文 < 8K 时触发，避免 I/O 拖慢补全延迟
+        //    （8K 对 FIM 已足够，兄弟文件搜索的 Jaccard 相似度计算耗时不可控）
         var smartContext: String? = null
-        if (prefix.length + suffix.length < MAX_CHARS && virtualFile != null) {
+        if (prefix.length + suffix.length < 8192 && virtualFile != null) {
             val currentImports = ContextEnhancer.extractImportLinesFromText(prefix, language)
             val siblingPaths = ContextEnhancer.findBestSiblingFiles(
                 virtualFile,

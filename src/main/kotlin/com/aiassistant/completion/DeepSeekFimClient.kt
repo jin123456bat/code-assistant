@@ -26,8 +26,9 @@ class DeepSeekFimClient(
 ) {
     companion object {
         private const val FIM_ENDPOINT = "https://api.deepseek.com/beta/completions"
-        private const val CONNECT_TIMEOUT_S = 5L
-        private const val READ_TIMEOUT_S = 10L
+        // 补全延迟目标 <500ms，连接超时 2s、读取超时 3s 已足够覆盖 2 次重试（200ms+400ms）
+        private const val CONNECT_TIMEOUT_S = 2L
+        private const val READ_TIMEOUT_S = 3L
         private const val MAX_RETRIES = 2
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
     }
@@ -46,6 +47,9 @@ class DeepSeekFimClient(
             ))
             .connectTimeout(CONNECT_TIMEOUT_S, TimeUnit.SECONDS)
             .readTimeout(READ_TIMEOUT_S, TimeUnit.SECONDS)
+            // 请求级超时：整个 HTTP 调用（含连接+读取+重定向）上限 3s，
+            // 单次调用超时后由 executeWithRetry 的重试逻辑接管
+            .callTimeout(3, TimeUnit.SECONDS)
             .retryOnConnectionFailure(false)  // 关闭 SDK 内置重试，由 executeWithRetry 自行控制指数退避
             .build()
     }

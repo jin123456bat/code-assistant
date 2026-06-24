@@ -192,6 +192,9 @@ class AiCompletionProvider : InlineCompletionProvider {
             val suffix: String? = context.suffix.ifBlank { null }
 
             val response = try {
+                // 请求级超时：1s + 2 次重试（400ms）= 1.4s，超过则视为不可接受
+                // Kotlin 协程中无法直接用 withTimeout（suspend 在 EDT 线程池），
+                // 改用 OkHttp call.timeout() 在 FimClient 层收紧
                 fimClient.complete(prompt, suffix)
             } catch (e: Exception) {
                 AppLogger.requestFailed(0, "FIM API error: ${e.message}")

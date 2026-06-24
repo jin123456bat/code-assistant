@@ -88,7 +88,9 @@ class AppSettingsService {
             .setValue(COMPLETION_ENABLED_KEY, enabled.toString())
 
     fun getCompletionMaxTokens(): Int {
+        // 补全延迟目标 <500ms，maxTokens 直接影响生成时间。
+        // 256 tokens 足够覆盖 ~50 行代码，同时保持低延迟。
         val raw = com.intellij.ide.util.PropertiesComponent.getInstance().getValue(COMPLETION_MAX_TOKENS_KEY)
-        return raw?.toIntOrNull()?.coerceIn(1, 1024) ?: 1024
+        return raw?.toIntOrNull()?.coerceIn(1, 1024) ?: 256
     }
 }
