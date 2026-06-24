@@ -1,5 +1,6 @@
 package com.aiassistant.completion
 
+import com.aiassistant.AppLogger
 import com.aiassistant.AppSettingsService
 import com.intellij.codeInsight.inline.completion.InlineCompletionEvent
 import com.intellij.codeInsight.inline.completion.InlineCompletionInsertEnvironment
@@ -193,11 +194,15 @@ class AiCompletionProvider : InlineCompletionProvider {
             val response = try {
                 fimClient.complete(prompt, suffix)
             } catch (e: Exception) {
-                // 网络错误等异常静默返回空建议，不影响用户正常输入
+                AppLogger.requestFailed(0, "FIM API error: ${e.message}")
                 return emptySuggestion()
             }
 
             if (response == null || response.choices.isNullOrEmpty()) {
+                if (response == null) AppLogger.requestFailed(
+                    0,
+                    "FIM response null — check API Key"
+                )
                 return emptySuggestion()
             }
 
@@ -263,8 +268,31 @@ class AiCompletionProvider : InlineCompletionProvider {
                 @Suppress("UNCHECKED_CAST")
                 return method.invoke(companion) as InlineCompletionSuggestion
             } catch (e: Exception) {
-                // 最后的兜底：返回空 flow 建议
-                return InlineCompletionSuggestion.Companion.withFlow { }
+                return buildSuggestion { }
+            }
+        }
+    }
+
+    /**
+     * 跨 IntelliJ 版本兼容的 withFlow() 调用。
+     * 2025.1+ 移除了 withFlow()，改为 InlineCompletionSingleSuggestion.build()。
+     */
+    private fun buildSuggestion(block: suspend kotlinx.coroutines.flow.FlowCollector<InlineCompletionElement>.() -> Unit): InlineCompletionSuggestion {
+        try {
+            @Suppress("DEPRECATION")
+            return InlineCompletionSuggestion.Companion.withFlow(block)
+        } catch (_: NoSuchMethodError) {
+            try {
+                val cls =
+                    Class.forName("com.intellij.codeInsight.inline.completion.InlineCompletionSingleSuggestion")
+                val companionField = cls.getDeclaredField("Companion").apply { isAccessible = true }
+                val companion = companionField.get(null)
+                val buildMethod =
+                    companion.javaClass.methods.first { it.name == "build" && it.parameterCount == 1 }
+                @Suppress("UNCHECKED_CAST")
+                return buildMethod.invoke(companion, block) as InlineCompletionSuggestion
+            } catch (e: Exception) {
+                throw RuntimeException("Cannot create InlineCompletionSuggestion", e)
             }
         }
     }

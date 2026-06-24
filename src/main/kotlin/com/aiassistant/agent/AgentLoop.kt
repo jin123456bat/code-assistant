@@ -266,6 +266,7 @@ class AgentLoop(
 
                     if (toolCalls.isNotEmpty()) {
                         if (thinking.isNotEmpty()) {
+                            AppLogger.info("AgentLoop thinking: ${thinking}")
                             edt { onMessage?.invoke(AgentMessage("thinking", thinking)) }
                         }
                         if (textContent.isNotEmpty()) {

@@ -250,6 +250,13 @@ class ChatToolWindow(private val project: Project) {
         border = JBUI.Borders.empty()
         verticalScrollBar.unitIncrement = 16
         minimumSize = Dimension(100, 100)
+        // 用户手动上滑时暂停自动滚动
+        verticalScrollBar.addAdjustmentListener { e ->
+            if (e.valueIsAdjusting) return@addAdjustmentListener
+            val atBottom =
+                e.value + verticalScrollBar.visibleAmount >= verticalScrollBar.maximum - 20
+            userScrolledUp = !atBottom  // 滑到底部恢复，滑离底部暂停
+        }
     }
 
     @Volatile private var projectFilesCache: List<String> = emptyList()
@@ -816,8 +823,12 @@ class ChatToolWindow(private val project: Project) {
     private var streamingThinkingRow: JPanel? = null
     private var streamingThinkingTextArea: JTextArea? = null
     private var streamingThinkingHeaderLabel: JLabel? = null
+    private var streamingThinkingCollapseAction: (() -> Unit)? = null
     private var thinkingCompleted = false
     private var assistantBubbleCompleted = false
+
+    /** 用户手动上滑后暂停自动滚动，新消息到达时恢复 */
+    private var userScrolledUp = false
     // 工具执行期间的流式输出
     private var streamingToolRow: JPanel? = null
     private var streamingToolContentPanel: JPanel? = null
@@ -1115,6 +1126,7 @@ class ChatToolWindow(private val project: Project) {
                 lingmaSubmitBtn.toolTipText = if (streaming) AiAssistantBundle.message("chat.tooltip.stop") else AiAssistantBundle.message("chat.tooltip.send")
                 // 发送/停止按钮样式保持一致，仅文字切换
                 if (!streaming) {
+                    userScrolledUp = false  // 流式结束，恢复自动滚动
                     // 流式结束，触发一次布局失效；自测量气泡会按最终内容/宽度重测。
                     conversationContainer.revalidate()
                     conversationContainer.repaint()
@@ -1178,7 +1190,7 @@ class ChatToolWindow(private val project: Project) {
                 latch.countDown()
             }
         )
-        conversationContainer.add(card, maxOf(0, conversationContainer.componentCount - 1))
+        conversationContainer.add(card)
         conversationContainer.revalidate()
         conversationContainer.repaint()
         scrollToBottom()
@@ -1205,19 +1217,17 @@ class ChatToolWindow(private val project: Project) {
             conversationContainer.revalidate(); conversationContainer.repaint()
             return
         }
+        // 流式路径可能使 renderedCount 超过 messages 数量，兜底复位避免跳过或重复渲染
+        if (renderedCount > displayMessages.size) renderedCount = 0
         if (renderedCount == 0) {
             conversationContainer.removeAll()
             bubbleSizeConstraints.clear()
+            streamingBubble = null; streamingContentPane = null
             streamingThinkingRow = null; streamingThinkingTextArea = null
             thinkingCompleted = false; assistantBubbleCompleted = false
         }
-        if (displayMessages.any { it.role == "assistant" }) {
-            assistantBubbleCompleted = true
-        }
         for (i in renderedCount until displayMessages.size) {
             val msg = displayMessages[i]
-            if (thinkingCompleted && msg.role == "thinking") continue
-            if (assistantBubbleCompleted && msg.role == "assistant") continue
             val component = when (msg.role) {
                 "user" -> {
                     val refs = viewModel.messageRefChips[msg.id]
@@ -1250,18 +1260,9 @@ class ChatToolWindow(private val project: Project) {
             streamingBubble = null; streamingContentPane = null
         }
         if (streamingBubble == null) {
-            // 首次流式：添加流式 AI 气泡。
-            // 如果已有 streaming thinking row 在容器中，assistant 气泡必须插入到它之后，
-            // 确保思考→回复的自然视觉顺序。
             val bubble = createAssistantBubble(AgentMessage("assistant", viewModel.streamingContent))
-            val thinkIdx = streamingThinkingRow?.let { row ->
-                conversationContainer.components.indexOfFirst { it === row }.takeIf { it >= 0 }
-            }
-            if (thinkIdx != null) {
-                conversationContainer.add(bubble, thinkIdx + 1)
-            } else {
-                conversationContainer.add(bubble)
-            }
+            conversationContainer.add(bubble)
+            renderedCount++
             // streamingBubble 必须存 row（container 的直接子组件），不能存 ChatBubble（row 的子组件），
             // 否则 conversationContainer.remove(streamingBubble) 找不到直接子组件，流式气泡永远删不掉
             streamingBubble = bubble
@@ -1311,16 +1312,18 @@ class ChatToolWindow(private val project: Project) {
         if (streamingThinkingRow == null) {
             val textAreaRef = java.util.concurrent.atomic.AtomicReference<JTextArea>()
             val headerRef = java.util.concurrent.atomic.AtomicReference<JLabel>()
+            val collapseRef = java.util.concurrent.atomic.AtomicReference<() -> Unit>()
             val row = toolRowFactory.thinkingRow(content, initiallyExpanded = true, streaming = true,
-                textAreaRef = textAreaRef, headerLabelRef = headerRef)
+                textAreaRef = textAreaRef,
+                headerLabelRef = headerRef,
+                onRequestCollapse = collapseRef
+            )
             streamingThinkingRow = row
             streamingThinkingTextArea = textAreaRef.get()
             streamingThinkingHeaderLabel = headerRef.get()
-            val assistantIdx = streamingBubble?.let { b ->
-                conversationContainer.components.indexOfFirst { it === b }.takeIf { it >= 0 }
-            }
-            if (assistantIdx != null) { conversationContainer.add(row, assistantIdx) }
-            else { conversationContainer.add(row) }
+            streamingThinkingCollapseAction = collapseRef.get()
+            conversationContainer.add(row)
+            renderedCount++
             conversationContainer.revalidate()
             autoScrollIfAtBottom()
         } else {
@@ -1332,8 +1335,7 @@ class ChatToolWindow(private val project: Project) {
     private fun finalizeThinkingRow() {
         thinkingCompleted = true
         streamingThinkingHeaderLabel?.text = AiAssistantBundle.message("chat.label.thinking")
-        streamingThinkingRow?.revalidate()
-        streamingThinkingRow?.repaint()
+        streamingThinkingCollapseAction?.invoke()
     }
 
     /** 工具开始执行时创建可折叠运行行（默认折叠），清理上一个未清理的 */
@@ -1362,12 +1364,14 @@ class ChatToolWindow(private val project: Project) {
             }
             streamingToolChevron = headerRow.components[0] as? JLabel
             conversationContainer.add(ref.outerRow)
+            renderedCount++
         } else {
             val msg = com.aiassistant.agent.AgentMessage("tool", toolArgs, toolName = toolName)
             val handle = toolRowFactory.toolResultRow(msg, null,
                 barColor = ChatTheme.toolBar, bgColor = ChatTheme.toolBg)
             streamingToolHandle = handle
             conversationContainer.add(handle.outerRow)
+            renderedCount++
         }
         conversationContainer.revalidate()
     }
@@ -2007,6 +2011,7 @@ class ChatToolWindow(private val project: Project) {
                     return@invokeLater
                 }
                 hideError()
+                userScrolledUp = false  // 新消息，恢复自动滚动
                 // 纯引用无文字时用 refContent 作为消息正文（避免 sendMessage 内 content.isBlank() 拦截）
                 val msgText = textContent.ifBlank { if (refContent.isNotEmpty()) refContent else "" }
                 if (msgText.isEmpty() && images.isEmpty()) {
@@ -2237,15 +2242,16 @@ class ChatToolWindow(private val project: Project) {
      *  确保流式输出时用户能看到新内容持续出现；同时严格守卫「用户不在底部时不滚动」，
      *  让用户能自由向上翻阅历史记录。 */
     private fun autoScrollIfAtBottom() {
+        if (userScrolledUp) return  // 用户手动上滑后暂停，直到新消息到达
         val bar = conversationScrollPane.verticalScrollBar
         val atBottom = bar.value + bar.visibleAmount >= bar.maximum - 80
         if (atBottom) bar.value = bar.maximum
     }
 
-    /** 滚动到底部。统一使用 invokeLater 确保 revalidate 后的布局计算完成再读 maximum。 */
+    /** 滚动到底部（仅当用户已在底部附近时）。统一使用 invokeLater 确保 revalidate 后布局完成。 */
     private fun scrollToBottom() {
         SwingUtilities.invokeLater {
-            conversationScrollPane.verticalScrollBar.value = conversationScrollPane.verticalScrollBar.maximum
+            autoScrollIfAtBottom()
         }
     }
 }

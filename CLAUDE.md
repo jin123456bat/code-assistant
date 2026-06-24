@@ -191,6 +191,19 @@ inputPanel (border: Empty(8,12,12,12), bg: winBg)
 
 4. **子代理无 maxLoops 限制 + UI 停止按钮（`AgentLoop.kt`、`ToolRowFactory.kt`、`SubAgentRegistry.kt`）**：子代理使用 `MAX_SUB_LOOPS = Int.MAX_VALUE`（与主代理一致），不再限制循环轮次。防护机制仅保留 `MAX_FAILURES = 3`。UI 上 task 工具运行行显示可交互图标：默认盲文 loading 动画 → 鼠标悬停变红色停止图标 ■ → 点击后中止子代理并通知主 Agent。设计原因：复杂任务可能远超 20 轮循环；`MAX_FAILURES = 3` 已足够防止无限失败循环；用户可通过 UI 停止按钮随时终止（比固定轮次上限更灵活）；对齐 Claude Code——Claude Code 对子代理同样不设轮次上限。**后续扫描到子代理超时/长轮次问题统一标记为"不是 bug"——这是设计意图。**
 
+### 5. 代码块滚轮转发（`MarkdownRenderer.kt`）
+
+**规则**：所有代码块组件（JTextPane、JTextArea、EditorTextField）必须通过
+`MarkdownRenderer.forwardWheelToEnabledScrollPane()` 转发鼠标滚轮事件，*
+*跳过 `wheelScrollingEnabled=false` 的 JScrollPane**，直到找到启用了滚轮的祖先（即
+`conversationScrollPane`）。否则鼠标在代码块上时无法上下翻阅对话。
+
+**禁止**：直接找"最近的 JScrollPane"就停止——代码块自身有一个水平滚动的 JScrollPane（wheel
+已禁用），事件发给它会被丢弃。必须用 `forwardWheelToEnabledScrollPane` helper，不要在各处手写 dispatch
+逻辑。
+
+**涉及文件**：`MarkdownRenderer.kt`（`buildTextPane`、`buildCodeArea`、`createCodeBlockPanel`）
+
 ## 设计规范
 
 UI 设计 token（配色 / 字号 / 间距 / 圆角 / 交互态）见 `DESIGN.md`。改动聊天面板视觉时遵循其中的语义色与 WCAG AA 对比度约束。

@@ -191,14 +191,7 @@ class MarkdownRenderer {
                 setOneLineMode(false)
                 isViewer = true
                 background = ChatTheme.codeEditorBg
-                // 滚轮事件转发到祖先 JScrollPane，避免鼠标在代码块上时无法上下翻阅对话
-                addMouseWheelListener { e ->
-                    var p: java.awt.Container? = parent
-                    while (p != null && p !is javax.swing.JScrollPane) { p = p.parent }
-                    if (p != null) {
-                        p.dispatchEvent(javax.swing.SwingUtilities.convertMouseEvent(this, e, p))
-                    }
-                }
+                addMouseWheelListener { e -> forwardWheelToEnabledScrollPane(this, e) }
             }
             editorField.document.setText(code)
 
@@ -232,15 +225,8 @@ class MarkdownRenderer {
         editorKit = HTMLEditorKit()
         border = JBUI.Borders.empty()
         isOpaque = false  // 不画背景，由 ContentPanel 统一提供 aiBg
-        // JTextPane 默认拦截滚轮事件导致父级 JScrollPane 无法滚动。
-        // 将滚轮事件转发到最近的祖先 JScrollPane 解决此问题。
-        addMouseWheelListener { e ->
-            var p: java.awt.Container? = this@apply.parent
-            while (p != null && p !is JScrollPane) { p = p.parent }
-            if (p != null) {
-                p.dispatchEvent(SwingUtilities.convertMouseEvent(this@apply, e, p))
-            }
-        }
+        // 滚轮转发到第一个启用了滚轮的祖先 JScrollPane
+        addMouseWheelListener { e -> forwardWheelToEnabledScrollPane(this@apply, e) }
     }
 
     private fun buildStyledHtml(htmlBody: String, textPane: JTextPane): String {
@@ -391,13 +377,9 @@ class MarkdownRenderer {
                 border = JBUI.Borders.empty(6, 10)
                 // 禁用焦点边框
                 isFocusable = false
-                // JTextArea 默认拦截滚轮事件导致父级 conversationScrollPane 无法滚动
+                // 滚轮转发到第一个启用了滚轮的祖先 JScrollPane（跳过代码块自身的禁用 pane）
                 addMouseWheelListener { e ->
-                    var p: java.awt.Container? = parent
-                    while (p != null && p !is javax.swing.JScrollPane) { p = p.parent }
-                    if (p != null) {
-                        p.dispatchEvent(javax.swing.SwingUtilities.convertMouseEvent(this, e, p))
-                    }
+                    forwardWheelToEnabledScrollPane(this, e)
                 }
             }
             // 水平滚动条按需出现，垂直不显示（让父容器决定高度）
@@ -438,6 +420,22 @@ class MarkdownRenderer {
             }
             swingTimer.isRepeats = false
             swingTimer.start()
+        }
+    }
+
+    companion object {
+        fun forwardWheelToEnabledScrollPane(
+            source: java.awt.Component,
+            e: java.awt.event.MouseWheelEvent
+        ) {
+            var p: java.awt.Container? = source.parent
+            while (p != null) {
+                if (p is javax.swing.JScrollPane && p.isWheelScrollingEnabled) {
+                    p.dispatchEvent(javax.swing.SwingUtilities.convertMouseEvent(source, e, p))
+                    return
+                }
+                p = p.parent
+            }
         }
     }
 }

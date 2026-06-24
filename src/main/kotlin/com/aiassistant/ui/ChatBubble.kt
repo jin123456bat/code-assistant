@@ -76,6 +76,7 @@ class ChatBubble(
     /** 设置 token 消耗标签（半透明极小字，默认隐藏） */
     fun setTokenUsage(inputTokens: Int, outputTokens: Int) {
         if (inputTokens <= 0 && outputTokens <= 0) return
+        if (tokenLabel != null) return  // 避免重复添加 tokenPanel
         tokenLabel = JLabel(buildTokenText(inputTokens, outputTokens)).apply {
             font = ChatTheme.metaFont.deriveFont(8f)
             foreground = Color(textMutedColor.red, textMutedColor.green, textMutedColor.blue, 96)
@@ -83,7 +84,10 @@ class ChatBubble(
             border = JBUI.Borders.empty(0, 0, 2, 4)
             isVisible = false
         }
-        val south = JPanel(FlowLayout(FlowLayout.RIGHT, 0, 0)).apply { isOpaque = false; background = null; add(tokenLabel) }
+        val south = JPanel(FlowLayout(FlowLayout.RIGHT, 0, 0)).apply {
+            isOpaque = false
+            maximumSize = Dimension(Int.MAX_VALUE, tokenLabel!!.preferredSize.height)
+        }
         add(south, BorderLayout.SOUTH)
     }
 

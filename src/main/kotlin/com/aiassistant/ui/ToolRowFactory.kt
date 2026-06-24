@@ -1,5 +1,6 @@
 package com.aiassistant.ui
 
+import com.aiassistant.AiAssistantBundle
 import com.aiassistant.agent.AgentMessage
 import com.intellij.diff.DiffManager
 import com.intellij.diff.contents.DocumentContentImpl
@@ -252,7 +253,9 @@ class ToolRowFactory(
      * - 始终允许展开（执行中的工具也可点击查看参数）
      */
     fun toolResultRow(message: AgentMessage, approvalActions: ApprovalActions? = null,
-                     barColor: java.awt.Color? = null, bgColor: java.awt.Color? = null): ToolResultHandle {
+                      barColor: java.awt.Color? = null, bgColor: java.awt.Color? = null,
+                      showBar: Boolean = false
+    ): ToolResultHandle {
         val toolName = message.toolName ?: "tool"
         val rawContent = message.content
         val bar = barColor ?: ChatTheme.toolBar
@@ -305,7 +308,10 @@ class ToolRowFactory(
         val outerRow = outerRow()
         val collapsed = AtomicBoolean(true)
         val approvalResolved = AtomicBoolean(false)
-        val bubble = leftBarPanel(bar = bar, bg = bg)
+        val bubble = if (showBar) leftBarPanel(
+            bar = bar,
+            bg = bg
+        ) else JPanel(BorderLayout()).apply { isOpaque = false }
 
         fun rebuild(isCollapsed: Boolean, resultOverride: String? = null) {
             // 支持原地更新结果
@@ -806,11 +812,14 @@ class ToolRowFactory(
      * @param initiallyExpanded 流式展示时传 true，让用户实时看到思考过程
      * @param streaming 流式接收中时传 true，展开标题显示"思考中..."
      */
-    /** @param textAreaRef 用于外部获取内部 JTextArea 引用，避免递归查找 */
+    /** @param onRequestCollapse 外部可调用此回调折叠思考行（完成后自动折叠） */
     fun thinkingRow(content: String, initiallyExpanded: Boolean = false, streaming: Boolean = false,
                      textAreaRef: java.util.concurrent.atomic.AtomicReference<JTextArea>? = null,
-                     headerLabelRef: java.util.concurrent.atomic.AtomicReference<JLabel>? = null): JPanel {
-        val summary = content.lines().take(2).joinToString(" ").take(ChatTheme.THINKING_PREVIEW_MAX_CHARS)
+                    headerLabelRef: java.util.concurrent.atomic.AtomicReference<JLabel>? = null,
+                    onRequestCollapse: java.util.concurrent.atomic.AtomicReference<() -> Unit>? = null
+    ): JPanel {
+        val summary =
+            content.lines().take(10).joinToString("").take(ChatTheme.THINKING_PREVIEW_MAX_CHARS)
             .let { if (content.length > ChatTheme.THINKING_PREVIEW_MAX_CHARS) "$it…" else it }
 
         val outerRow = outerRow()
@@ -860,8 +869,19 @@ class ToolRowFactory(
         fun applyCollapsedState(isCollapsed: Boolean) {
             val arrow = headerRow.getComponent(0) as? JLabel
             arrow?.text = if (isCollapsed) "▸" else "▾"
-            headerLabel.text = if (isCollapsed) summary else (if (streaming) "思考中..." else "思考过程")
+            headerLabel.text =
+                if (isCollapsed) summary else (if (streaming) AiAssistantBundle.message("chat.label.thinking.streaming") else AiAssistantBundle.message(
+                    "chat.label.thinking"
+                ))
             textArea.isVisible = !isCollapsed
+        }
+
+        // 暴露折叠回调给外部（如思考完成后自动折叠）
+        onRequestCollapse?.set {
+            collapsed.set(true)
+            applyCollapsedState(true)
+            container.revalidate()
+            container.repaint()
         }
 
         headerRow.addMouseListener(object : MouseAdapter() {

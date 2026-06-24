@@ -60,10 +60,7 @@ class DeepSeekFimClient(
         val prompt: String,
         val suffix: String?,
         @SerializedName("max_tokens") val maxTokens: Int,
-        val n: Int,
-        val temperature: Double = 0.0,
-        val stop: List<String> = listOf("\n\n\n"),
-        val stream: Boolean = false
+        val temperature: Double = 0.0
     )
 
     data class FimChoice(
@@ -97,8 +94,7 @@ class DeepSeekFimClient(
             model = settings.getModel(),
             prompt = prompt,
             suffix = suffix,
-            maxTokens = settings.getCompletionMaxTokens(),
-            n = settings.getCompletionNumCandidates()
+            maxTokens = settings.getCompletionMaxTokens()
         )
         return executeWithRetry(request, apiKey)
     }

@@ -161,14 +161,9 @@ class ChatViewModel {
 
     /** 添加 thinking 消息，若上一条也是 thinking 则合并，避免多个相邻思考行 */
     private fun addThinkingMessage(content: String) {
-        val last = messages.lastOrNull()
-        if (last != null && last.role == "thinking") {
-            messages[messages.lastIndex] = last.copy(content = last.content + "\n" + content, version = last.version + 1)
-        } else {
-            messages.add(AgentMessage("thinking", content))
-        }
+        messages.add(AgentMessage("thinking", content))
         streamingThinking = ""
-        onThinkingCompleted?.invoke()  // 通知 UI 固化流式思考行
+        onThinkingCompleted?.invoke()
     }
 
     private fun setupCallbacks(a: AgentLoop) {

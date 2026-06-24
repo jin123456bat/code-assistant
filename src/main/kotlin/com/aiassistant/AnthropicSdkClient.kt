@@ -107,7 +107,7 @@ class AnthropicSdkClient(
         }
 
         val params = paramsBuilder.build()
-        AppLogger.info("SDK请求: model=$model thinking=$thinkingEnabled tools=[${tools.joinToString(", ") { it.name }}]")
+//        AppLogger.info("SDK请求: model=$model thinking=$thinkingEnabled tools=[${tools.joinToString(", ") { it.name }}]")
         val latch = CountDownLatch(1)
         val textBuffer = StringBuilder()
         val thinkingBuffer = StringBuilder()
