@@ -47,10 +47,6 @@ object CompletionStats {
     fun recordShown(latencyMs: Long) = recordShown("unknown", latencyMs)
     fun recordAccepted() = recordAccepted("unknown")
 
-    fun recordCancelled() {
-        // 仅标记，不改变计数器
-    }
-
     fun getShownCount(): Int = totalShown.get()
     fun getAcceptedCount(): Int = totalAccepted.get()
 

@@ -94,7 +94,7 @@ class CompletionContextCollector {
         }
         val psiContext = if (psiFile != null) {
             ReadAction.compute<String?, Throwable> {
-                selectPsiStrategy(language).collectContext(editor, project, psiFile)
+                PsiCompletionStrategy.collectContext(editor, project, psiFile, language)
             }
         } else null
 

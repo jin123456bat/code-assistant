@@ -261,42 +261,12 @@ class AiCompletionProvider : InlineCompletionProvider {
      * 2025.1+ 移除了 InlineCompletionSuggestion.Companion.empty()，回退到反射。
      */
     private fun emptySuggestion(): InlineCompletionSuggestion {
-        try {
-            return InlineCompletionSuggestion.Companion.empty()
-        } catch (_: NoSuchMethodError) {
-            try {
-                val companion = InlineCompletionSuggestion::class.java
-                    .getDeclaredField("Companion").apply { isAccessible = true }.get(null)
-                val method = companion.javaClass.getMethod("empty")
-                @Suppress("UNCHECKED_CAST")
-                return method.invoke(companion) as InlineCompletionSuggestion
-            } catch (e: Exception) {
-                return buildSuggestion { }
-            }
-        }
+        @Suppress("DEPRECATION")
+        return InlineCompletionSuggestion.Companion.empty()
     }
 
-    /**
-     * 跨 IntelliJ 版本兼容的 withFlow() 调用。
-     * 2025.1+ 移除了 withFlow()，改为 InlineCompletionSingleSuggestion.build()。
-     */
     private fun buildSuggestion(block: suspend kotlinx.coroutines.flow.FlowCollector<InlineCompletionElement>.() -> Unit): InlineCompletionSuggestion {
-        try {
-            @Suppress("DEPRECATION")
-            return InlineCompletionSuggestion.Companion.withFlow(block)
-        } catch (_: NoSuchMethodError) {
-            try {
-                val cls =
-                    Class.forName("com.intellij.codeInsight.inline.completion.InlineCompletionSingleSuggestion")
-                val companionField = cls.getDeclaredField("Companion").apply { isAccessible = true }
-                val companion = companionField.get(null)
-                val buildMethod =
-                    companion.javaClass.methods.first { it.name == "build" && it.parameterCount == 1 }
-                @Suppress("UNCHECKED_CAST")
-                return buildMethod.invoke(companion, block) as InlineCompletionSuggestion
-            } catch (e: Exception) {
-                throw RuntimeException("Cannot create InlineCompletionSuggestion", e)
-            }
-        }
+        @Suppress("DEPRECATION")
+        return InlineCompletionSuggestion.Companion.withFlow(block)
     }
 }

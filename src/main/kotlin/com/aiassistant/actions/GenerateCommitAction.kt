@@ -232,22 +232,17 @@ class GenerateCommitAction : AnAction() {
                         }
                     }
                     before != null && after != null -> {
-                        // 修改文件：使用 SimpleDiff 生成真正的行级 unified diff
+                        // 修改文件：平面 diff 输出（git CLI 覆盖绝大多数场景，此处为降级路径）
                         val diffLines = SimpleDiff.diff(before, after)
-                        val hunks = buildHunks(diffLines)
-
-                        if (hunks.isEmpty()) continue
+                        if (diffLines.isEmpty()) continue
 
                         append("--- a/$path\n")
                         append("+++ b/$path\n")
-                        for (hunk in hunks) {
-                            append("@@ -${hunk.oldStart},${hunk.oldCount} +${hunk.newStart},${hunk.newCount} @@\n")
-                            for (line in hunk.lines) {
-                                when (line.kind) {
-                                    DiffKind.CTX -> append(" ${line.text}\n")
-                                    DiffKind.DEL -> append("-${line.text}\n")
-                                    DiffKind.ADD -> append("+${line.text}\n")
-                                }
+                        for (line in diffLines) {
+                            when (line.kind) {
+                                DiffKind.CTX -> append(" ${line.text}\n")
+                                DiffKind.DEL -> append("-${line.text}\n")
+                                DiffKind.ADD -> append("+${line.text}\n")
                             }
                         }
                     }
@@ -255,57 +250,6 @@ class GenerateCommitAction : AnAction() {
                 append("\n")
             }
         }.take(50000)
-    }
-
-    /** unified diff hunk 数据 */
-    private data class Hunk(
-        val oldStart: Int,
-        val oldCount: Int,
-        val newStart: Int,
-        val newCount: Int,
-        val lines: List<DiffLine>
-    )
-
-    /**
-     * 将 [SimpleDiff] 输出的平面 diff 行列表，按 unified diff 规范
-     * 分组为带上下文（默认 3 行）的 hunk。
-     */
-    private fun buildHunks(diffLines: List<DiffLine>, contextSize: Int = 3): List<Hunk> {
-        if (diffLines.isEmpty()) return emptyList()
-
-        val changedIndices = diffLines.indices.filter { diffLines[it].kind != DiffKind.CTX }.toSet()
-        if (changedIndices.isEmpty()) return emptyList()
-
-        // 标记所有需要包含的行：变更行 + 上下文
-        val included = BooleanArray(diffLines.size)
-        for (idx in changedIndices) {
-            val start = maxOf(0, idx - contextSize)
-            val end = minOf(diffLines.size - 1, idx + contextSize)
-            for (k in start..end) included[k] = true
-        }
-
-        // 将连续 included 行分组成 hunk
-        val hunks = mutableListOf<Hunk>()
-        var i = 0
-        while (i < diffLines.size) {
-            if (!included[i]) { i++; continue }
-
-            val hunkStart = i
-            while (i < diffLines.size && included[i]) i++
-            val hunkEnd = i
-
-            val hunkLines = diffLines.subList(hunkStart, hunkEnd)
-            val prefixLines = diffLines.subList(0, hunkStart)
-
-            val oldStart = prefixLines.count { it.kind != DiffKind.ADD } + 1
-            val oldCount = hunkLines.count { it.kind != DiffKind.ADD }
-            val newStart = prefixLines.count { it.kind != DiffKind.DEL } + 1
-            val newCount = hunkLines.count { it.kind != DiffKind.DEL }
-
-            hunks.add(Hunk(oldStart, oldCount, newStart, newCount, hunkLines))
-        }
-
-        return hunks
     }
 
     private fun readContent(revision: com.intellij.openapi.vcs.changes.ContentRevision?): String? {
