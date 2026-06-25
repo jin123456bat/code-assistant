@@ -8,6 +8,7 @@ import com.fasterxml.jackson.annotation.JsonPropertyDescription
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
+import org.junit.Assume.assumeTrue
 
 /**
  * Phase 0 Pre-Spike: Anthropic Java SDK 2.43.0 + DeepSeek /anthropic 兼容性验证。
@@ -19,12 +20,13 @@ class SdkCompatibilitySpikeTest {
 
     @Before
     fun setUp() {
+        assumeTrue(
+            "未设置 DEEPSEEK_API_KEY，跳过在线 DeepSeek 兼容性 spike",
+            System.getenv("DEEPSEEK_API_KEY") != null
+        )
         client = AnthropicOkHttpClient.builder()
             .baseUrl("https://api.deepseek.com/anthropic")
-            .apiKey(
-                System.getenv("DEEPSEEK_API_KEY")
-                    ?: throw IllegalStateException("set DEEPSEEK_API_KEY")
-            )
+            .apiKey(System.getenv("DEEPSEEK_API_KEY"))
             .build()
     }
 
@@ -98,15 +100,9 @@ class SdkCompatibilitySpikeTest {
         // 模拟 tool 执行 + 回传结果
         val tool = toolUses[0]
         builder
-            .addAssistantMessageOfBetaContentBlockParams(
-                listOf(
-                    BetaContentBlockParam.ofToolUse(
-                        BetaToolUseBlockParam.builder()
-                            .name(tool.name()).id(tool.id())
-                            .input(tool._input()).build()
-                    )
-                )
-            )
+            // DeepSeek thinking mode requires replaying the full assistant turn,
+            // including thinking/signature blocks, before sending tool_result.
+            .addMessage(resp1)
             .addUserMessageOfBetaContentBlockParams(
                 listOf(
                     BetaContentBlockParam.ofToolResult(
@@ -121,12 +117,20 @@ class SdkCompatibilitySpikeTest {
         val text = resp2.content().filter { it.text().isPresent }
             .joinToString("") { it.text().get().text() }
 
-        assertFalse(
-            "③-2 失败: 回传 tool_result 后无文本输出。stopReason=${resp2.stopReason()}",
-            text.isEmpty()
+        // 第 2 轮: LLM 可能输出文本，也可能继续调用工具(正常 Agent 行为)
+        val hasResponse = resp2.content().any {
+            it.text().isPresent || it.toolUse().isPresent
+        }
+        assertTrue(
+            "③-2 失败: 回传 tool_result 后无任何响应。stopReason=${resp2.stopReason()}",
+            hasResponse
         )
-        println("第 2 轮回复: $text")
-        println("✅ 验证③ 通过: Tool result 回传后继续对话正常")
+        println("第 2 轮 stopReason: ${resp2.stopReason()}")
+        if (text.isNotEmpty()) println("第 2 轮文本: $text")
+        resp2.content().filter { it.toolUse().isPresent }.forEach {
+            println("第 2 轮 tool_use: ${it.toolUse().get().name()}")
+        }
+        println("✅ 验证③ 通过: Tool result 回传后 LLM 正常响应")
     }
 }
 

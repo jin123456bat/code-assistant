@@ -7,6 +7,16 @@ plugins {
 group = "com.aiassistant"
 version = "2.0.0"
 
+java {
+    toolchain {
+        languageVersion.set(JavaLanguageVersion.of(21))
+    }
+}
+
+kotlin {
+    jvmToolchain(21)
+}
+
 repositories {
     mavenCentral()
     intellijPlatform {
@@ -31,7 +41,7 @@ dependencies {
 intellijPlatform {
     pluginConfiguration {
         ideaVersion {
-            sinceBuild = "233"
+            sinceBuild = "243"
             untilBuild = ""
         }
     }
@@ -39,11 +49,11 @@ intellijPlatform {
 
 tasks {
     withType<JavaCompile> {
-        sourceCompatibility = "17"
-        targetCompatibility = "17"
+        sourceCompatibility = "21"
+        targetCompatibility = "21"
     }
     withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {
-        kotlinOptions.jvmTarget = "17"
+        kotlinOptions.jvmTarget = "21"
     }
     runIde {
         jvmArgs(

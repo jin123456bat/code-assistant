@@ -8,22 +8,25 @@
         Powered by DeepSeek V4. Bring your own API key.
 
         Features:
-        - AI-powered git commit message generation
+        - Experimental Agent panel: chat UI and early tool execution prototype
+        - Experimental Plan Mode: /plan generates a reviewable plan
         - FIM (Fill-in-the-Middle) code completion
+        - AI-powered git commit message generation
+        - Skill discovery prototype (.code-assistant/skills/)
+        - MCP server management prototype
 
         To get started, register for a DeepSeek API key at platform.deepseek.com,
-        then configure it in Settings > Tools > Code Assistant.
+        then open the Code Assistant panel (Ctrl+Shift+K / Cmd+Shift+K).
     ]]></description>
 
     <depends>com.intellij.modules.platform</depends>
     <depends>com.intellij.modules.vcs</depends>
+    <depends>org.intellij.plugins.markdown</depends>
 
     <extensions defaultExtensionNs="com.intellij">
-        <applicationConfigurable
-            parentId="tools"
-            instance="com.aiassistant.SettingsConfigurable"
-            id="com.aiassistant.settings"
-            displayName="Code Assistant"/>
+        <toolWindow id="Code Assistant" anchor="right" icon="/icons/icon.svg"
+                factoryClass="com.aiassistant.ui.ChatToolWindowFactory" />
+        <!-- Settings managed inside the Chat panel; IDE Configurable removed per design -->
 
         <inline.completion.provider
             id="ai-assistant"
@@ -31,6 +34,12 @@
     </extensions>
 
     <actions resource-bundle="messages.AiAssistantBundle">
+        <action id="AiAssistant.OpenChat" class="com.aiassistant.ui.OpenChatAction"
+                text="Open Agent Chat" description="Open the AI Agent chat panel">
+            <keyboard-shortcut keymap="Mac OS X" first-keystroke="meta shift K" />
+            <keyboard-shortcut keymap="Mac OS X 10.5+" first-keystroke="meta shift K" />
+            <keyboard-shortcut keymap="$default" first-keystroke="ctrl shift K" />
+        </action>
         <action
             id="AiAssistant.GenerateCommit"
             class="com.aiassistant.actions.GenerateCommitAction"
