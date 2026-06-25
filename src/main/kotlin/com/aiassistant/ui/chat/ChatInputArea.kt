@@ -1,6 +1,6 @@
 package com.aiassistant.ui.chat
 
-import com.intellij.ui.JBColor
+import com.aiassistant.ui.AppColors
 import java.awt.*
 import java.awt.datatransfer.DataFlavor
 import java.awt.event.*
@@ -222,12 +222,12 @@ class ChatInputArea(
         tagsPanel.removeAll()
         tags.forEach { tag ->
             val t = JPanel(FlowLayout(FlowLayout.LEFT, 2, 0)).apply {
-                isOpaque = true; background = JBColor(0xEFF6FF, 0x1E3A5F); border =
-                BorderFactory.createLineBorder(JBColor(0xBFDBFE, 0x2563EB))
+                isOpaque = true; background = AppColors.tagBg; border =
+                BorderFactory.createLineBorder(AppColors.tagBorder)
             }
             t.add(JLabel(tag))
             val x = JLabel(" ✕").apply {
-                foreground = JBColor(0x6B7280, 0x9CA3AF); cursor =
+                foreground = AppColors.textSecondary; cursor =
                 Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
                 addMouseListener(object : MouseAdapter() {
                     override fun mouseClicked(e: MouseEvent) {

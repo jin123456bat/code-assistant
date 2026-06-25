@@ -1,5 +1,6 @@
 package com.aiassistant
 
+import com.aiassistant.ui.AppColors
 import com.intellij.openapi.options.Configurable
 import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBLabel
@@ -25,12 +26,12 @@ class SettingsConfigurable : Configurable {
         }
 
         // API Key
-        content.add(JLabel("DeepSeek API Key:"))
+        content.add(JBLabel("DeepSeek API Key:"))
         content.add(apiKeyField)
         content.add(Box.createVerticalStrut(12))
 
         // Model
-        content.add(JLabel("Model:"))
+        content.add(JBLabel("Model:"))
         content.add(modelCombo)
         content.add(Box.createVerticalStrut(12))
 
@@ -43,12 +44,12 @@ class SettingsConfigurable : Configurable {
         content.add(Box.createVerticalStrut(16))
 
         // Commit Prompt
-        content.add(JLabel("Commit Message Prompt ({diff} = git diff):"))
+        content.add(JBLabel("Commit Message Prompt ({diff} = git diff):"))
         content.add(JBScrollPane(promptArea).apply { preferredSize = Dimension(0, 120) })
         content.add(Box.createVerticalStrut(16))
 
         // Status
-        statusLabel.foreground = com.intellij.ui.JBColor(0x666666, 0x8C8C8C)
+        statusLabel.foreground = AppColors.textSecondary
         content.add(statusLabel)
 
         mainPanel.add(content, BorderLayout.NORTH)

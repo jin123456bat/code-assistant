@@ -1,6 +1,7 @@
 package com.aiassistant.ui.chat
 
-import com.intellij.ui.JBColor
+import com.aiassistant.ui.AppColors
+import com.aiassistant.ui.toHtmlColor
 import java.awt.BorderLayout
 import java.awt.FlowLayout
 import java.awt.Font
@@ -20,9 +21,6 @@ class PlanCard(
     private val steps = mutableListOf<StepRow>()
     private var currentStepIndex = 0
 
-    private val cardBorder = JBColor(0xE5E7EB, 0x374151)
-    private val cardBg = JBColor(0xFFFFFF, 0x2B2B2B)
-
     data class StepRow(
         val id: String,
         val description: String,
@@ -33,11 +31,11 @@ class PlanCard(
 
     init {
         border = BorderFactory.createCompoundBorder(
-            BorderFactory.createLineBorder(cardBorder),
+            BorderFactory.createLineBorder(AppColors.border),
             BorderFactory.createEmptyBorder(12, 16, 12, 16)
         )
         isOpaque = true
-        background = cardBg
+        background = AppColors.cardBg
 
         val header = JPanel(BorderLayout())
         summaryLabel.font = summaryLabel.font.deriveFont(13f).deriveFont(Font.BOLD)
@@ -46,7 +44,7 @@ class PlanCard(
 
         add(stepsPanel, BorderLayout.CENTER)
 
-        val btns = JPanel(FlowLayout(FlowLayout.LEFT))
+        val btns = JPanel(FlowLayout(FlowLayout.LEFT, 8, 0))
         btns.add(JButton("▶ 继续").apply { addActionListener { onResume() } })
         btns.add(JButton("⏸ 暂停").apply { addActionListener { onPause() } })
         btns.add(JButton("✕ 终止").apply { addActionListener { onAbort() } })
@@ -70,8 +68,9 @@ class PlanCard(
 
     fun setStepDone(index: Int) {
         steps.getOrNull(index)?.let { step ->
+            val dim = AppColors.textSecondary.toHtmlColor()
             step.label.text =
-                "<html>✅ ${step.description} <span style='color:#6B7280;font-size:11px'>${step.files}</span></html>"
+                "<html>✅ ${step.description} <span style='color:$dim;font-size:11px'>${step.files}</span></html>"
         }
         currentStepIndex = index + 1
         refreshStepLabels()
@@ -79,23 +78,27 @@ class PlanCard(
 
     fun setStepExecuting(index: Int) {
         steps.getOrNull(index)?.let { step ->
+            val dim = AppColors.textSecondary.toHtmlColor()
+            val highlight = AppColors.tagBg.toHtmlColor()
             step.label.text =
-                "<html><span style='background:#EFF6FF;padding:2px 4px'>⏳ ${step.description}</span> <span style='color:#6B7280;font-size:11px'>${step.files}</span></html>"
+                "<html><span style='background:$highlight;padding:2px 4px'>⏳ ${step.description}</span> <span style='color:$dim;font-size:11px'>${step.files}</span></html>"
         }
         currentStepIndex = index
     }
 
     fun setStepError(index: Int, msg: String) {
         steps.getOrNull(index)?.let { step ->
+            val err = AppColors.error.toHtmlColor()
             step.label.text =
-                "<html><span style='color:#EF4444'>❌ ${step.description}: $msg</span></html>"
+                "<html><span style='color:$err'>❌ ${step.description}: $msg</span></html>"
         }
     }
 
     fun setStepSkipped(index: Int) {
         steps.getOrNull(index)?.let { step ->
+            val dim = AppColors.textSecondary.toHtmlColor()
             step.label.text =
-                "<html><span style='color:#9CA3AF;text-decoration:line-through'>⏭ ${step.description}</span></html>"
+                "<html><span style='color:$dim;text-decoration:line-through'>⏭ ${step.description}</span></html>"
         }
     }
 
@@ -105,12 +108,14 @@ class PlanCard(
                     "❌"
                 ) != true
             ) {
+                val dim = AppColors.textSecondary.toHtmlColor()
                 step.label.text =
-                    "<html>✅ ${step.description} <span style='color:#6B7280;font-size:11px'>${step.files}</span></html>"
+                    "<html>✅ ${step.description} <span style='color:$dim;font-size:11px'>${step.files}</span></html>"
             }
             if (i > currentStepIndex && step.label.text?.contains("⬜") != true) {
+                val dim = AppColors.textSecondary.toHtmlColor()
                 step.label.text =
-                    "<html><span style='color:#6B7280'>⬜ ${step.description}</span> <span style='color:#9CA3AF;font-size:11px'>${step.files}</span></html>"
+                    "<html><span style='color:$dim'>⬜ ${step.description}</span> <span style='color:$dim;font-size:11px'>${step.files}</span></html>"
             }
         }
     }

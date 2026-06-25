@@ -2,12 +2,14 @@ package com.aiassistant.ui.chat
 
 import com.aiassistant.agent.AgentLoop
 import com.aiassistant.agent.AgentSession
+import com.aiassistant.agent.ToolCallState
 import com.aiassistant.session.SessionStore
+import com.aiassistant.ui.MessageBus
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
 import java.time.Instant
 import javax.swing.SwingUtilities
-
-// ponytail: 聊天 UI 状态管理，连接 AgentLoop 和 ChatPage
+import javax.swing.Timer
 
 class ChatViewModel(
     private val project: Project,
@@ -17,17 +19,66 @@ class ChatViewModel(
     internal var session = if (restoreSessionId != null) store.load(restoreSessionId)
         ?: AgentSession() else AgentSession()
     private val loop = AgentLoop(project, session)
-    var onMessageAdded: ((ChatMessage) -> Unit)? = null
-    var onTokenAppended: ((String) -> Unit)? = null
-    var onStreamingToken: ((String) -> Unit)? = null
-    var onStateChanged: (() -> Unit)? = null
 
+    var onMessageAdded: ((ChatMessage) -> Unit)? = null
+    var onStreamingToken: ((String) -> Unit)? = null
+    var onReasoningContent: ((String) -> Unit)? = null
+    var onToolCallStarted: ((toolUseId: String, toolName: String, params: Map<String, Any?>) -> Unit)? =
+        null
+    var onToolCallStateChanged: ((toolUseId: String, state: ToolCallState, result: String?, durationMs: Long?) -> Unit)? =
+        null
+    var onStateChanged: (() -> Unit)? = null
+    var onTurnCompleted: (() -> Unit)? = null
+
+    // ── 30ms 批量 flush：Timer 在 EDT 上合并连续 token ──
     private val streamingBuf = StringBuilder()
+    private var flushTimer: Timer? = null
+    private val FLUSH_INTERVAL_MS = 30
+
+    private fun startFlushTimer() {
+        if (flushTimer != null) return
+        flushTimer = Timer(FLUSH_INTERVAL_MS) {
+            if (streamingBuf.isNotEmpty()) {
+                val batch = streamingBuf.toString()
+                streamingBuf.clear()
+                onStreamingToken?.invoke(batch)
+            }
+        }.apply { isRepeats = false; start() }
+    }
+
+    private fun scheduleFlush() {
+        flushTimer?.restart()
+        if (flushTimer == null) startFlushTimer()
+    }
 
     init {
         loop.onToken = { token ->
             streamingBuf.append(token)
-            SwingUtilities.invokeLater { onStreamingToken?.invoke(token) }
+            // 每个 token 到达时调度 flush timer（首 token 即时，后续 30ms 批量）
+            if (flushTimer == null) {
+                SwingUtilities.invokeLater {
+                    val t = streamingBuf.toString()
+                    streamingBuf.clear()
+                    onStreamingToken?.invoke(t)
+                }
+            }
+            scheduleFlush()
+        }
+        loop.onReasoningContent = { reasoning ->
+            SwingUtilities.invokeLater { onReasoningContent?.invoke(reasoning) }
+        }
+        loop.onToolCall = { toolUseId, toolName, params ->
+            SwingUtilities.invokeLater {
+                onToolCallStarted?.invoke(toolUseId, toolName, params)
+            }
+        }
+        loop.onToolCallStateChanged = { toolUseId, state, result, durationMs ->
+            SwingUtilities.invokeLater {
+                onToolCallStateChanged?.invoke(toolUseId, state, result, durationMs)
+            }
+        }
+        loop.onTurnCompleted = {
+            SwingUtilities.invokeLater { onTurnCompleted?.invoke() }
         }
     }
 
@@ -35,6 +86,10 @@ class ChatViewModel(
     private val _messages = mutableListOf<ChatMessage>()
 
     val isRunning: Boolean get() = session.state == AgentSession.State.PROCESSING
+
+    // ── 暴露 session id 和 plan 供 ChatPage 使用 ──
+    val sessionId: String get() = session.id
+    val currentPlan: com.aiassistant.agent.PlanExecutor.Plan? get() = session.plan
 
     fun sendMessage(text: String) {
         val userMsg = ChatMessage(
@@ -49,7 +104,6 @@ class ChatViewModel(
             )
         )
 
-        // Detect /plan command → generate plan first
         if (text.trimStart() == "/clear") {
             newSession(); return
         }
@@ -58,8 +112,7 @@ class ChatViewModel(
             return
         }
 
-        // Normal agent execution
-        com.intellij.openapi.application.ApplicationManager.getApplication()
+        ApplicationManager.getApplication()
             .executeOnPooledThread {
                 val result = loop.run(text)
                 SwingUtilities.invokeLater {
@@ -71,7 +124,7 @@ class ChatViewModel(
 
     private fun handlePlanCommand(task: String) {
         val planExecutor = com.aiassistant.agent.PlanExecutor(session)
-        com.intellij.openapi.application.ApplicationManager.getApplication()
+        ApplicationManager.getApplication()
             .executeOnPooledThread {
                 val planResult =
                     loop.run("为以下任务生成详细的执行计划，每步骤包含描述、预期工具和涉及文件：$task")
@@ -90,6 +143,7 @@ class ChatViewModel(
                                 timestamp = Instant.now()
                             )
                             _messages.add(planMsg); onMessageAdded?.invoke(planMsg)
+                            MessageBus.publishPlanStateChanged(session.id, plan.status.name)
                         }
 
                         is AgentLoop.Result.Error -> {
@@ -110,6 +164,21 @@ class ChatViewModel(
     private fun handleResult(result: AgentLoop.Result) {
         when (result) {
             is AgentLoop.Result.Success -> {
+                // 清空 buffer 残留
+                if (streamingBuf.isNotEmpty()) {
+                    onStreamingToken?.invoke(streamingBuf.toString())
+                    streamingBuf.clear()
+                }
+                // 思考过程如果有内容，通过系统消息展示
+                if (!result.reasoning.isNullOrBlank()) {
+                    val thinkMsg = ChatMessage(
+                        type = ChatMessage.Type.SYSTEM,
+                        content = result.reasoning,
+                        timestamp = Instant.now()
+                    )
+                    _messages.add(thinkMsg)
+                    onMessageAdded?.invoke(thinkMsg)
+                }
                 session.addMessage(
                     com.aiassistant.agent.Message(
                         role = com.aiassistant.agent.Role.ASSISTANT,
@@ -125,30 +194,40 @@ class ChatViewModel(
                     )
                 )
                 _messages.add(agentMsg); onMessageAdded?.invoke(agentMsg)
+                MessageBus.publishTokenUsageUpdated(session.id, result.text.length / 4L)
             }
 
             is AgentLoop.Result.Error -> {
+                if (streamingBuf.isNotEmpty()) {
+                    onStreamingToken?.invoke(streamingBuf.toString())
+                    streamingBuf.clear()
+                }
                 val errMsg = ChatMessage(
                     type = ChatMessage.Type.ERROR,
-                    content = "错误: ${result.message}",
+                    content = result.message,
                     timestamp = Instant.now()
                 )
                 _messages.add(errMsg); onMessageAdded?.invoke(errMsg)
             }
         }
         store.save(session)
+        MessageBus.publishAgentStateChanged(session.id, session.state.name)
     }
 
     fun newSession() {
-        store.save(session) // save current before switching
+        store.save(session)
         session = AgentSession()
         _messages.clear()
+        MessageBus.publishSessionChanged(session.id, "CREATED")
     }
 
     fun cancel() {
         session.cancel()
         session.runningProcesses.forEach { if (it.isAlive) it.destroyForcibly() }
         session.runningProcesses.clear()
+        flushTimer?.stop()
+        flushTimer = null
+        streamingBuf.clear()
     }
 }
 
@@ -165,6 +244,7 @@ data class ChatMessage(
 }
 
 data class ToolCallUIData(
+    val toolUseId: String,
     val toolName: String,
     val state: String,
     val result: String? = null,

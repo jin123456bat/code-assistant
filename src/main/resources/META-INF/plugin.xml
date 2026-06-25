@@ -7,16 +7,19 @@
         AI-powered coding assistant for JetBrains IDEs.
         Powered by DeepSeek V4. Bring your own API key.
 
-        Features:
-        - Experimental Agent panel: chat UI and early tool execution prototype
-        - Experimental Plan Mode: /plan generates a reviewable plan
-        - FIM (Fill-in-the-Middle) code completion
-        - AI-powered git commit message generation
-        - Skill discovery prototype (.code-assistant/skills/)
-        - MCP server management prototype
+        面向 JetBrains IDE 的免费 AI 编程助手插件，基于 DeepSeek V4 模型。
+        用户自带 DeepSeek API Key。
 
-        To get started, register for a DeepSeek API key at platform.deepseek.com,
-        then open the Code Assistant panel (Ctrl+Shift+K / Cmd+Shift+K).
+        Features / 功能:
+        - Agent 对话：统一 Chat 模式，工具调用随对话自然触发
+        - Plan Mode：/plan 命令生成可审查的执行计划，逐步执行
+        - FIM 代码补全（Fill-in-the-Middle）
+        - AI 驱动的 Git commit message 生成
+        - Skill 系统（兼容 Claude Code SKILL.md 格式）
+        - MCP Server 管理
+
+        快速开始：在 platform.deepseek.com 注册获取 API Key，
+        然后打开 Code Assistant 面板（Ctrl+Shift+K / Cmd+Shift+K）。
     ]]></description>
 
     <depends>com.intellij.modules.platform</depends>

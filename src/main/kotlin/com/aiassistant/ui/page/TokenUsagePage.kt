@@ -1,8 +1,9 @@
 package com.aiassistant.ui.page
 
 import com.aiassistant.session.SessionStore
+import com.aiassistant.ui.AppColors
+import com.aiassistant.ui.toHtmlColor
 import com.intellij.openapi.project.Project
-import com.intellij.ui.JBColor
 import java.awt.BorderLayout
 import java.awt.Dimension
 import java.awt.Graphics
@@ -45,6 +46,13 @@ class TokenUsagePage(project: Project) : JPanel(BorderLayout()) {
 
             else -> sessions
         }
+
+        if (filtered.isEmpty()) {
+            body.add(renderEmpty())
+            body.revalidate(); body.repaint()
+            return
+        }
+
         val total = filtered.sumOf { it.totalTokens }
         val cost = String.format("%.2f", total * 0.000007)
         body.add(JLabel("总消耗: ${total / 1000}K tokens · ¥$cost"))
@@ -52,7 +60,7 @@ class TokenUsagePage(project: Project) : JPanel(BorderLayout()) {
         val sparkline = object : JPanel() {
             override fun paintComponent(g: Graphics) {
                 super.paintComponent(g)
-                g.color = JBColor(0x3B82F6, 0x60A5FA)
+                g.color = AppColors.primary
                 val data = filtered.takeLast(30).map { it.totalTokens.toFloat() }
                 if (data.isEmpty()) return;
                 val max = data.max(); if (max == 0f) return
@@ -68,18 +76,19 @@ class TokenUsagePage(project: Project) : JPanel(BorderLayout()) {
                 }
             }
         }
-        sparkline.preferredSize = Dimension(600, 80)
-        sparkline.border = BorderFactory.createLineBorder(JBColor(0xE5E7EB, 0x374151))
+        sparkline.minimumSize = Dimension(200, 60); sparkline.preferredSize = Dimension(200, 80)
+        sparkline.border = BorderFactory.createLineBorder(AppColors.border)
         sparkline.toolTipText = "hover 显示具体数值"
         body.add(sparkline)
         body.add(Box.createVerticalStrut(8))
-        body.add(JLabel("<html><span style='color:#6B7280;font-size:10px'>1日${" ".repeat(50)}最近30天</span></html>"))
+        val dimHex = AppColors.textSecondary.toHtmlColor()
+        body.add(JLabel("<html><span style='color:$dimHex;font-size:10px'>1 日 — 最近 30 天</span></html>"))
         body.add(Box.createVerticalStrut(12))
         body.add(JLabel("<html><b>按会话</b></html>"))
         filtered.sortedByDescending { it.updatedAt }.take(10).forEach { s ->
             body.add(
                 JLabel(
-                    "<html>📝 ${s.title} &nbsp;<span style='color:#6B7280;font-size:11px'>${s.totalTokens / 1000}K · ¥${
+                    "<html>📝 ${s.title} &nbsp;<span style='color:$dimHex;font-size:11px'>${s.totalTokens / 1000}K · ¥${
                         String.format(
                             "%.2f",
                             s.totalTokens * 0.000007
@@ -88,7 +97,19 @@ class TokenUsagePage(project: Project) : JPanel(BorderLayout()) {
                 )
             )
         }
-        body.add(JLabel("<html><span style='color:#6B7280;font-size:11px'>模型: deepseek-v4-pro（固定）</span></html>"))
+        body.add(JLabel("<html><span style='color:$dimHex;font-size:11px'>模型: deepseek-v4-pro（固定）</span></html>"))
         body.revalidate(); body.repaint()
+    }
+
+    private fun renderEmpty(): JPanel {
+        val p = JPanel(BorderLayout())
+        val dimHex = AppColors.textSecondary.toHtmlColor()
+        p.add(
+            JLabel(
+                "<html><div style='text-align:center;padding:40px;color:$dimHex'>📊<br><br>还没有 token 消耗<br><span style='font-size:11px'>使用 Agent 后这里会显示消耗统计</span></div></html>",
+                SwingConstants.CENTER
+            )
+        )
+        return p
     }
 }

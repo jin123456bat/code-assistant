@@ -2,6 +2,8 @@ package com.aiassistant.ui.page
 
 import com.aiassistant.session.SessionIndex
 import com.aiassistant.session.SessionStore
+import com.aiassistant.ui.AppColors
+import com.aiassistant.ui.toHtmlColor
 import com.intellij.openapi.project.Project
 import com.intellij.ui.JBColor
 import java.awt.BorderLayout
@@ -21,7 +23,7 @@ class SessionsPage(
     private val store = SessionStore(project)
     private val listContainer = JPanel().apply { layout = BoxLayout(this, BoxLayout.Y_AXIS) }
     private val searchField = JTextField().apply {
-        putClientProperty("JTextField.placeholderText", "搜索会话...")
+        putClientProperty("JTextField.placeholderText", "🔍 搜索会话...")
     }
     private val checkboxes = mutableMapOf<String, JCheckBox>()
 
@@ -97,10 +99,10 @@ class SessionsPage(
     private fun renderCard(s: SessionIndex): JPanel {
         val card = JPanel(BorderLayout()).apply {
             border = BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(0, 0, 1, 0, JBColor(0xE5E7EB, 0x374151)),
+                BorderFactory.createMatteBorder(0, 0, 1, 0, AppColors.border),
                 BorderFactory.createEmptyBorder(8, 12, 8, 12)
             )
-            maximumSize = java.awt.Dimension(Int.MAX_VALUE, 60)
+            maximumSize = java.awt.Dimension(Int.MAX_VALUE, 72)
             cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
             addMouseListener(object : MouseAdapter() {
                 override fun mouseClicked(e: MouseEvent) {
@@ -114,14 +116,17 @@ class SessionsPage(
 
         val formatter = DateTimeFormatter.ofPattern("MM-dd HH:mm").withZone(ZoneId.systemDefault())
         val time = formatter.format(s.updatedAt)
+        val dimHex = AppColors.textSecondary.toHtmlColor()
+        val planStatus =
+            if (s.hasActivePlan) "<br><span style='color:$dimHex;font-size:11px'>⏸ 计划暂停中</span>" else ""
         card.add(
-            JLabel("<html><b>${s.title}</b><br><span style='color:#6B7280;font-size:11px'>$time · ${s.totalTokens / 1000}K tokens · ${s.toolCallCount} 次工具</span></html>"),
+            JLabel("<html><b>${s.title}</b>$planStatus<br><span style='color:$dimHex;font-size:11px'>$time · ${s.totalTokens / 1000}K tokens · ${s.toolCallCount} 次工具</span></html>"),
             BorderLayout.CENTER
         )
 
         val delBtn = JButton("✕").apply {
             isContentAreaFilled = false; border = BorderFactory.createEmptyBorder()
-            foreground = JBColor(0xEF4444, 0xF87171)
+            foreground = AppColors.error
             addActionListener { store.delete(s.id); refreshList() }
         }
         card.add(delBtn, BorderLayout.EAST)
@@ -130,9 +135,10 @@ class SessionsPage(
 
     private fun renderEmpty(): JPanel {
         val p = JPanel(BorderLayout())
+        val dimHex = AppColors.textSecondary.toHtmlColor()
         p.add(
             JLabel(
-                "<html><div style='text-align:center;padding:40px;color:#6B7280'>还没有会话记录<br><span style='font-size:11px'>开始一段对话，会话将自动保存</span></div></html>",
+                "<html><div style='text-align:center;padding:40px;color:$dimHex'>还没有会话记录<br><span style='font-size:11px'>开始一段对话，会话将自动保存</span></div></html>",
                 SwingConstants.CENTER
             )
         )

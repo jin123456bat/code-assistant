@@ -1,6 +1,6 @@
 # Code Assistant Agent Mode — 技术契约
 
-关联设计文档：`DESIGN.md`。本文档定义所有组件的公开接口、数据契约和线程模型。
+关联设计文档：[`../DESIGN.md`](../DESIGN.md)。本文档定义所有组件的公开接口、数据契约和线程模型。
 
 ---
 
@@ -9,32 +9,51 @@
 ```
 com.aiassistant/
 ├── agent/
-│   ├── ToolModels.kt          // 8 个 Tool 数据类
+│   ├── ToolModels.kt          // 8 个 Tool 数据类 + @JsonClassDescription 注解
+│   ├── ToolInput.kt           // 工具输入参数类
 │   ├── ToolRegistry.kt        // 工具注册中心
+│   ├── ToolExecutor.kt        // 工具执行分发器（when 路由）
 │   ├── AgentLoop.kt           // Agent 主循环
 │   ├── AgentSession.kt        // 会话状态机
 │   ├── PlanExecutor.kt        // Plan Mode
 │   └── MultiAgentManager.kt   // 多 Agent（phase 5）
 ├── skills/
-│   ├── SkillManager.kt        // Skill 扫描/注册
-│   └── SkillModels.kt         // Skill 数据类
+│   ├── SkillManager.kt        // Skill 扫描/注册（含 Skill 数据类）
+│   └── SkillModels.kt         // Skill 数据类（⏳ 待独立：当前内嵌于 SkillManager）
 ├── mcp/
 │   ├── McpManager.kt          // MCP Server 生命周期
-│   └── McpConfigStore.kt      // 配置读写
+│   └── McpConfigStore.kt      // 配置读写（⏳ 待独立：当前内嵌于 McpManager）
 ├── session/
-│   ├── SessionStore.kt        // JSON 持久化
+│   ├── SessionStore.kt        // JSON 持久化（含 SessionModels 数据类）
 │   ├── SessionManager.kt      // 会话 CRUD
-│   └── SessionModels.kt       // 数据类
+│   └── SessionModels.kt       // 数据类（⏳ 待独立：当前内嵌于 SessionStore）
 ├── ui/
 │   ├── ChatToolWindowFactory.kt
 │   ├── ChatToolWindow.kt      // 顶层容器
 │   ├── TabBar.kt              // 顶部导航
-│   ├── page/                  // 6 个 Page
+│   ├── AppColors.kt           // 颜色令牌
+│   ├── MessageBus.kt          // 事件总线
+│   ├── SelectionListener.kt   // 编辑器选中监听
+│   ├── OpenChatAction.kt      // 快捷键 Action
+│   ├── page/                  // 7 个 Page
+│   │   ├── WelcomePage.kt
+│   │   ├── ChatPage.kt
+│   │   ├── SessionsPage.kt
+│   │   ├── TokenUsagePage.kt
+│   │   ├── McpPage.kt
+│   │   ├── SkillsPage.kt
+│   │   ├── SettingsPage.kt      // 关于页面 + 快捷键参考（Agent 设置已迁移到 SettingsConfigurable）
+│   │   └── PlaceholderPage.kt  // 占位页面
 │   └── chat/                  // 聊天 UI 组件
-├── ui/
-│   └── page/SettingsPage.kt             // 面板内 Settings（替代 IDE Configurable）
+│       ├── ChatBubbleRenderer.kt
+│       ├── ChatViewModel.kt
+│       ├── ChatInputArea.kt
+│       ├── ToolCallCard.kt
+│       ├── PlanCard.kt
+│       ├── RoundedBorder.kt    // 圆角边框
+│       └── SimpleDiff.kt       // LCS diff 算法
 └── actions/
-    └── AgentAction.kt
+    └── GenerateCommitAction.kt
 ```
 
 ---
@@ -48,8 +67,7 @@ com.aiassistant/
 ```
 AgentLoop
 ├── 构造: AgentLoop(session, toolRegistry, client, settings)
-├── run(userMessage: String, mode: AgentMode): Flow<AgentEvent>
-│   AgentMode = CHAT | AGENT | PLAN
+├── run(userMessage: String): Flow<AgentEvent>
 │   AgentEvent = TextDelta | ToolCallStarted | ToolCallCompleted | TurnCompleted | Error
 ├── cancel()
 ├── isRunning: Boolean
@@ -113,34 +131,20 @@ TokenUsage:
 
 ```
 ToolRegistry
-├── register(tool: AgentTool)          // 注册工具（内置或 MCP）
-├── unregister(toolName: String)       // 移除工具
-├── get(name: String): AgentTool?      // 按名查找
-├── listAll(): List<AgentTool>         // 所有已注册工具
-├── listBuiltin(): List<AgentTool>     // 仅内置工具
-├── listMcp(): List<AgentTool>         // 仅 MCP 工具
-└── toToolDefinitions(): List<ToolDefinition>  // 转为 SDK 格式
+├── register(name: String, toolClass: Class<*>, info: ToolInfo)  // 注册工具
+├── get(name: String): Class<*>?       // 按名查找 tool class
+├── listAll(): List<Class<*>>          // 所有已注册工具 class
+├── listBuiltin(): List<String>        // 内置工具名称列表
+└── toToolDefinitions(): List<String>  // 转为工具名称列表
 
-AgentTool:
+ToolInfo (ToolRegistry 内部类):
 ├── name: String                       // readFile, writeFile, ...
 ├── description: String                // LLM 看到的工具描述
-├── parameters: List<ToolParameter>    // JSON Schema 参数定义
-├── execute(params, session, onOutput?): ToolResult  // 执行逻辑
-├── requiresApproval: Boolean          // 是否需要用户审批
-└── source: BUILTIN | MCP              // 来源
+└── usage: String                      // 使用示例
 
-ToolParameter:
-├── name: String
-├── type: STRING | INT | BOOL | ARRAY | OBJECT
-├── description: String
-├── required: Boolean
-└── defaultValue: Any?
-
-ToolResult:
-├── success: Boolean
-├── content: String                    // 返回给 LLM 的内容
-├── displayContent: String?            // UI 展示的完整内容（可能比 content 长）
-└── errorMessage: String?              // 失败原因
+工具数据类 (ToolModels.kt):
+  8 个 @JsonClassDescription 注解的 data class，通过 SDK toolFromClass() 生成 JSON Schema。
+  工具执行分发 → ToolExecutor.kt 通过 when(toolName) 路由。
 ```
 
 **执行分发（每个 AgentTool 内部）：**
@@ -149,6 +153,10 @@ ToolResult:
 - WriteFile / EditFile → `invokeAndWait { WriteCommandAction }`
 - RunShell → Background Thread（`ProcessHandler` + 实时 `onOutput` 回调）
 - SpawnAgent → `MultiAgentManager.spawn()`
+
+**超时机制：** 每个工具都包含必填的 `timeout` 参数（秒），由 LLM 在 tool call 时传入。
+0=不限。RunShell 超时时强制 `destroyForcibly()` 终止进程。其他 I/O 工具的 timeout
+由 ToolExecutor 统一读取，目前作为安全兜底（操作通常很快完成）。
 
 ---
 
@@ -163,10 +171,9 @@ ChatViewModel
 ├── session: AgentSession                  // 当前绑定的会话
 ├── inputState: InputState                 // 输入区域状态
 │
-├── sendMessage(text: String, mode: AgentMode, attachments: List<FileRef>, images: List<ImageRef>)
+├── sendMessage(text: String, attachments: List<FileRef>, images: List<ImageRef>)
 │   → 调用 AgentLoop.run() → collect AgentEvent → 更新 messages/streamingToken
 ├── cancelGeneration()                     // 停止按钮
-├── switchMode(mode: AgentMode)            // 切换 Chat/Agent/Plan
 ├── addFileRef(ref: FileRef)               // 添加文件引用（手动或选中）
 ├── removeFileRef(ref: FileRef)
 ├── updateSelectionRef(file: String, lines: IntRange?, content: String)  // 更新选中引用
@@ -175,7 +182,6 @@ ChatViewModel
 ├── removeImage(imageId: String)
 │
 └── InputState:
-    ├── mode: AgentMode
     ├── manualRefs: List<FileRef>          // @file 手动引用（可多个）
     ├── selectionRef: FileRef?             // 选中代码引用（仅一个）
     ├── images: List<ImageRef>             // 粘贴的图片（可多个，单次 ≤ 5 张）
@@ -249,10 +255,10 @@ ChatBubbleRenderer
 
 ```
 ToolCallCard
-├── 构造: ToolCallCard(toolCallData: ToolCallUIData)
+├── 构造: ToolCallCard(toolName: String, params: String, initialState: ToolCallState)
 ├── setState(state: ToolCallState, result: String?, durationMs: Long?)
 ├── setRejected()                          // 用户拒绝审批
-├── onRetryRequested: (() -> Unit)?        // [重审] 按钮回调（拒绝后可见）
+├── setCancelled()                         // 用户取消
 ├── isExpanded: Boolean                    // 折叠/展开
 └── 渲染: JPanel (带状态图标 + 参数折叠 + 结果滚动区 + 底部耗时)
 
@@ -270,16 +276,19 @@ PlanCard
 
 ### 2.7 PlanExecutor
 
-**职责：** Plan Mode——生成计划、管理步骤执行、持久化。
+**职责：** 计划执行器——生成计划、管理步骤执行、持久化。操作通过 PlanCard 内联按钮触发。
+
+**生命周期：** 计划与 Agent 同步——Agent end_turn 时计划自动暂停，Agent 继续时计划自动恢复。
 
 ```
 PlanExecutor
 ├── 构造: PlanExecutor(session: AgentSession, agentLoop: AgentLoop)
 ├── generatePlan(task: String): Plan       // /plan → LLM 输出 → 4 层解析 → Plan
-├── resumeNextStep(): StepResult           // "继续" → 执行下一个 PENDING step
-├── retryStep(stepId: String): StepResult  // "重试 Step N"
-├── skipStep(stepId: String)               // "跳过 Step N"
-├── abortPlan()                            // "取消计划"
+├── deletePlan()                           // [✕ 删除] 仅未开始（全 PENDING）时可调用
+├── resumeNextStep(): StepResult           // [▶ 继续] 或 Agent 恢复时自动触发
+├── retryStep(stepId: String): StepResult  // [↻ 重试]
+├── skipStep(stepId: String)               // [⏭ 跳过]
+├── abortPlan()                            // [✕ 取消计划]
 ├── currentPlan: Plan?                     // 当前计划
 │
 └── Plan 解析流程 (4 层):
@@ -438,17 +447,11 @@ ChatToolWindow
 ├── registerPage(pageId: PageId, factory: () -> Page)
 │
 ├── onPageChanged: ((PageId) -> Unit)?   // 页面切换回调
-│
-└── dispose():                           // 清理顺序见 DESIGN.md 6.2
+└── dispose():                           // 清理顺序见 ../DESIGN.md 6.2
 
 PageId: WELCOME | CHAT | SESSIONS | TOKEN_USAGE | MCP | SKILLS | SETTINGS
 
-Page (接口):
-├── getPageId(): PageId
-├── getComponent(): JComponent
-├── onActivated()                        // 页面显示时回调
-├── onDeactivated()                      // 页面隐藏时回调
-└── dispose()                            // 页面销毁时回调
+所有页面直接继承 JPanel，通过 CardLayout 管理切换。页面懒加载，首次点击对应 Tab 时创建。
 ```
 
 ---
@@ -470,7 +473,7 @@ TabBar
 ### 2.13 ChatPage（聊天主页面）
 
 ```
-ChatPage implements Page
+ChatPage extends JPanel
 ├── 构造: ChatPage(sessionManager, chatViewModel)
 ├── messageList: JScrollPane             // 消息列表
 ├── inputArea: ChatInputArea             // 输入区域
@@ -488,11 +491,9 @@ ChatPage implements Page
       │               ├── PlanCard (计划)
       │               └── StreamingBubble (流式渲染中)
       └── SOUTH: ChatInputArea
-                 ├── 模式切换按钮组
-                 ├── JTextArea (输入框)
-                 ├── ImageTags (粘贴图片缩略图)
-                 ├── FileRefTags (文件引用标签)
-                 └── 发送按钮 + token 计数
+                 ├── TagsRow (FlowLayout: 文件+图片混合 tag, 输入框上方)
+                 ├── JTextArea (文本区域, 无边框)
+                 └── BottomBar: [+]按钮 + @提示 + [→]发送
 ```
 
 ### 2.14 ChatInputArea（输入区域组件）
@@ -500,19 +501,19 @@ ChatPage implements Page
 ```
 ChatInputArea
 ├── 构造: ChatInputArea(viewModel: ChatViewModel)
-├── textArea: JTextArea                       // 输入框
-├── fileRefTags: JPanel                       // 文件引用 tag 行
-├── imageTags: JPanel                         // 图片缩略图 tag 行
-├── sendButton: JButton
-├── tokenLabel: JLabel                        // token 计数
+├── textArea: JTextArea                       // 输入框（无边框，自适应 2-10 行）
+├── tagsRow: JPanel                           // Tags 行（FlowLayout，文件+图片混合排列，位于输入框上方）
+├── addFileButton: JButton                    // [+] 按钮 → 弹出文件选择 Popup
+├── sendButton: JButton                       // [→] 发送按钮
+├── hintLabel: JLabel                         // "@ 选择文件" 提示
 │
 ├── onSlashTrigger(): Unit                    // 输入 `/` → 弹出指令列表 Popup
 │   → 内容: 内置指令 (/plan, /clear) + 已启用 Skills 的 command
 │   → ↑↓ 选择，Enter 确认，Esc 关闭，输入实时过滤
 │
-├── onAtTrigger(): Unit                       // 输入 `@` → 弹出文件搜索 Popup
-│   → FilenameIndex.getFilesByName() → 前缀过滤 Top 20
-│   → ↑↓ 选择，Enter 确认 → 文件名插入输入框 → tag 显示
+├── onAtTrigger(): Unit                       // 输入 `@` 或点击 [+] → 弹出文件搜索 Popup
+│   → 文件按子目录分组展示，支持嵌套目录
+│   → ↑↓ 选择，Enter 确认 → 添加 tag 到 Tags 行
 │
 ├── handlePopupKeyDown(event: KeyEvent): Boolean  // Popup 键盘导航 (↑↓ Enter Esc)
 │   → 返回 true 表示已处理（消费事件）
@@ -589,15 +590,15 @@ ChatInputArea
 
 ## 五、数据流时序
 
-### 5.1 用户发送消息（Agent Mode）
+### 5.1 用户发送消息
 
 ```
 ChatInputArea.enterPressed()
-  → ChatViewModel.sendMessage(text, AGENT, attachments, images)
+  → ChatViewModel.sendMessage(text, attachments, images)
     → buildContext(text, attachments, images)  // 组装 @file + 选中代码 + 图片到 userContent
     → AgentSession.addMessage(USER, userContent)
     → AgentSession.setState(PROCESSING)
-    → AgentLoop.run(userContent, AGENT)
+    → AgentLoop.run(userContent)
         → 构建 params：
             system = SystemPromptBuilder.build(toolRegistry, skillManager)
             messages = session.messages + [userContent]
@@ -618,7 +619,7 @@ ChatInputArea.enterPressed()
                   emit(AgentState.AWAITING_APPROVAL)
                   latch = CountDownLatch(1)
                   invokeLater { showDialog() → latch.countDown() }
-                  latch.await(30, SECONDS)
+                  latch.await()  // 无超时，等待用户手动处理
                 if (approved):
                   ToolCallCard.setState(EXECUTING)
                   result = tool.execute(params, session, onOutput)
@@ -631,24 +632,24 @@ ChatInputArea.enterPressed()
     → messageBus.publish(TokenUsageUpdated)
 ```
 
-### 5.2 Plan Mode 执行
+### 5.2 Plan 执行
 
 ```
-ChatViewModel.sendMessage("/plan 重构 UserService", PLAN, ...)
+ChatViewModel.sendMessage("/plan 重构 UserService", ...)
   → PlanExecutor.generatePlan(task)
-    → AgentLoop.run("plan-request:" + task, AGENT)  // 生成计划
+    → AgentLoop.run("plan-request:" + task)  // 生成计划
     → parsePlan(llmOutput)  // 4 层解析
     → PlanCard 渲染
     → Plan 状态 = PAUSED
 
-用户输入 "继续"
+用户点击 PlanCard [▶ 继续]
   → PlanExecutor.resumeNextStep()
     → 获取 nextStep (currentStepIndex 对应的 PENDING step)
     → 构建 stepPrompt: "执行步骤: {step.description}。文件: {step.files}。工具: {step.tool}"
-    → AgentLoop.run(stepPrompt, AGENT)
+    → AgentLoop.run(stepPrompt)
     → 更新 step.status + step.result + step.fileStamps
     → currentStepIndex++
-    → 自动 PAUSED → 等待用户输入
+    → 自动 PAUSED → 等待用户操作
 ```
 
 ---
@@ -780,17 +781,18 @@ ChatViewModel.sendMessage("/plan 重构 UserService", PLAN, ...)
 
 ## 七、Settings 持久化
 
-Settings 在面板内管理，不注册 IDE Configurable。存储复用已有的 `PasswordSafe`（API Key）和
+Agent 设置已迁移到 IDE SettingsConfigurable（Settings > Tools > Code Assistant），与代码补全、Commit
+生成统一管理。面板内 Settings 页面简化为关于页 + 快捷键参考。存储复用 `PasswordSafe`（API Key）和
 `PropertiesComponent`（其余配置）。
 
 ```
-SettingsStore
-├── apiKey: String                           // PasswordSafe 存储
-├── shellTimeoutSeconds: Int (default 0)     // PropertiesComponent
-├── maxAgentTurns: Int (default 15)
-├── maxConcurrentAgents: Int (default 3)
-├── sendShortcut: ENTER | CTRL_ENTER (default ENTER)
-└── model: String = "deepseek-v4-pro"        // 固定，不可配置
+AppSettingsService（SettingsConfigurable 读写）
+├── apiKey: String                               // PasswordSafe 存储
+├── model: String = "deepseek-v4-pro"            // 下拉选择（V4 Flash / V4 Pro）
+├── completionEnabled: Boolean = true             // 代码补全开关
+├── prompt: String                                // Commit message 模板（{diff} 占位）
+├── maxAgentTurns: Int (default 15, 0=不限)       // Agent 最大轮次
+└── maxConcurrentAgents: Int (default 3)          // 多 Agent 并发上限
 ```
 
 ---
@@ -798,6 +800,9 @@ SettingsStore
 ## 八、System Prompt
 
 以下为 `AgentLoop` 构建 `MessageCreateParams` 时使用的 system prompt。**原文直接使用，不可改写。**
+
+> **语言选择说明：** System Prompt 使用中文，因为 DeepSeek V4 对中英文混合 prompt 支持良好，
+> 且目标用户为中文开发者。如后续支持其他语言用户，可抽取为 i18n 模板（`AiAssistantBundle` 已预留国际化机制）。
 
 ### 8.1 Agent 基础 System Prompt
 
@@ -814,6 +819,7 @@ SettingsStore
 当前项目：{projectName}
 项目路径：{projectBasePath}
 当前文件：{currentFileName}
+<!-- currentFileName 取 IDE 编辑器中最上层可见 Tab 的文件名；无打开文件时为空字符串 -->
 
 ## 工具使用原则
 
@@ -975,10 +981,9 @@ $ {command}
 {stdout}
 退出码: {exitCode} | 耗时: {duration}s | {outputLineCount} 行输出
 
-超时（如设置了超时上限）:
+超时（timeout 由 LLM 在 tool call 时传入，>0 时生效）:
 $ {command}
-{partialOutput}
-⚠ 命令超时 ({timeoutSeconds}s)，已终止
+超时: 命令执行超过 {timeout}s，已强制终止
 
 输出截断:
 $ {command}
@@ -1089,23 +1094,23 @@ $ {command}
 
 以下为关键 UI 组件的 LayoutManager 选择。**必须使用指定的 LayoutManager，不可替换。**
 
-| 组件             | LayoutManager                             | 说明                                                                                              |
-|----------------|-------------------------------------------|-------------------------------------------------------------------------------------------------|
-| ChatToolWindow | `BorderLayout`                            | NORTH=TabBar, CENTER=pageContainer(CardLayout)                                                  |
-| TabBar         | `JPanel(FlowLayout.LEFT, hgap=0, vgap=0)` | 等宽按钮，`setPreferredSize(Dimension(120, 32))`                                                     |
-| ChatPage       | `BorderLayout`                            | NORTH=标题行, CENTER=JScrollPane, SOUTH=ChatInputArea                                              |
-| 消息容器           | `JPanel` → `BoxLayout.Y_AXIS`             | 消息气泡垂直排列，用 `Box.createVerticalStrut(8)` 间隔                                                      |
-| 用户气泡           | `JPanel(BorderLayout)` → 右对齐              | `setMaximumSize(Dimension(maxWidth, ...))` 限制宽度为面板的 70%                                         |
-| Agent 气泡       | `BubblePanel(BoxLayout.Y_AXIS)`           | 文本段+代码块+文本段垂直排列，用 `Box.createVerticalStrut(4)` 间隔                                               |
-| ToolCallCard   | `JPanel(BorderLayout)`                    | NORTH=头部(图标+名称+状态), CENTER=折叠面板(JPanel.BoxLayout_Y_AXIS)                                        |
-| PlanCard       | `JPanel(BorderLayout)`                    | NORTH=摘要行, CENTER=步骤列表(BoxLayout.Y_AXIS)                                                        |
-| ChatInputArea  | `JPanel(BorderLayout)`                    | NORTH=tag行(FlowLayout.LEFT), CENTER=JTextArea(JScrollPane), SOUTH=底部栏(FlowLayout: 模式按钮+提示+发送按钮) |
-| WelcomePage    | `JPanel(GridBagLayout)`                   | 居中单列，GridBagConstraints.fill=HORIZONTAL, insets=Insets(8,20,8,20)                               |
-| SessionsPage   | `JPanel(BorderLayout)`                    | NORTH=搜索栏, CENTER=JScrollPane→JPanel(BoxLayout.Y_AXIS) 会话卡片列表                                   |
-| TokenUsagePage | `JPanel(BorderLayout)`                    | NORTH=时间选择行(FlowLayout), CENTER=JPanel→上部sparkline(JComponent)+下部JTable                         |
-| McpPage        | `JPanel(BorderLayout)`                    | NORTH=标题+添加按钮, CENTER=JScrollPane→JPanel(BoxLayout.Y_AXIS) server卡片列表                           |
-| SkillsPage     | `JPanel(BorderLayout)`                    | NORTH=标题+操作按钮, CENTER=JScrollPane→JPanel(BoxLayout.Y_AXIS) skill卡片列表                            |
-| SettingsPage   | `JPanel(GridBagLayout)`                   | 左对齐表单，GridBagConstraints.fill=HORIZONTAL, ipady=6                                               |
+| 组件             | LayoutManager                             | 说明                                                                                         |
+|----------------|-------------------------------------------|--------------------------------------------------------------------------------------------|
+| ChatToolWindow | `BorderLayout`                            | NORTH=TabBar, CENTER=pageContainer(CardLayout)                                             |
+| TabBar         | `JPanel(FlowLayout.LEFT, hgap=0, vgap=0)` | 纯图标按钮，`setPreferredSize(Dimension(44, 32))`。7 个 Tab × 44px = 308px                         |
+| ChatPage       | `BorderLayout`                            | NORTH=标题行, CENTER=JScrollPane, SOUTH=ChatInputArea                                         |
+| 消息容器           | `JPanel` → `BoxLayout.Y_AXIS`             | 消息气泡垂直排列，用 `Box.createVerticalStrut(8)` 间隔                                                 |
+| 用户气泡           | `JPanel(BorderLayout)` → 右对齐              | `setMaximumSize(Dimension(maxWidth, ...))` 限制宽度为面板的 70%                                    |
+| Agent 气泡       | `BubblePanel(BoxLayout.Y_AXIS)`           | 文本段+代码块+文本段垂直排列，用 `Box.createVerticalStrut(4)` 间隔                                          |
+| ToolCallCard   | `JPanel(BorderLayout)`                    | NORTH=头部(图标+名称+状态), CENTER=折叠面板(JPanel.BoxLayout_Y_AXIS)                                   |
+| PlanCard       | `JPanel(BorderLayout)`                    | NORTH=摘要行, CENTER=步骤列表(BoxLayout.Y_AXIS)                                                   |
+| ChatInputArea  | `JPanel(BorderLayout)`                    | NORTH=TagsRow(FlowLayout: 文件+图片), CENTER=JTextArea, SOUTH=底部栏(FlowLayout: [+]按钮+@提示+[→]发送) |
+| WelcomePage    | `JPanel(GridBagLayout)`                   | 居中单列，GridBagConstraints.fill=HORIZONTAL, insets=Insets(8,20,8,20)                          |
+| SessionsPage   | `JPanel(BorderLayout)`                    | NORTH=搜索栏, CENTER=JScrollPane→JPanel(BoxLayout.Y_AXIS) 会话卡片列表                              |
+| TokenUsagePage | `JPanel(BorderLayout)`                    | NORTH=时间选择行(FlowLayout), CENTER=JPanel→上部sparkline(JComponent)+下部JTable                    |
+| McpPage        | `JPanel(BorderLayout)`                    | NORTH=标题+添加按钮, CENTER=JScrollPane→JPanel(BoxLayout.Y_AXIS) server卡片列表                      |
+| SkillsPage     | `JPanel(BorderLayout)`                    | NORTH=标题+操作按钮, CENTER=JScrollPane→JPanel(BoxLayout.Y_AXIS) skill卡片列表                       |
+| SettingsPage   | `JPanel(BoxLayout.Y_AXIS)`                | 关于卡片 + 快捷键参考卡片 + IDE 设置入口卡片，垂直排列                                                           |
 
 **组件样式规范：**
 
@@ -1114,10 +1119,10 @@ $ {command}
 | 用户气泡背景色     | `Color(232, 240, 254)` (#E8F0FE)                                                                                        |
 | Agent 气泡背景色 | `Color(255, 255, 255)` (#FFFFFF) + 左边框 `Color(59, 130, 246)` (#3B82F6) 3px                                              |
 | 错误气泡背景色     | `Color(254, 226, 226)` (#FEE2E2)                                                                                        |
-| 系统消息颜色      | `Color(148, 163, 184)` (#94A3B8)                                                                                        |
+| 系统消息颜色      | `Color(156, 163, 175)` (#9CA3AF)                                                                                        |
 | 代码块背景色      | `Color(246, 248, 250)` (#F6F8FA)                                                                                        |
 | 字体          | 中文/英文统一: `Font("SansSerif", PLAIN, 14)`。代码块: `Font("JetBrains Mono", PLAIN, 13)`，不可用时降级 `Font("Monospaced", PLAIN, 13)` |
 | 圆角          | 用户气泡: 12px, Agent 气泡: 12px, 代码块: 8px, 工具卡片: 8px                                                                         |
 | 间距          | 气泡间: 8px, 气泡内部 padding: 12px, 代码块 margin: 8px 0                                                                         |
 | 输入框最小行数     | 2 行, 最大 10 行, 自动扩展                                                                                                      |
-| TabBar 按钮大小 | 120×32 px, 当前页面高亮 `Color(100, 140, 220)` 底边框 2px                                                                        |
+| TabBar 按钮大小 | 44×32 px（纯图标）, 当前页面高亮 `Color(100, 140, 220)` 底边框 2px                                                                    |

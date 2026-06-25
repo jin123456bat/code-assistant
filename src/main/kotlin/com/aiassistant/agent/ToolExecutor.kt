@@ -4,34 +4,55 @@ import com.anthropic.models.beta.messages.BetaToolUseBlock
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.vfs.VirtualFileManager
-import com.intellij.psi.PsiDocumentManager
-import com.intellij.psi.PsiFileFactory
-import com.intellij.psi.search.FilenameIndex
-import com.intellij.psi.search.GlobalSearchScope
 import java.io.File
 
 class ToolExecutor(private val project: Project, private val session: AgentSession) {
 
+    /** 工具状态变更回调，供 AgentLoop 驱动 ToolCallCard 实时刷新 */
+    var onToolStateChanged: ((toolUseId: String, state: ToolCallState, result: String?, durationMs: Long?) -> Unit)? =
+        null
+
     fun execute(toolUse: BetaToolUseBlock): String {
+        val toolUseId = toolUse.id()
+        val toolName = toolUse.name()
         return try {
-            when (toolUse.name()) {
+            val input = toolUse._input()
+            val timeoutSec = ToolInput.int(input, "timeout") ?: 0
+            onToolStateChanged?.invoke(toolUseId, ToolCallState.EXECUTING, null, null)
+            val start = System.currentTimeMillis()
+            val result = when (toolName) {
                 "readFile" -> readFile(toolUse)
                 "writeFile" -> writeFile(toolUse)
                 "editFile" -> editFile(toolUse)
-                "runShell" -> runShell(toolUse)
+                "runShell" -> runShell(toolUse, timeoutSec)
                 "listFiles" -> listFiles(toolUse)
                 "searchContent" -> searchContent(toolUse)
                 "readLints" -> readLints(toolUse)
                 "spawnAgent" -> spawnAgent(toolUse)
-                else -> "未知工具: ${toolUse.name()}"
+                else -> "未知工具: $toolName"
             }
+            val elapsed = System.currentTimeMillis() - start
+            val isError =
+                result.startsWith("错误") || result.startsWith("超时") || result.startsWith("未知工具")
+            onToolStateChanged?.invoke(
+                toolUseId,
+                if (isError) ToolCallState.ERROR else ToolCallState.DONE,
+                result,
+                elapsed
+            )
+            result
         } catch (e: Exception) {
+            onToolStateChanged?.invoke(
+                toolUseId,
+                ToolCallState.ERROR,
+                "错误: ${e.javaClass.simpleName}: ${e.message}",
+                null
+            )
             "错误: ${e.javaClass.simpleName}: ${e.message}"
         }
     }
 
-    // ponytail: read from VFS, parse input as JsonValue
+    // ── readFile ──
     private fun readFile(toolUse: BetaToolUseBlock): String {
         val input = toolUse._input()
         val path = ToolInput.string(input, "filePath") ?: return "错误: 缺少 filePath 参数"
@@ -46,6 +67,9 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
         val from = (startLine?.minus(1))?.coerceAtLeast(0) ?: 0
         val to = (endLine?.coerceAtMost(lines.size)) ?: lines.size
 
+        // 记录 modificationStamp 供 editFile 冲突检测
+        session.fileStamps[path] = file.lastModified()
+
         val content = lines.subList(from, to).joinToString("\n")
         val totalLines = lines.size
         val returnedLines = to - from
@@ -59,7 +83,7 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
         }
     }
 
-    // ponytail: use WriteCommandAction for safe file writes
+    // ── writeFile ──
     private fun writeFile(toolUse: BetaToolUseBlock): String {
         val input = toolUse._input()
         val path = ToolInput.string(input, "filePath") ?: return "错误: 缺少 filePath 参数"
@@ -80,10 +104,13 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
             }
         }
 
+        // 更新 stamp
+        session.fileStamps[path] = file.lastModified()
+
         return "✅ 文件已写入: $path ($lineCount 行, ${content.length} 字节)\n操作类型: ${if (isNew) "新建" else "覆盖"}"
     }
 
-    // ponytail: precise string replacement
+    // ── editFile (含 modificationStamp 校验) ──
     private fun editFile(toolUse: BetaToolUseBlock): String {
         val input = toolUse._input()
         val path = ToolInput.string(input, "filePath") ?: return "错误: 缺少 filePath 参数"
@@ -93,20 +120,26 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
         val basePath = project.basePath ?: return "错误: 项目路径不可用"
         val file = File(basePath, path)
         if (!file.exists()) {
-            // 空 oldString + 文件不存在 = 创建新文件
             if (oldString.isEmpty()) {
                 file.parentFile?.mkdirs()
                 file.writeText(newString)
+                session.fileStamps[path] = file.lastModified()
                 return "✅ 文件已创建: $path (${newString.lines().size} 行)"
             }
             return "错误: 文件 \"$path\" 不存在"
+        }
+
+        // modificationStamp 冲突检测
+        val lastReadStamp = session.fileStamps[path]
+        val currentStamp = file.lastModified()
+        if (lastReadStamp != null && lastReadStamp != currentStamp) {
+            return "错误: \"$path\" 已被外部修改（上次读取 stamp=$lastReadStamp，当前 stamp=$currentStamp）。\n请使用 readFile 重新读取文件后再试。"
         }
 
         val currentContent = file.readText()
         val count = currentContent.split(oldString).size - 1
 
         if (count == 0) {
-            // Show nearby content for context
             val lines = currentContent.lines()
             return "错误: 在 \"$path\" 中未找到 oldString。\n提示: 请使用 readFile 确认文件内容。\n文件共 ${lines.size} 行。"
         }
@@ -122,13 +155,16 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
             }
         }
 
+        // 更新 stamp
+        session.fileStamps[path] = file.lastModified()
+
         val replacedLines = oldString.lines().size
         val newLines = newString.lines().size
         return "✅ 已修改: $path\n替换了 $replacedLines 行 → $newLines 行"
     }
 
-    // ponytail: Runtime.exec, 30s timeout for safety
-    private fun runShell(toolUse: BetaToolUseBlock): String {
+    // ── runShell ──
+    private fun runShell(toolUse: BetaToolUseBlock, timeoutSec: Int): String {
         val input = toolUse._input()
         val command = ToolInput.string(input, "command") ?: return "错误: 缺少 command 参数"
         val workDir = ToolInput.string(input, "workDir") ?: project.basePath
@@ -137,18 +173,33 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
         val process = Runtime.getRuntime().exec(arrayOf("/bin/bash", "-c", command), null, dir)
         session.runningProcesses.add(process)
 
-        // Read stdout/stderr on separate threads to prevent deadlock
         val stdoutFuture = java.util.concurrent.CompletableFuture.supplyAsync {
             process.inputStream.bufferedReader().use { it.readText() }
         }
         val stderrFuture = java.util.concurrent.CompletableFuture.supplyAsync {
             process.errorStream.bufferedReader().use { it.readText() }
         }
-        val stdout = stdoutFuture.get(60, java.util.concurrent.TimeUnit.SECONDS)
-        val stderr = stderrFuture.get(10, java.util.concurrent.TimeUnit.SECONDS)
-        process.waitFor(60, java.util.concurrent.TimeUnit.SECONDS)
-        if (process.isAlive) {
-            process.destroyForcibly(); session.runningProcesses.remove(process)
+
+        val (stdout, stderr) = if (timeoutSec > 0) {
+            try {
+                val out =
+                    stdoutFuture.get(timeoutSec.toLong(), java.util.concurrent.TimeUnit.SECONDS)
+                val err = stderrFuture.get(1, java.util.concurrent.TimeUnit.SECONDS)
+                process.waitFor(1, java.util.concurrent.TimeUnit.SECONDS)
+                if (process.isAlive) {
+                    process.destroyForcibly(); session.runningProcesses.remove(process)
+                    return "超时: 命令执行超过 ${timeoutSec}s，已强制终止\n\$ $command"
+                }
+                Pair(out, err)
+            } catch (e: java.util.concurrent.TimeoutException) {
+                process.destroyForcibly(); session.runningProcesses.remove(process)
+                return "超时: 命令执行超过 ${timeoutSec}s，已强制终止\n\$ $command"
+            }
+        } else {
+            val out = stdoutFuture.get()
+            val err = stderrFuture.get()
+            process.waitFor()
+            Pair(out, err)
         }
 
         val start = System.currentTimeMillis()
@@ -163,7 +214,7 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
         }
     }
 
-    // ponytail: VFS directory listing
+    // ── listFiles ──
     private fun listFiles(toolUse: BetaToolUseBlock): String {
         val input = toolUse._input()
         val dirPath = ToolInput.string(input, "dirPath") ?: "."
@@ -198,6 +249,7 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
         }
     }
 
+    // ── searchContent ──
     private fun searchContent(toolUse: BetaToolUseBlock): String {
         val input = toolUse._input()
         val query = ToolInput.string(input, "query") ?: return "错误: 缺少 query 参数"
@@ -226,14 +278,12 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
             }
         return if (results.isEmpty()) "未找到匹配 \"$query\" 的内容。"
         else if (results.size >= 50) "找到 ${results.size}+ 条匹配，已截断到 50 条:\n${
-            results.joinToString(
-                "\n"
-            )
+            results.joinToString("\n")
         }\n如有必要，请使用更精确的搜索词缩小范围。"
         else "找到 ${results.size} 条匹配:\n${results.joinToString("\n")}"
     }
 
-    // ponytail: IDE inspection placeholder — real impl needs IntelliJ inspection API
+    // ── readLints ──
     private fun readLints(toolUse: BetaToolUseBlock): String {
         val input = toolUse._input()
         val path = ToolInput.string(input, "filePath") ?: return "错误: 缺少 filePath 参数"
@@ -242,11 +292,10 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
         val file = File(basePath, path)
         if (!file.exists()) return "错误: 文件 \"$path\" 不存在"
 
-        // ponytail: return empty — real IDE inspection integration in later phase
         return "文件: $path\n0 个错误, 0 个警告, 0 个提示\n(IDE inspection 集成将在后续 Phase 实现)"
     }
 
-    // ponytail: real spawnAgent — creates sub-AgentLoop for parallel work
+    // ── spawnAgent ──
     private val multiAgent = MultiAgentManager(project)
 
     private fun spawnAgent(toolUse: BetaToolUseBlock): String {

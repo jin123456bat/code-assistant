@@ -1,6 +1,6 @@
 package com.aiassistant.agent
 
-// ponytail: Plan Mode shell — generates plan then step-by-step execution via AgentLoop
+// ponytail: plan executor — generates plan then step-by-step execution via AgentLoop, controlled by PlanCard buttons
 
 class PlanExecutor(private val session: AgentSession) {
 

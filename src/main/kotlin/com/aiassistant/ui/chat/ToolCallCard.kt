@@ -1,7 +1,8 @@
 package com.aiassistant.ui.chat
 
+import com.aiassistant.ui.AppColors
 import com.aiassistant.ui.RoundedBorder
-import com.intellij.ui.JBColor
+import com.aiassistant.ui.toHtmlColor
 import java.awt.BorderLayout
 import java.awt.Color
 import java.awt.Font
@@ -16,56 +17,56 @@ class ToolCallCard(
 ) : JPanel(BorderLayout()) {
 
     enum class ToolCallState(val label: String, val color: Color) {
-        PENDING("⏳ 等待执行", JBColor(0x6B7280, 0x9CA3AF)),
-        AWAITING_APPROVAL("🔒 等待授权", JBColor(0xF59E0B, 0xFBBF24)),
-        EXECUTING("🔄 执行中...", JBColor(0x3B82F6, 0x60A5FA)),
-        DONE("✅ 完成", JBColor(0x22C55E, 0x4ADE80)),
-        ERROR("❌ 错误", JBColor(0xEF4444, 0xF87171)),
-        TIMEOUT("⏰ 超时", JBColor(0xF59E0B, 0xFBBF24)),
-        REJECTED("🚫 已拒绝", JBColor(0x6B7280, 0x9CA3AF)),
-        CANCELLED("⛔ 已取消", JBColor(0x6B7280, 0x9CA3AF)),
+        PENDING("⏳ 等待执行", AppColors.textSecondary),
+        AWAITING_APPROVAL("🔒 等待授权", AppColors.warning),
+        EXECUTING("🔄 执行中...", AppColors.primary),
+        DONE("✅ 完成", AppColors.success),
+        ERROR("❌ 错误", AppColors.error),
+        TIMEOUT("⏰ 超时", AppColors.warning),
+        REJECTED("🚫 已拒绝", AppColors.textSecondary),
+        CANCELLED("⛔ 已取消", AppColors.textSecondary),
     }
 
     private var state = initialState
     private val headerLabel = JLabel()
-    private val bodyPanel = JPanel().apply { layout = BoxLayout(this, BoxLayout.Y_AXIS) }
+    private val bodyPanel = JPanel().apply {
+        layout = BoxLayout(this, BoxLayout.Y_AXIS)
+        border = BorderFactory.createEmptyBorder(8, 12, 8, 12)
+    }
     private val resultArea = JTextArea().apply {
-        font = Font("Monospaced", Font.PLAIN, 13)
-        isEditable = false; background = JBColor(0xF6F8FA, 0x161B22)
+        font = Font(Font.MONOSPACED, Font.PLAIN, 13)
+        isEditable = false; background = AppColors.codeBg
         border = BorderFactory.createEmptyBorder(8, 12, 8, 12)
     }
     private val footerLabel = JLabel()
 
-    private val cardBorder = JBColor(0xE5E7EB, 0x374151)
-    private val cardBg = JBColor(0xFFFFFF, 0x2B2B2B)
-    private val headerBg = JBColor(0xF9FAFB, 0x111827)
-    private val footerFg = JBColor(0x6B7280, 0x9CA3AF)
-
     init {
         border = BorderFactory.createCompoundBorder(
-            RoundedBorder(8, cardBorder),
+            RoundedBorder(8, AppColors.border),
             BorderFactory.createEmptyBorder(0, 0, 0, 0)
         )
         isOpaque = true
-        background = cardBg
+        background = AppColors.cardBg
 
         val header = JPanel(BorderLayout()).apply {
             isOpaque = true
-            background = headerBg
+            background = AppColors.headerBg
             border = BorderFactory.createEmptyBorder(8, 12, 8, 12)
             add(JLabel("🔧 $toolName"), BorderLayout.WEST)
             add(headerLabel, BorderLayout.EAST)
         }
         add(header, BorderLayout.NORTH)
 
+        val fgHex = AppColors.textSecondary.toHtmlColor()
+        val bgHex = AppColors.toolPlaceholderBg.toHtmlColor()
         val paramsLabel =
-            JLabel("<html><span style='font-family:monospace;font-size:12px;color:#374151;background:#F3F4F6;padding:4px 8px'>$params</span></html>")
+            JLabel("<html><span style='font-family:monospace;font-size:12px;color:$fgHex;background:$bgHex;padding:4px 8px'>$params</span></html>")
         bodyPanel.add(paramsLabel)
         bodyPanel.add(resultArea)
         add(bodyPanel, BorderLayout.CENTER)
 
         footerLabel.font = footerLabel.font.deriveFont(11f)
-        footerLabel.foreground = footerFg
+        footerLabel.foreground = AppColors.textSecondary
         footerLabel.border = BorderFactory.createEmptyBorder(6, 12, 6, 12)
         add(footerLabel, BorderLayout.SOUTH)
 

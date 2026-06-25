@@ -3,8 +3,6 @@ package com.aiassistant.agent
 import java.time.Instant
 import java.util.UUID
 
-// ponytail: 会话状态机 + 消息列表，事件发射延后到 ChatViewModel
-
 class AgentSession(
     val id: String = UUID.randomUUID().toString(),
     val title: String = "新会话"
@@ -17,15 +15,15 @@ class AgentSession(
     var updatedAt: Instant = createdAt
 
     var state: State = State.IDLE
-        set(value) {
-            field = value
-            updatedAt = Instant.now()
-        }
+        private set
 
     val messages = mutableListOf<Message>()
     var cancelled = false
     val runningProcesses = mutableSetOf<Process>()
     var plan: com.aiassistant.agent.PlanExecutor.Plan? = null
+
+    /** 记录每个文件上次读取时的 modificationStamp，用于 editFile 冲突检测 */
+    val fileStamps: MutableMap<String, Long> = mutableMapOf()
 
     fun addMessage(msg: Message) {
         messages.add(msg)
@@ -35,6 +33,49 @@ class AgentSession(
     fun cancel() {
         cancelled = true
         state = State.CANCELLED
+    }
+
+    // ── 状态转换方法 ──
+
+    fun startProcessing() {
+        state = State.PROCESSING
+    }
+
+    fun requireApproval() {
+        state = State.AWAITING_APPROVAL
+    }
+
+    fun approvalGranted() {
+        state = State.EXECUTING
+    }
+
+    fun approvalRejected() {
+        state = State.IDLE
+    }
+
+    fun startExecuting() {
+        state = State.EXECUTING
+    }
+
+    fun doneExecuting() {
+        state = State.PROCESSING  // 回到循环等待 LLM 下一轮
+    }
+
+    fun finishTurn() {
+        state = State.IDLE
+    }
+
+    fun pause() {
+        state = State.PAUSED
+    }
+
+    fun resume() {
+        state = State.PROCESSING
+    }
+
+    fun markError(error: String) {
+        state = State.ERROR
+        addMessage(Message(role = Role.ERROR, content = error))
     }
 }
 

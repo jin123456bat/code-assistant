@@ -68,8 +68,11 @@ class GenerateCommitAction : AnAction() {
             return
         }
         // 通过反射从 CheckinProjectPanel 拿用户勾选的文件（该类在 vcs-impl，不可编译期引用）
-        val selectedChanges = getCheckedChanges(controlComponent)
-        if (selectedChanges.isEmpty()) return
+        val selectedChanges = getCheckedChanges(controlComponent, project)
+        if (selectedChanges.isEmpty()) {
+            Messages.showWarningDialog(project, "未检测到待提交的文件变更", "Code Assistant")
+            return
+        }
         val editor = findEditorField(controlComponent) ?: run {
             Messages.showWarningDialog(project, AiAssistantBundle.message("action.generate.setfailed"), "Code Assistant")
             return
@@ -361,20 +364,29 @@ class GenerateCommitAction : AnAction() {
     /**
      * 通过反射从组件树中查找 CheckinProjectPanel 并拿取用户勾选的文件。
      * CheckinProjectPanel 在 vcs-impl 模块，不可编译期引用，只能运行时反射。
+     * 若反射失败（新版 Commit UI 等），降级使用 defaultChangeList.changes。
      */
-    private fun getCheckedChanges(controlComponent: Component): List<Change> {
+    private fun getCheckedChanges(controlComponent: Component, project: Project): List<Change> {
         var parent: Container? = controlComponent.parent
         while (parent != null) {
             if (parent.javaClass.name.contains("CheckinProjectPanel")) {
-                return try {
+                try {
                     val method = parent.javaClass.getMethod("getSelectedChanges")
                     @Suppress("UNCHECKED_CAST")
-                    (method.invoke(parent) as? Collection<*>)?.filterIsInstance<Change>() ?: emptyList()
-                } catch (_: Exception) { emptyList() }
+                    val changes =
+                        (method.invoke(parent) as? Collection<*>)?.filterIsInstance<Change>()
+                            ?: emptyList()
+                    if (changes.isNotEmpty()) return changes
+                    // 反射成功但返回空列表，跳出循环走降级逻辑
+                    break
+                } catch (_: Exception) { /* reflection failed, try next parent */
+                }
             }
             parent = parent.parent
         }
-        return emptyList()
+        // 降级：反射未找到 CheckinProjectPanel（新版 Commit UI），使用 default changelist
+        AppLogger.info("getCheckedChanges: CheckinProjectPanel not found or returned empty, falling back to defaultChangeList")
+        return ChangeListManager.getInstance(project).defaultChangeList.changes.toList()
     }
 
     private fun findEditorField(component: Component): EditorTextField? {

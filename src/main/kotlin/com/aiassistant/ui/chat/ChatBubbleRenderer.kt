@@ -1,9 +1,9 @@
 package com.aiassistant.ui.chat
 
+import com.aiassistant.ui.AppColors
 import com.aiassistant.ui.RoundedBorder
-import com.intellij.ui.JBColor
+import com.aiassistant.ui.toHtmlColor
 import java.awt.BorderLayout
-import java.awt.Color
 import java.awt.Font
 import javax.swing.*
 
@@ -11,43 +11,15 @@ import javax.swing.*
 
 object ChatBubbleRenderer {
 
-    // ---- 主题色板 ----
-    // 用户气泡
-    private val userBubbleBg = JBColor(0xE8F0FE, 0x1E3A5F)
-
-    // Agent 左侧蓝条
-    private val agentAccent = JBColor(0x3B82F6, 0x60A5FA)
-
-    // 错误气泡
-    private val errorBg = JBColor(0xFEE2E2, 0x7F1D1D)
-    private val errorAccent = JBColor(0xEF4444, 0xF87171)
-
-    // 代码块
-    private val codeBg = JBColor(0xF6F8FA, 0x161B22)
-    private val codeBorder = JBColor(0xE1E4E8, 0x30363D)
-
-    // 引用块
-    private val quoteBg = JBColor(0xF9FAFB, 0x111827)
-    private val quoteBorder = JBColor(0xD1D5DB, 0x4B5563)
-
-    // 系统消息
-    private val systemFg = JBColor(0x94A3B8, 0x6B7280)
-
-    // 时间戳
-    private val timestampFg = JBColor(0x6B7280, 0x9CA3AF)
-
-    // 工具调用占位
-    private val toolPlaceholderBg = JBColor(0xF3F4F6, 0x1F2937)
-
-    // 思考过程
-    private val thinkingBg = JBColor(0xFFF8F0, 0x3D2E1C)
-    private val thinkingBorder = JBColor(0xFDE8D0, 0x5C3D1E)
-    private val thinkingTimeFg = JBColor(0xB45309, 0xF59E0B)
-    private val thinkingBodyFg = JBColor(0x92400E, 0xFBBF24)
-
-    // 内联代码
-    private val inlineCodeBg = JBColor(0xF6F8FA, 0x1F2937)
-    private val inlineCodeBorder = JBColor(0xE1E4E8, 0x374151)
+    // ponytail: JetBrains Mono → Monospaced fallback
+    private val monoFont = run {
+        val jetbrains = Font("JetBrains Mono", Font.PLAIN, 13)
+        if ("JetBrains Mono" in java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment().availableFontFamilyNames) {
+            jetbrains
+        } else {
+            Font(Font.MONOSPACED, Font.PLAIN, 13)
+        }
+    }
 
     fun render(msg: ChatMessage): JComponent {
         return when (msg.type) {
@@ -69,8 +41,13 @@ object ChatBubbleRenderer {
                 )
             }</body></html>"
         ).apply {
-            isOpaque = true; background = userBubbleBg; font = font.deriveFont(14f)
-            border = BorderFactory.createEmptyBorder(12, 16, 12, 16)
+            isOpaque = true; background = AppColors.userBubbleBg; font = font.deriveFont(14f)
+            border = BorderFactory.createCompoundBorder(
+                RoundedBorder(12, AppColors.userBubbleBg),
+                BorderFactory.createEmptyBorder(12, 16, 12, 16)
+            )
+            // 限制最大宽度为容器 70%
+            maximumSize = java.awt.Dimension(Int.MAX_VALUE, Int.MAX_VALUE)
         }
         wrapper.add(text, BorderLayout.EAST)
         wrapper.add(renderTimestamp(msg), BorderLayout.SOUTH)
@@ -87,15 +64,9 @@ object ChatBubbleRenderer {
                 is MarkdownBlock.Paragraph -> {
                     val rendered = block.text
                         .replace(Regex("`([^`]+)`")) {
-                            "<code style='font-family:monospace;font-size:13px;background:${
-                                colorToHex(
-                                    inlineCodeBg
-                                )
-                            };padding:1px 6px;border-radius:3px;border:1px solid ${
-                                colorToHex(
-                                    inlineCodeBorder
-                                )
-                            }'>${it.groupValues[1]}</code>"
+                            val codeBgHex = AppColors.inlineCodeBg.toHtmlColor()
+                            val codeBorderHex = AppColors.inlineCodeBorder.toHtmlColor()
+                            "<code style='font-family:monospace;font-size:13px;background:${codeBgHex};padding:1px 6px;border-radius:3px;border:1px solid ${codeBorderHex}'>${it.groupValues[1]}</code>"
                         }
                     body.add(
                         JLabel(
@@ -112,15 +83,20 @@ object ChatBubbleRenderer {
 
                 is MarkdownBlock.CodeBlock -> {
                     val code = JTextArea(block.code).apply {
-                        font = Font("Monospaced", Font.PLAIN, 13)
-                        background = codeBg
+                        font = monoFont
+                        background = AppColors.codeBg; foreground = AppColors.textSecondary
                         border = BorderFactory.createCompoundBorder(
-                            RoundedBorder(8, codeBorder),
+                            RoundedBorder(8, AppColors.codeBorder),
                             BorderFactory.createEmptyBorder(8, 12, 8, 12)
                         )
                         isEditable = false; lineWrap = false
                     }
-                    body.add(code)
+                    val scrollPane = JScrollPane(code).apply {
+                        horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED
+                        verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_NEVER
+                        border = BorderFactory.createEmptyBorder()
+                    }
+                    body.add(scrollPane)
                 }
 
                 is MarkdownBlock.Header -> {
@@ -133,10 +109,11 @@ object ChatBubbleRenderer {
 
                 is MarkdownBlock.QuoteBlock -> {
                     body.add(JTextArea(block.text).apply {
-                        font = Font("SansSerif", Font.ITALIC, 13); foreground = timestampFg
-                        background = quoteBg; isEditable = false; lineWrap = true
+                        font = Font(Font.SANS_SERIF, Font.ITALIC, 13); foreground =
+                        AppColors.textSecondary
+                        background = AppColors.quoteBg; isEditable = false; lineWrap = true
                         border = BorderFactory.createCompoundBorder(
-                            BorderFactory.createMatteBorder(0, 3, 0, 0, quoteBorder),
+                            BorderFactory.createMatteBorder(0, 3, 0, 0, AppColors.quoteBorder),
                             BorderFactory.createEmptyBorder(4, 8, 4, 8)
                         )
                     })
@@ -151,7 +128,7 @@ object ChatBubbleRenderer {
         wrapper.add(renderTimestamp(msg, tokenInfo), BorderLayout.SOUTH)
         wrapper.border = BorderFactory.createCompoundBorder(
             BorderFactory.createEmptyBorder(12, 16, 12, 16),
-            BorderFactory.createMatteBorder(0, 3, 0, 0, agentAccent)
+            BorderFactory.createMatteBorder(0, 3, 0, 0, AppColors.primary)
         )
         return wrapper
     }
@@ -162,10 +139,10 @@ object ChatBubbleRenderer {
         val copy = JButton("📋 复制")
         val btns = JPanel().apply { add(retry); add(copy) }
         wrapper.add(JLabel("<html><body style='width:100%;max-width:480px'>❌ ${escapeHtml(msg.content)}</body></html>").apply {
-            isOpaque = true; background = errorBg
+            isOpaque = true; background = AppColors.errorBg
             border = BorderFactory.createCompoundBorder(
                 BorderFactory.createEmptyBorder(12, 16, 12, 16),
-                BorderFactory.createMatteBorder(0, 3, 0, 0, errorAccent)
+                BorderFactory.createMatteBorder(0, 3, 0, 0, AppColors.error)
             )
         }, BorderLayout.CENTER)
         wrapper.add(btns, BorderLayout.SOUTH)
@@ -175,7 +152,7 @@ object ChatBubbleRenderer {
     private fun renderSystemMsg(msg: ChatMessage): JPanel {
         val p = JPanel(BorderLayout())
         p.add(JLabel(msg.content, SwingConstants.CENTER).apply {
-            foreground = systemFg; font = font.deriveFont(11f)
+            foreground = AppColors.textTertiary; font = font.deriveFont(11f)
         }, BorderLayout.CENTER)
         return p
     }
@@ -184,7 +161,7 @@ object ChatBubbleRenderer {
         return JPanel().apply {
             isOpaque = true
             add(JLabel("<html><i>🔧 ${msg.toolCall?.toolName ?: "tool"} — ${msg.toolCall?.state ?: ""}</i></html>"))
-            background = toolPlaceholderBg
+            background = AppColors.toolPlaceholderBg
             border = BorderFactory.createEmptyBorder(8, 12, 8, 12)
         }
     }
@@ -196,7 +173,7 @@ object ChatBubbleRenderer {
         val label = if (extra.isNotEmpty()) "$ts | $extra" else ts
         return JPanel(BorderLayout()).apply {
             add(JLabel(label).apply {
-                foreground = timestampFg; font = font.deriveFont(11f)
+                foreground = AppColors.textSecondary; font = font.deriveFont(11f)
             }, BorderLayout.EAST)
         }
     }
@@ -204,20 +181,20 @@ object ChatBubbleRenderer {
     fun renderThinking(reasoning: String, durationMs: Long): JPanel {
         val block = JPanel(BorderLayout()).apply {
             isOpaque = true
-            background = thinkingBg; border = BorderFactory.createLineBorder(thinkingBorder)
-            maximumSize = java.awt.Dimension(Int.MAX_VALUE, 120)
+            background = AppColors.thinkingBg; border =
+            BorderFactory.createLineBorder(AppColors.thinkingBorder)
         }
         val header = JPanel(BorderLayout()).apply {
             isOpaque = true
-            background = thinkingBg; border = BorderFactory.createEmptyBorder(4, 8, 4, 8)
+            background = AppColors.thinkingBg; border = BorderFactory.createEmptyBorder(4, 8, 4, 8)
             add(JLabel("💭 思考过程"), BorderLayout.WEST)
             add(JLabel("${durationMs / 1000}.${(durationMs % 1000) / 100}s").apply {
-                foreground = thinkingTimeFg; font = font.deriveFont(10f)
+                foreground = AppColors.thinkingTimeFg; font = font.deriveFont(10f)
             }, BorderLayout.EAST)
         }
         val body = JTextArea(reasoning.take(500)).apply {
-            font = Font("SansSerif", Font.ITALIC, 12); foreground = thinkingBodyFg
-            background = thinkingBg; isEditable = false; lineWrap = true
+            font = Font(Font.SANS_SERIF, Font.ITALIC, 12); foreground = AppColors.thinkingBodyFg
+            background = AppColors.thinkingBg; isEditable = false; lineWrap = true
             border = BorderFactory.createEmptyBorder(4, 8, 8, 8)
         }
         header.addMouseListener(object : java.awt.event.MouseAdapter() {
@@ -299,12 +276,6 @@ object ChatBubbleRenderer {
     private fun escapeHtml(s: String): String = s
         .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         .replace("\"", "&quot;")
-
-    // ponytail: JBColor 转 HTML 颜色（用于内联 CSS），fallback 到亮色值
-    private fun colorToHex(c: Color): String {
-        val rgb = c.rgb and 0xFFFFFF
-        return "#${rgb.toString(16).padStart(6, '0')}"
-    }
 }
 
 sealed class MarkdownBlock {

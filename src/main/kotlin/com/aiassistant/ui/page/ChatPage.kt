@@ -1,8 +1,8 @@
 package com.aiassistant.ui.page
 
+import com.aiassistant.ui.AppColors
 import com.aiassistant.ui.chat.*
 import com.intellij.openapi.project.Project
-import com.intellij.ui.JBColor
 import java.awt.BorderLayout
 import javax.swing.*
 
@@ -13,11 +13,15 @@ class ChatPage(
 
     private val viewModel = ChatViewModel(project, restoreSessionId)
     private lateinit var planCard: PlanCard
-    private val messageContainer = JPanel().apply { layout = BoxLayout(this, BoxLayout.Y_AXIS) }
+    private val messageContainer = JPanel().apply {
+        layout = BoxLayout(this, BoxLayout.Y_AXIS)
+        isOpaque = true
+        background = AppColors.pageBg
+    }
     private var autoScroll = true
     private val scrollPane = JScrollPane(messageContainer).apply {
         verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED
-        border = BorderFactory.createEmptyBorder(); background = JBColor(0xF9FAFB, 0x2B2B2B)
+        border = BorderFactory.createEmptyBorder(); background = AppColors.pageBg
         verticalScrollBar.addAdjustmentListener { e ->
             if (!e.valueIsAdjusting) {
                 val bar = verticalScrollBar; autoScroll =
@@ -40,7 +44,7 @@ class ChatPage(
 
         val titleBar = JPanel(BorderLayout()).apply {
             border = BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(0, 0, 1, 0, JBColor(0xE5E7EB, 0x374151)),
+                BorderFactory.createMatteBorder(0, 0, 1, 0, AppColors.border),
                 BorderFactory.createEmptyBorder(6, 12, 6, 12)
             )
             add(JLabel("🤖 Code Assistant Chat").apply {
