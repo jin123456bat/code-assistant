@@ -1152,46 +1152,46 @@ sparkline 趋势图（Custom JComponent paintComponent）。
 
 ## 十、文件清单（40+ 文件）
 
-| 包          | 文件                         | 职责                                                                  | 状态 |
-|------------|----------------------------|---------------------------------------------------------------------|----|
-| `agent/`   | `ToolModels.kt`            | 8 个 Tool 数据类（@JsonClassDescription 注解，定义 JSON Schema）+ execute() 方法 | ✅  |
-| `agent/`   | `ToolInput.kt`             | 工具输入参数类型（ToolInput 基类 + 各工具的 Input 子类，如 ReadInput）                  | ✅  |
-| `agent/`   | `ToolRegistry.kt`          | 内置 Tools + MCP Tools 统一管理                                           | ✅  |
-| `agent/`   | `ToolExecutor.kt`          | 工具执行分发器（when 路由）                                                    | ✅  |
-| `agent/`   | `AgentLoop.kt`             | while 循环：stream → parse → executeTool → feedback                    | ✅  |
-| `agent/`   | `AgentSession.kt`          | 状态机、消息列表、事件发射                                                       | ✅  |
-| `agent/`   | `PlanExecutor.kt`          | /plan 指令（phase 4）                                                   | ✅  |
-| `agent/`   | `MultiAgentManager.kt`     | 多 Agent 调度（已实现）                                                     | ✅  |
-| `skills/`  | `SkillManager.kt`          | SKILL.md 扫描/解析/注册（含 Skill 数据类，内嵌实现）                                 | ✅  |
-| `skills/`  | `SkillModels.kt`           | Skill 数据类（后续独立文件，当前内嵌于 SkillManager）                                | ⏳  |
-| `mcp/`     | `McpManager.kt`            | MCP Server 生命周期                                                     | ✅  |
-| `mcp/`     | `McpConfigStore.kt`        | mcp-config.json 读写（后续独立文件，当前内嵌于 McpManager）                         | ⏳  |
-| `session/` | `SessionStore.kt`          | JSON 文件读写（含 SessionModels 数据类，内嵌实现）                                 | ✅  |
-| `session/` | `SessionManager.kt`        | 会话 CRUD                                                             | ✅  |
-| `session/` | `SessionModels.kt`         | SessionInfo、Message、TokenUsage（后续独立文件，当前内嵌于 SessionStore）           | ⏳  |
-| `ui/`      | `AppColors.kt`             | 统一颜色令牌（亮/暗主题）                                                       | ✅  |
-| `ui/`      | `ChatToolWindowFactory.kt` | ToolWindowFactory 注册                                                | ✅  |
-| `ui/`      | `ChatToolWindow.kt`        | 主容器：顶部 TabBar + CardLayout 路由                                       | ✅  |
-| `ui/`      | `TabBar.kt`                | 顶部 TabBar 导航组件                                                      | ✅  |
-| `ui/`      | `MessageBus.kt`            | messageBus 事件总线                                                     | ✅  |
-| `ui/`      | `SelectionListener.kt`     | 编辑器选中代码实时监听                                                         | ✅  |
-| `ui/`      | `OpenChatAction.kt`        | Ctrl+Shift+K 快捷键 Action                                             | ✅  |
-| `ui/page/` | `WelcomePage.kt`           | API Key 配置引导                                                        | ✅  |
-| `ui/page/` | `ChatPage.kt`              | 消息列表 + 输入框                                                          | ✅  |
-| `ui/page/` | `SessionsPage.kt`          | 会话历史列表                                                              | ✅  |
-| `ui/page/` | `TokenUsagePage.kt`        | Token 消耗统计                                                          | ✅  |
-| `ui/page/` | `McpPage.kt`               | MCP Server 管理                                                       | ✅  |
-| `ui/page/` | `SkillsPage.kt`            | Skills 列表                                                           | ✅  |
-| `ui/page/` | `SettingsPage.kt`          | 关于页面 + 快捷键参考（Agent 设置已迁移到 SettingsConfigurable）                     | ✅  |
-| `ui/page/` | `PlaceholderPage.kt`       | 占位页面（未实现功能）                                                         | ✅  |
-| `ui/chat/` | `ChatBubbleRenderer.kt`    | Markdown → 组件序列                                                     | ✅  |
-| `ui/chat/` | `ChatViewModel.kt`         | 消息列表状态 + 流式 buffer                                                  | ✅  |
-| `ui/chat/` | `ChatInputArea.kt`         | 输入框：Tags 行 + 文本区域 + 底部栏（+/提示/发送）                                    | ✅  |
-| `ui/chat/` | `ToolCallCard.kt`          | 工具调用卡片组件（8 状态）                                                      | ✅  |
-| `ui/chat/` | `PlanCard.kt`              | 计划卡片组件                                                              | ✅  |
-| `ui/chat/` | `RoundedBorder.kt`         | 圆角边框绘制工具                                                            | ✅  |
-| `ui/chat/` | `SimpleDiff.kt`            | LCS diff 算法，为 Edit 提供精确差异比较                                         | ✅  |
-| `actions/` | `GenerateCommitAction.kt`  | VCS diff → LLM → commit dialog 填充                                   | ✅  |
+| 包          | 文件                         | 职责                                                                                 | 状态 |
+|------------|----------------------------|------------------------------------------------------------------------------------|----|
+| `agent/`   | `ToolModels.kt`            | 14 个 Tool 数据类（9 个内置 + 5 个计划，@JsonClassDescription 注解，定义 JSON Schema）+ execute() 方法 | ✅  |
+| `agent/`   | `ToolInput.kt`             | 工具输入参数类型（ToolInput 基类 + 各工具的 Input 子类，如 ReadInput）                                 | ✅  |
+| `agent/`   | `ToolRegistry.kt`          | 内置 Tools + MCP Tools 统一管理                                                          | ✅  |
+| `agent/`   | `ToolExecutor.kt`          | 工具执行分发器（when 路由）                                                                   | ✅  |
+| `agent/`   | `AgentLoop.kt`             | while 循环：stream → parse → executeTool → feedback                                   | ✅  |
+| `agent/`   | `AgentSession.kt`          | 状态机、消息列表、事件发射                                                                      | ✅  |
+| `agent/`   | `PlanExecutor.kt`          | /plan 指令（phase 4）                                                                  | ✅  |
+| `agent/`   | `MultiAgentManager.kt`     | 多 Agent 调度（已实现）                                                                    | ✅  |
+| `skills/`  | `SkillManager.kt`          | SKILL.md 扫描/解析/注册（含 Skill 数据类，内嵌实现）                                                | ✅  |
+| `skills/`  | `SkillModels.kt`           | Skill 数据类（后续独立文件，当前内嵌于 SkillManager）                                               | ⏳  |
+| `mcp/`     | `McpManager.kt`            | MCP Server 生命周期                                                                    | ✅  |
+| `mcp/`     | `McpConfigStore.kt`        | mcp-config.json 读写（后续独立文件，当前内嵌于 McpManager）                                        | ⏳  |
+| `session/` | `SessionStore.kt`          | JSON 文件读写（含 SessionModels 数据类，内嵌实现）                                                | ✅  |
+| `session/` | `SessionManager.kt`        | 会话 CRUD                                                                            | ✅  |
+| `session/` | `SessionModels.kt`         | SessionInfo、Message、TokenUsage（后续独立文件，当前内嵌于 SessionStore）                          | ⏳  |
+| `ui/`      | `AppColors.kt`             | 统一颜色令牌（亮/暗主题）                                                                      | ✅  |
+| `ui/`      | `ChatToolWindowFactory.kt` | ToolWindowFactory 注册                                                               | ✅  |
+| `ui/`      | `ChatToolWindow.kt`        | 主容器：顶部 TabBar + CardLayout 路由                                                      | ✅  |
+| `ui/`      | `TabBar.kt`                | 顶部 TabBar 导航组件                                                                     | ✅  |
+| `ui/`      | `MessageBus.kt`            | messageBus 事件总线                                                                    | ✅  |
+| `ui/`      | `SelectionListener.kt`     | 编辑器选中代码实时监听                                                                        | ✅  |
+| `ui/`      | `OpenChatAction.kt`        | Ctrl+Shift+K 快捷键 Action                                                            | ✅  |
+| `ui/page/` | `WelcomePage.kt`           | API Key 配置引导                                                                       | ✅  |
+| `ui/page/` | `ChatPage.kt`              | 消息列表 + 输入框                                                                         | ✅  |
+| `ui/page/` | `SessionsPage.kt`          | 会话历史列表                                                                             | ✅  |
+| `ui/page/` | `TokenUsagePage.kt`        | Token 消耗统计                                                                         | ✅  |
+| `ui/page/` | `McpPage.kt`               | MCP Server 管理                                                                      | ✅  |
+| `ui/page/` | `SkillsPage.kt`            | Skills 列表                                                                          | ✅  |
+| `ui/page/` | `SettingsPage.kt`          | 关于页面 + 快捷键参考（Agent 设置已迁移到 SettingsConfigurable）                                    | ✅  |
+| `ui/page/` | `PlaceholderPage.kt`       | 占位页面（未实现功能）                                                                        | ✅  |
+| `ui/chat/` | `ChatBubbleRenderer.kt`    | Markdown → 组件序列                                                                    | ✅  |
+| `ui/chat/` | `ChatViewModel.kt`         | 消息列表状态 + 流式 buffer                                                                 | ✅  |
+| `ui/chat/` | `ChatInputArea.kt`         | 输入框：Tags 行 + 文本区域 + 底部栏（+/提示/发送）                                                   | ✅  |
+| `ui/chat/` | `ToolCallCard.kt`          | 工具调用卡片组件（8 状态）                                                                     | ✅  |
+| `ui/chat/` | `PlanCard.kt`              | 计划卡片组件                                                                             | ✅  |
+| `ui/chat/` | `RoundedBorder.kt`         | 圆角边框绘制工具                                                                           | ✅  |
+| `ui/chat/` | `SimpleDiff.kt`            | LCS diff 算法，为 Edit 提供精确差异比较                                                        | ✅  |
+| `actions/` | `GenerateCommitAction.kt`  | VCS diff → LLM → commit dialog 填充                                                  | ✅  |
 
 ## 十一、所有决策
 
@@ -1210,7 +1210,7 @@ sparkline 趋势图（Custom JComponent paintComponent）。
 | @file 引用      | `@文件名` + FilenameIndex + debounce 200ms                | < 50ms 索引查询，性能可控                       |
 | 会话持久化         | Jackson → .tmp → ATOMIC_MOVE + FileLock                | 防写入中断数据丢失 + 多实例竞态                      |
 | 上下文超限处理       | 自动压缩（Auto-Compact）：摘要 + 保留近期原文                         | 对齐 Claude Code，避免粗暴截断丢失关键上下文           |
-| 上下文窗口大小       | 写死 1M tokens（DeepSeek V4 上限）                           | 不需要动态检测，compact 阈值 800K                |
+| 上下文窗口大小       | 写死 1M tokens（DeepSeek V4 上限）                           | 不需要动态检测，compact 阈值 700K                |
 | max_tokens 续写 | 自动发送"继续"，不持久化，≤5 次                                     | 对齐 Claude Code，高频场景自动处理                |
 | /clear & /new | 清空当前会话（messages + plan + compactSummary），复用 session.id | 对齐 Claude Code，避免 session 文件堆积         |
 | 会话标题          | LLM 异步生成（≤20 字，max_tokens=64）                          | 对齐 Claude Code，Sessions 列表可读性          |
@@ -1258,7 +1258,7 @@ Agent 在写。任务正交分派（如 Agent-A 重构、Agent-B 测试、Agent-
 - [x] Welcome 页面：未配置 Key → 引导页；已配置 → 自动跳转 Chat
 - [x] 7 页面 TabBar 导航可切换
 - [x] Chat：流式 Markdown + 代码块语法高亮 + @file 引用 + 选中代码引用 + 剪贴板图片粘贴
-- [x] Agent：8 个工具完整调用循环
+- [x] Agent：9 个内置 + 5 个计划管理工具（共 14 个）完整调用循环
 - [x] Plan Mode：/plan → 计划卡片（详细到文件+工具）→ 每步暂停 → 用户输入控制 → 跨会话持久化
 - [x] Skills 页面：扫描/显示/启用/禁用
 - [x] MCP 页面：添加/启停/测试连接
