@@ -25,7 +25,7 @@ Mode、多 Agent、Skill 系统和 MCP 外部工具。
 ├──────────────────────────────────────────────────────┤
 │  Tool Layer: ToolRegistry (内置 Tools + MCP Tools)    │
 │  Read/Write/Edit/Bash/Glob/                           │
-│  Grep/ReadLints/Task                                  │
+│  Grep/ReadLints/Task/Skill                            │
 │  CreatePlan/ListTasks/DeleteTask/ReorderTasks/        │
 │  MarkTaskDone                                         │
 ├──────────────────────────────────────────────────────┤
