@@ -2,6 +2,8 @@ package com.aiassistant.ui
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import javax.swing.JLabel
 
 class TabBarTest {
 
@@ -21,6 +23,18 @@ class TabBarTest {
         tabBar.setApiKeyConfigured(true)
 
         assertEquals(listOf(false, true, true, true, true, true, true), visibleTabs(tabBar))
+    }
+
+    @Test
+    fun `uses compact icon tabs`() {
+        val tabBar = TabBar {}
+
+        tabBar.components.forEach { component ->
+            val label = component as JLabel
+            assertEquals(44, component.preferredSize.width)
+            assertEquals(32, component.preferredSize.height)
+            assertFalse(label.text.any { it.isLetter() })
+        }
     }
 
     private fun visibleTabs(tabBar: TabBar): List<Boolean> =

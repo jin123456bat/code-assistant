@@ -10,6 +10,7 @@ import java.awt.Graphics
 import java.time.YearMonth
 import java.time.ZoneId
 import javax.swing.*
+import javax.swing.table.DefaultTableModel
 
 class TokenUsagePage(project: Project) : JPanel(BorderLayout()) {
 
@@ -85,20 +86,36 @@ class TokenUsagePage(project: Project) : JPanel(BorderLayout()) {
         body.add(JLabel("<html><span style='color:$dimHex;font-size:10px'>1 日 — 最近 30 天</span></html>"))
         body.add(Box.createVerticalStrut(12))
         body.add(JLabel("<html><b>按会话</b></html>"))
-        filtered.sortedByDescending { it.updatedAt }.take(10).forEach { s ->
-            body.add(
-                JLabel(
-                    "<html>📝 ${s.title} &nbsp;<span style='color:$dimHex;font-size:11px'>${s.totalTokens / 1000}K · ¥${
-                        String.format(
-                            "%.2f",
-                            s.totalTokens * 0.000007
-                        )
-                    }</span></html>"
-                )
-            )
-        }
+        body.add(Box.createVerticalStrut(6))
+        body.add(renderSessionTable(filtered.sortedByDescending { it.updatedAt }.take(10)))
+        body.add(Box.createVerticalStrut(8))
         body.add(JLabel("<html><span style='color:$dimHex;font-size:11px'>模型: deepseek-v4-pro（固定）</span></html>"))
         body.revalidate(); body.repaint()
+    }
+
+    private fun renderSessionTable(sessions: List<com.aiassistant.session.SessionIndex>): JScrollPane {
+        val rows = sessions.map { session ->
+            arrayOf(
+                session.title,
+                "${session.totalTokens / 1000}K",
+                "¥${String.format("%.2f", session.totalTokens * 0.000007)}"
+            )
+        }.toTypedArray()
+        val model = object : DefaultTableModel(rows, arrayOf("会话", "Tokens", "成本")) {
+            override fun isCellEditable(row: Int, column: Int): Boolean = false
+        }
+        val table = JTable(model).apply {
+            rowHeight = 28
+            fillsViewportHeight = true
+            tableHeader.reorderingAllowed = false
+            setShowGrid(false)
+            intercellSpacing = Dimension(0, 0)
+        }
+        return JScrollPane(table).apply {
+            border = BorderFactory.createLineBorder(AppColors.border)
+            preferredSize = Dimension(360, 180)
+            maximumSize = Dimension(Int.MAX_VALUE, 180)
+        }
     }
 
     private fun renderEmpty(): JPanel {

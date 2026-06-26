@@ -25,6 +25,14 @@ class ChatInputArea(
     private val popup = JPopupMenu()
     private val tagsPanel = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0))
     private val tags = mutableListOf<String>()
+    private val fileRefs = mutableListOf<String>()
+    private val tagRefs = mutableMapOf<String, String>()
+    private var selectionTag: String? = null
+    private val addFileButton = JButton("+").apply {
+        addActionListener {
+            showPopup("", getProjectFiles("").map { "@$it" })
+        }
+    }
     private val sendButton = JButton("发送").apply { addActionListener { doSend() } }
 
     private var projectRef: com.intellij.openapi.project.Project? = null
@@ -102,7 +110,17 @@ class ChatInputArea(
         topPanel.add(scrollPane, BorderLayout.CENTER)
 
         add(topPanel, BorderLayout.CENTER)
-        add(sendButton, BorderLayout.EAST)
+        add(
+            JPanel(BorderLayout()).apply {
+                add(addFileButton, BorderLayout.WEST)
+                add(
+                    JLabel("@ 选择文件").apply { foreground = AppColors.textSecondary },
+                    BorderLayout.CENTER
+                )
+                add(sendButton, BorderLayout.EAST)
+            },
+            BorderLayout.SOUTH
+        )
     }
 
     private fun checkTriggers() {
@@ -148,7 +166,7 @@ class ChatInputArea(
             val mi = JMenuItem(item).apply {
                 font = font.deriveFont(12f)
                 addActionListener {
-                    insertAtCaret(item + " ")
+                    if (item.startsWith("@")) addFileReference(item) else insertAtCaret(item + " ")
                     popup.isVisible = false
                 }
             }
@@ -226,6 +244,22 @@ class ChatInputArea(
         refreshTags()
     }
 
+    private fun addFileReference(ref: String) {
+        if (ref !in fileRefs) fileRefs.add(ref)
+        val label = "📎 ${ref.removePrefix("@")}"
+        tagRefs[label] = ref
+        if (label !in tags) tags.add(label)
+        insertAtCaret("")
+        refreshTags()
+    }
+
+    fun setSelectionReference(displayName: String?) {
+        selectionTag?.let { tags.remove(it) }
+        selectionTag = displayName?.takeIf { it.isNotBlank() }?.let { "📎 $it" }
+        selectionTag?.let { tags.add(0, it) }
+        refreshTags()
+    }
+
     private fun refreshTags() {
         tagsPanel.removeAll()
         tags.forEach { tag ->
@@ -239,7 +273,10 @@ class ChatInputArea(
                 Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
                 addMouseListener(object : MouseAdapter() {
                     override fun mouseClicked(e: MouseEvent) {
-                        tags.remove(tag); refreshTags()
+                        tags.remove(tag)
+                        tagRefs.remove(tag)?.let { fileRefs.remove(it) }
+                        if (selectionTag == tag) selectionTag = null
+                        refreshTags()
                     }
                 })
             }
@@ -257,13 +294,22 @@ class ChatInputArea(
             val prefix = when (mode) {
                 "Chat" -> ""; "Plan" -> "/plan "; else -> ""
             }
-            onSend(prefix + text)
-            textArea.text = ""; tags.clear(); refreshTags()
+            val message = listOf(fileRefs.joinToString(" "), text)
+                .filter { it.isNotBlank() }
+                .joinToString(" ")
+            onSend(prefix + message)
+            textArea.text = ""
+            tags.clear()
+            fileRefs.clear()
+            tagRefs.clear()
+            selectionTag = null
+            refreshTags()
         }
     }
 
     fun setInputEnabled(enabled: Boolean) {
         textArea.isEnabled = enabled
+        addFileButton.isEnabled = enabled
         sendButton.isEnabled = enabled
     }
 }

@@ -1,45 +1,52 @@
 package com.aiassistant.ui
 
-import com.aiassistant.ui.AppColors
 import com.aiassistant.ui.ChatToolWindow.Page
-import com.intellij.ui.JBColor
 import java.awt.Cursor
+import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import javax.swing.BorderFactory
 import javax.swing.JLabel
 import javax.swing.JPanel
+import javax.swing.SwingConstants
 
 // Tab 切换栏 — 支持亮/暗主题
 
 class TabBar(
     private val onSelect: (Page) -> Unit
-) : JPanel(FlowLayout(FlowLayout.LEFT, 4, 0)) {
+) : JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)) {
 
-    private data class Tab(val page: Page, val label: String, val enabled: Boolean)
+    private data class Tab(
+        val page: Page,
+        val icon: String,
+        val tooltip: String,
+        val enabled: Boolean
+    )
 
     private var selected: Page = Page.CHAT
     private val labels = mutableListOf<JLabel>()
 
     private val tabs = listOf(
-        Tab(Page.WELCOME, "🏠 Welcome", true),
-        Tab(Page.CHAT, "💬 Chat", true),
-        Tab(Page.SESSIONS, "📁 Sessions", true),
-        Tab(Page.TOKEN_USAGE, "📊 Usage", true),
-        Tab(Page.MCP, "🔌 MCP", true),
-        Tab(Page.SKILLS, "🎯 Skills", true),
-        Tab(Page.SETTINGS, "⚙ Settings", true),
+        Tab(Page.WELCOME, "🏠", "Welcome", true),
+        Tab(Page.CHAT, "💬", "Chat", true),
+        Tab(Page.SESSIONS, "📁", "Sessions", true),
+        Tab(Page.TOKEN_USAGE, "📊", "Usage", true),
+        Tab(Page.MCP, "🔌", "MCP", true),
+        Tab(Page.SKILLS, "🎯", "Skills", true),
+        Tab(Page.SETTINGS, "⚙", "Settings", true),
     )
 
     init {
         tabs.forEach { tab ->
-            val lbl = JLabel(" ${tab.label} ").apply {
+            val lbl = JLabel(tab.icon, SwingConstants.CENTER).apply {
                 font = font.deriveFont(13f)
                 foreground = AppColors.textSecondary
+                preferredSize = Dimension(44, 32)
+                toolTipText = tab.tooltip
                 border = BorderFactory.createCompoundBorder(
                     BorderFactory.createMatteBorder(0, 0, 2, 0, AppColors.borderTransparent),
-                    BorderFactory.createEmptyBorder(6, 10, 6, 10)
+                    BorderFactory.createEmptyBorder(6, 0, 6, 0)
                 )
                 cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
 
@@ -91,7 +98,7 @@ class TabBar(
                 lbl.background = AppColors.hoverBg
                 lbl.border = BorderFactory.createCompoundBorder(
                     BorderFactory.createMatteBorder(0, 0, 2, 0, AppColors.primary),
-                    BorderFactory.createEmptyBorder(6, 10, 6, 10)
+                    BorderFactory.createEmptyBorder(6, 0, 6, 0)
                 )
                 lbl.isOpaque = true
             } else {
@@ -99,7 +106,7 @@ class TabBar(
                 lbl.background = AppColors.borderTransparent
                 lbl.border = BorderFactory.createCompoundBorder(
                     BorderFactory.createMatteBorder(0, 0, 2, 0, AppColors.borderTransparent),
-                    BorderFactory.createEmptyBorder(6, 10, 6, 10)
+                    BorderFactory.createEmptyBorder(6, 0, 6, 0)
                 )
                 lbl.isOpaque = true
             }

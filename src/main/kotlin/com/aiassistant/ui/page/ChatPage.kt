@@ -1,6 +1,7 @@
 package com.aiassistant.ui.page
 
 import com.aiassistant.ui.AppColors
+import com.aiassistant.ui.EditorSelectionListener
 import com.aiassistant.ui.chat.*
 import com.intellij.openapi.project.Project
 import java.awt.BorderLayout
@@ -40,6 +41,8 @@ class ChatPage(
                 viewModel.session.plan?.status =
                     com.aiassistant.agent.PlanExecutor.Plan.Status.PAUSED
             },
+            onRetry = { viewModel.sendMessage("重试当前计划步骤") },
+            onSkip = { viewModel.sendMessage("跳过当前计划步骤") },
             onAbort = { viewModel.session.plan = null; planCard.isVisible = false }
         ).apply { isVisible = false }
 
@@ -73,6 +76,13 @@ class ChatPage(
                 messageContainer.repaint()
             }
         ).apply { setProject(project) }
+        EditorSelectionListener(
+            project,
+            onSelectionChanged = { filePath, startLine, endLine, _ ->
+                inputArea.setSelectionReference("$filePath:$startLine-$endLine")
+            },
+            onSelectionCleared = { inputArea.setSelectionReference(null) }
+        )
         add(inputArea, BorderLayout.SOUTH)
 
         viewModel.onMessageAdded = { msg ->

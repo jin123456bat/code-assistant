@@ -19,36 +19,13 @@ class ChatToolWindow(private val project: Project) : JPanel(BorderLayout()) {
     private val pages = JPanel(CardLayout())
     private val welcomePage = WelcomePage(project) { navigateTo(Page.CHAT) }
     private var chatPage = ChatPage(project)
-    private val sessionsPage = SessionsPage(
-        project,
-        onRestore = { id ->
-            pages.remove(chatPage)
-            chatPage = ChatPage(project, id)
-            pages.add(chatPage, Page.CHAT.id)
-            navigateTo(Page.CHAT)
-        },
-        onNewSession = {
-            pages.remove(chatPage)
-            chatPage = ChatPage(project)
-            pages.add(chatPage, Page.CHAT.id)
-            navigateTo(Page.CHAT)
-        }
-    )
-    private val tokenUsagePage = TokenUsagePage(project)
-    private val mcpPage = McpPage(project)
-    private val skillsPage = SkillsPage(project)
-    private val settingsPage = SettingsPage()
+    private val loadedPages = mutableSetOf(Page.WELCOME, Page.CHAT)
 
     private val tabBar = TabBar { navigateTo(it) }
 
     init {
         pages.add(welcomePage, Page.WELCOME.id)
         pages.add(chatPage, Page.CHAT.id)
-        pages.add(sessionsPage, Page.SESSIONS.id)
-        pages.add(tokenUsagePage, Page.TOKEN_USAGE.id)
-        pages.add(mcpPage, Page.MCP.id)
-        pages.add(skillsPage, Page.SKILLS.id)
-        pages.add(settingsPage, Page.SETTINGS.id)
 
         add(tabBar, BorderLayout.NORTH)
         add(pages, BorderLayout.CENTER)
@@ -78,7 +55,34 @@ class ChatToolWindow(private val project: Project) : JPanel(BorderLayout()) {
             page == Page.WELCOME -> Page.CHAT
             else -> page
         }
+        ensurePage(target)
         (pages.layout as CardLayout).show(pages, target.id)
         tabBar.setSelected(target)
+    }
+
+    private fun ensurePage(page: Page) {
+        if (page in loadedPages) return
+        val component = when (page) {
+            Page.SESSIONS -> SessionsPage(
+                project,
+                onRestore = { id -> replaceChatPage(ChatPage(project, id)) },
+                onNewSession = { replaceChatPage(ChatPage(project)) }
+            )
+
+            Page.TOKEN_USAGE -> TokenUsagePage(project)
+            Page.MCP -> McpPage(project)
+            Page.SKILLS -> SkillsPage(project)
+            Page.SETTINGS -> SettingsPage()
+            Page.WELCOME, Page.CHAT -> return
+        }
+        pages.add(component, page.id)
+        loadedPages.add(page)
+    }
+
+    private fun replaceChatPage(next: ChatPage) {
+        pages.remove(chatPage)
+        chatPage = next
+        pages.add(chatPage, Page.CHAT.id)
+        navigateTo(Page.CHAT)
     }
 }

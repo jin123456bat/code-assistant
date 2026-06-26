@@ -12,6 +12,8 @@ import javax.swing.*
 class PlanCard(
     private val onResume: () -> Unit,
     private val onPause: () -> Unit,
+    private val onRetry: () -> Unit = {},
+    private val onSkip: () -> Unit = {},
     private val onAbort: () -> Unit
 ) : JPanel(BorderLayout()) {
 
@@ -46,6 +48,8 @@ class PlanCard(
 
         val btns = JPanel(FlowLayout(FlowLayout.LEFT, 8, 0))
         btns.add(JButton("▶ 继续").apply { addActionListener { onResume() } })
+        btns.add(JButton("↻ 重试").apply { addActionListener { onRetry() } })
+        btns.add(JButton("⏭ 跳过").apply { addActionListener { onSkip() } })
         btns.add(JButton("⏸ 暂停").apply { addActionListener { onPause() } })
         btns.add(JButton("✕ 终止").apply { addActionListener { onAbort() } })
         add(btns, BorderLayout.SOUTH)

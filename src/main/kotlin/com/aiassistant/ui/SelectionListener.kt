@@ -9,7 +9,8 @@ import com.intellij.openapi.project.Project
 
 class EditorSelectionListener(
     private val project: Project,
-    private val onSelectionChanged: (filePath: String, startLine: Int, endLine: Int, content: String) -> Unit
+    private val onSelectionChanged: (filePath: String, startLine: Int, endLine: Int, content: String) -> Unit,
+    private val onSelectionCleared: () -> Unit = {}
 ) {
     private var lastSelection: Triple<String, IntRange, String>? = null
 
@@ -23,6 +24,7 @@ class EditorSelectionListener(
                 val selection = editor.selectionModel
                 if (!selection.hasSelection()) {
                     lastSelection = null
+                    onSelectionCleared()
                     return
                 }
                 val startLine = editor.document.getLineNumber(selection.selectionStart) + 1
