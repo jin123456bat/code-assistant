@@ -62,6 +62,8 @@ com.aiassistant/
 
 ### 2.1 AgentLoop
 
+> **设计原理：** 见 [`agent.md` 第三节 > Agent Loop](../docs/agent.md#三agent-loop核心逻辑) 和 [`agent.md` 第八节 > 上下文自动压缩](../docs/agent.md#八上下文自动压缩auto-compact)。
+
 **职责：** Agent 主循环——发送消息到 LLM、解析 tool_use、调度工具执行、回传结果。
 
 ```
@@ -76,7 +78,9 @@ AgentLoop
 ├── compactThreshold: Double = 0.8      // 触发压缩的上下文使用率阈值（对齐 Claude Code）
 ├── modelContextLimit: Int = 1_000_000  // 模型上下文窗口大小（DeepSeek V4 的 1M tokens，写死）
 ├── maxAutoContinue: Int = 5            // max_tokens 自动续写最大次数，防止死循环
-└── autoContinueMessage: String = "继续" // max_tokens 时自动发送的续写消息
+├── autoContinueMessage: String = "继续" // max_tokens 时自动发送的续写消息
+├── turnWarningRatio: Double = 0.6      // ⏳ 规划中：轮次预警触发比例（turn >= maxTurns * ratio 时附加系统提示）
+└── turnWarningMessage: String          // ⏳ 规划中：轮次预警文本模板
 ```
 
 **线程模型：**
@@ -91,6 +95,32 @@ AgentLoop
 - 单个 AgentSession 同时只能有一个 `run()` 在执行
 - AgentEvent 的发射在 background thread，UI 订阅者负责线程切换
 
+**工具结果自检反馈环（⏳ 规划中）：**
+
+每次 tool result 回传 LLM 前，根据结果类型自动附加检查提示，防止 LLM 忽略异常：
+
+```
+fun annotateToolResult(toolName: String, result: ToolResult): String {
+    val hints = mutableListOf<String>()
+    when (toolName) {
+        "readFile" -> if (result.content.contains("不存在")) hints += "提示：文件不存在，请确认路径是否正确。不要假设文件内容。"
+        "searchContent" -> {
+            if (result.content.contains("未找到匹配")) hints += "提示：未找到匹配。不要假设代码存在，考虑用 listFiles 确认文件位置。"
+            if (result.content.contains("已截断")) hints += "提示：搜索结果已截断，可能有遗漏。如需修改代码，建议先用更精确的关键词确认范围。"
+        }
+        "runShell" -> {
+            if (result.exitCode != 0) hints += "⚠️ 命令执行失败。请分析错误原因后决定下一步，不要忽略此错误继续执行。"
+            if (!result.stderr.isNullOrEmpty()) hints += "⚠️ 命令有错误输出，请检查 stderr 内容。"
+        }
+        "readLints"   -> if (result.content.contains("错误:")) hints += "⚠️ 文件存在编译错误。请先解决这些错误再继续修改代码。"
+        "listFiles"   -> if (result.content.contains("已截断")) hints += "提示：目录列表已截断。如果你在找特定文件，建议用更精确的路径缩小范围。"
+    }
+    return if (hints.isNotEmpty()) result.content + "\n\n" + hints.joinToString("\n") else result.content
+}
+```
+
+**约束：** 提示信息仅用于引导 LLM，不改变 `ToolResult` 的数据结构。`content` 字段仍然是工具返回的原始内容，提示作为追加文本存在于传给 LLM 的最终字符串中。
+
 ---
 
 ### 2.2 AgentSession
@@ -104,6 +134,7 @@ AgentSession
 ├── state: AgentState
 ├── plan: Plan?                       // 关联的计划（最多一个）
 ├── runningProcesses: Set<ProcessHandle>  // 当前会话的 Shell 进程
+├── filesReadThisTurn: Set<String>        // ⏳ 规划中：当前 turn 中已读取的文件路径，用于 readFile 前置校验
 │
 ├── addMessage(msg: Message)
 ├── setState(newState: AgentState)
@@ -131,6 +162,8 @@ TokenUsage:
 ---
 
 ### 2.3 ToolRegistry
+
+> **设计原理：** 工具系统防幻觉方案见 [`agent.md` 第十五节](../docs/agent.md#十五防止-llm-幻觉)，代码正确性验证方案见 [`agent.md` 第十六节](../docs/agent.md#十六agent-代码改动正确性验证)，方案正确性验证见 [`agent.md` 第十七节](../docs/agent.md#十七agent-方案正确性验证)。
 
 **职责：** 工具注册、查找、列表，统一管理内置工具 + MCP 工具。
 
@@ -162,6 +195,83 @@ ToolInfo (ToolRegistry 内部类):
 **超时机制：** 每个工具都包含必填的 `timeout` 参数（秒），由 LLM 在 tool call 时传入。
 0=不限。RunShell 超时时强制 `destroyForcibly()` 终止进程。其他 I/O 工具的 timeout
 由 ToolExecutor 统一读取，目前作为安全兜底（操作通常很快完成）。
+
+**文件操作前置校验（⏳ 规划中）：**
+
+`ToolExecutor` 在执行文件操作工具前做前置校验，防止 LLM 幻觉导致非法操作：
+
+| 校验项 | 适用工具 | 规则 |
+|--------|---------|------|
+| 文件存在性 | `readFile`、`editFile`（非新建） | VFS 中不存在 → 拒绝执行，返回错误 |
+| readFile 前置 | `editFile`、`writeFile`（覆盖模式） | 当前 turn 中该文件未被 `readFile` 过 → 拒绝执行，返回 `"请先用 readFile 读取 {filePath} 后再修改"` |
+| modificationStamp | `editFile`、`writeFile`（覆盖模式） | 文件 stamp 与上次 `readFile` 时不一致 → 拒绝执行，返回 `"文件已被外部修改"` |
+
+**约束：**
+- 文件存在性校验在 `ToolExecutor` 分发前执行（统一入口）
+- `readFile` 前置校验依赖 `AgentSession` 维护的 `filesReadThisTurn: Set<String>`，每次 `readFile` 成功时追加，每个 turn 开始时清空
+- `modificationStamp` 校验已有实现，此处补充 `readFile` 前置校验
+
+**修改后自动 `readLints`（⏳ 规划中）：**
+
+`editFile` 或 `writeFile` 成功执行后，`ToolExecutor` 自动对被修改文件静默运行 `readLints`，将诊断结果追加到 tool result 中：
+
+| 结果 | 行为 |
+|------|------|
+| 有新 ERROR | toolResult 尾部追加 `⚠️ 该文件修改后存在 N 个编译错误，请检查并修复:` + 错误列表 |
+| 有新 WARNING | 追加 `该文件修改后有 N 个警告:` + 警告列表（最多 5 条） |
+| 无新问题 | 不追加额外内容 |
+
+**约束：**
+- 静默执行：不创建额外 ToolCallCard，结果仅作为 tool result 的附加文本
+- 对比增量：记录修改前文件的 lint 数量，只报告**新增**的问题
+- 不阻塞：`readLints` 快速返回（IDE 内存数据），不影响 Agent Loop 节奏
+
+**回归测试智能提示（⏳ 规划中）：**
+
+`editFile`/`writeFile` 成功后，根据文件路径附加测试建议：
+
+| 修改文件路径模式 | 附加提示 |
+|-----------------|---------|
+| `src/main/**/*.kt`、`src/main/**/*.java` | `提示：修改了 {fileName}，建议运行相关测试。如用 Gradle：./gradlew test --tests "*{ClassName}*"` |
+| `src/test/**/*.kt`、`src/test/**/*.java` | `提示：修改了测试文件 {fileName}，建议运行：./gradlew test --tests "{TestClassName}"` |
+| `build.gradle.kts`、`build.gradle` | `⚠️ 修改了构建配置，建议运行 ./gradlew build 验证` |
+
+**改动影响范围分析（⏳ 规划中）：**
+
+`editFile`/`writeFile` 成功后，若修改涉及方法名/类名变更（通过简单正则匹配 `fun/class/val/var` 后的标识符变更），自动 `searchContent` 搜索该标识符在项目中的引用，结果追加提示：
+
+```
+{oldSymbol} 在 N 个文件中仍有引用: file1.kt:30, file2.kt:55...
+请确认这些引用是否需要联动修改。
+```
+
+**关键操作确认（⏳ 规划中）：**
+
+对以下高影响操作，`ToolExecutor` 在执行前将 Agent 状态切换为 `AWAITING_APPROVAL`，弹出确认对话框：
+
+| 操作类型 | 触发条件 | 确认提示 |
+|---------|---------|---------|
+| 公共 API 变更 | `editFile`/`writeFile` 修改了方法签名（检测 `fun ` 行变更）且文件被 ≥3 个其他文件引用 | `将修改公共方法 {methodName}。searchContent 发现 N 处引用。确认执行？` |
+| 新增依赖 | `editFile`/`writeFile` 在 `build.gradle.kts` 中新增 `implementation(...)` 行 | `将在构建配置中新增依赖。确认？` |
+| 大范围修改 | 同一 turn 中累计修改 ≥5 个文件 | `本 turn 已修改 M 个文件。是否继续？建议考虑用 /plan 拆分。` |
+| 删除文件 | `runShell` 命令中包含 `rm ` 且目标在项目目录内 | `将删除文件 {path}。确认？`（已有危险命令确认，此处补充文件路径识别） |
+
+**约束：** 关键操作确认复用现有审批 UI（`CountDownLatch` + Dialog），与 Shell 危险命令确认共用同一机制。确认无超时，等待用户手动处理。
+
+**同类代码自动参考（⏳ 规划中）：**
+
+`readFile` 成功返回后，Agent Loop 自动分析文件特征并附加风格参考：
+
+```
+readFile 工具执行成功后
+  → 分析文件特征（缩进风格、命名模式、检测到的框架/工具类）
+  → 用 FilenameIndex 找同目录下同扩展名的其他文件（取 Top-3）
+  → tool result 底部追加:
+     "📋 风格参考: 该文件使用 {indent} 缩进，方法名 {naming}。
+      同目录类似文件: {sibling1}, {sibling2}, {sibling3}（可用 readFile 查看）"
+```
+
+LLM 在修改这个文件前就有了明确的风格参照，减少风格不一致的方案错误。
 
 ---
 
@@ -272,7 +382,9 @@ ToolCallCard
 ├── setRejected()                          // 用户拒绝审批
 ├── setCancelled()                         // 用户取消
 ├── isExpanded: Boolean                    // 折叠/展开
-└── 渲染: JPanel (带状态图标 + 参数折叠 + 结果滚动区 + 底部耗时)
+├── renderDiff(oldText: String, newText: String)  // ⏳ 规划中：editFile 成功后渲染可视化 Diff
+│                                               //   用 SimpleDiff（LCS 算法），ADD 绿色/DEL 红色/CTX 灰色
+└── 渲染: JPanel (带状态图标 + 参数折叠 + 结果滚动区 + 可视化 Diff + 底部耗时)
 
 PlanCard
 ├── 构造: PlanCard(plan: Plan)
@@ -281,6 +393,7 @@ PlanCard
 ├── onSkipRequested: ((stepId: String) -> Unit)?     // [跳过] 回调
 ├── onAbortRequested: (() -> Unit)?                  // [终止] 回调
 ├── setCurrentStepIndex(index: Int)                  // 高亮当前步骤
+├── createPlan(task: String, steps: List<PlanStep>)  // ⏳ 规划中：LLM 通过 createPlan 工具主动创建
 └── 渲染: JPanel (计划摘要 + 步骤列表 + 操作按钮)
 ```
 
@@ -292,10 +405,13 @@ PlanCard
 
 **生命周期：** 计划与 Agent 同步——Agent end_turn 时计划自动暂停，Agent 继续时计划自动恢复。
 
+**双重入口：** Plan 可通过两种方式创建——用户手动 `/plan` 命令，或 LLM 通过 `createPlan` 工具主动创建（⏳ 规划中）。两者触发 `generatePlan()` 流程一致，区别仅在于 LLM 主动创建时已通过 readFile 了解项目现状，计划更准确。详见 [`docs/agent.md` 第五节 > LLM 自动判断并创建计划](../docs/agent.md#llm-自动判断并创建计划规划中)。
+
 ```
 PlanExecutor
 ├── 构造: PlanExecutor(session: AgentSession, agentLoop: AgentLoop)
-├── generatePlan(task: String): Plan       // /plan → LLM 输出 → 4 层解析 → Plan
+├── generatePlan(task: String): Plan       // /plan 或 createPlan 工具 → LLM 输出 → 4 层解析 → Plan
+├── createPlanFromTool(task: String, steps: List<PlanStepInput>): Plan  // ⏳ 规划中：LLM 通过 createPlan 工具主动创建
 ├── deletePlan()                           // [✕ 删除] 仅未开始（全 PENDING）时可调用
 ├── resumeNextStep(): StepResult           // [▶ 继续] 或 Agent 恢复时自动触发
 ├── retryStep(stepId: String): StepResult  // [↻ 重试]
@@ -840,6 +956,8 @@ AppSettingsService（SettingsConfigurable 读写）
 
 ### 8.1 Agent 基础 System Prompt
 
+> **设计原理：** 防幻觉规则见 [`agent.md` 第十五节](../docs/agent.md#十五防止-llm-幻觉)，代码验证流程见 [`agent.md` 第十六节](../docs/agent.md#十六agent-代码改动正确性验证)，方案设计原则见 [`agent.md` 第十七节](../docs/agent.md#十七agent-方案正确性验证)。
+
 ```
 你是 Code Assistant，一个运行在 JetBrains IDE 中的智能编程助手。你可以：
 - 阅读项目中的任何文件
@@ -863,12 +981,59 @@ AppSettingsService（SettingsConfigurable 读写）
 4. Shell 命令的工作目录默认为项目根目录。长时间运行的命令（如 gradle build）是正常的，不需要手动终止。
 5. 所有文件路径使用项目内相对路径。
 
+## 任务复杂度判断（⏳ 规划中）
+
+在开始执行任务前，先评估复杂度。如果满足以下任一条件，在回复开头列出简要执行计划（目标、步骤、涉及文件）再开始：
+
+- 涉及 3 个以上文件的修改
+- 可能需要多次编译/测试验证
+- 用户描述中有"重构""迁移""全部""整个项目""所有""统一"等大范围关键词
+- 用户要求同时做多件事
+
+如果执行中途发现任务比预期复杂（如实际涉及文件远多于预期），应建议用户使用 /plan 拆分，或直接调用 createPlan 工具创建正式计划。
+
 ## 回复风格
 
 - 使用中文回复
 - 代码块使用正确的语言标记（```kotlin、```java、```json 等）
 - 修改文件前简要说明变更内容
 - 执行 Shell 命令前说明命令用途
+
+## 防止幻觉
+
+1. 绝不编造不存在的 API、类名、方法名。引用任何 API 前必须通过 readFile 或 searchContent 确认其真实存在。
+2. 不确定文件是否存在时，先用 listFiles 或 readFile 确认，不要假设路径。
+3. 修改代码前必须用 readFile 读取目标区域的真实内容，不要凭记忆或猜测。
+4. Shell 命令执行后，先检查退出码和 stderr，再根据实际结果（而非预期结果）决定下一步。
+5. 如果信息不足，主动说明"我需要先读取 X 文件来确认"，而不是猜测。
+
+## 代码修改后的验证流程（⏳ 规划中）
+
+每次修改代码后，按以下顺序验证：
+
+1. 如果修改的是 Kotlin/Java 等编译型语言文件，用 readLints 检查是否有新引入的错误。
+2. 如果 lints 无错误，考虑运行编译或相关测试（如 ./gradlew build 或对应模块的 test）。
+3. 如果测试失败，分析失败原因并修复，不要跳过失败的测试。
+4. 如果项目没有现成测试或编译耗时过长，至少用 readFile 重新读取修改区域确认改动符合预期。
+
+## 方案设计原则（⏳ 规划中）
+
+在动手修改代码前，先理解项目现状：
+
+1. 如果任务是修改/扩展已有功能，先用 searchContent 搜索项目中类似实现（如"项目中其他 Service 类长什么样"），以现有模式为模板。
+2. 如果任务是新增功能，先在项目中找一个最相似的文件通读，保持风格一致（命名、结构、错误处理方式）。
+3. 优先复用项目已有的工具类、基类、扩展函数，不要自己从头写。
+4. 选择方案时遵循项目已有的复杂度水平——如果项目里其他 Service 都是单文件 200 行，你就不该引入多层抽象。
+5. 只改和任务直接相关的代码，不要顺便重构不相关的文件。
+
+## 方案自检清单（⏳ 规划中）
+
+每次提出修改方案前，在回复中简要自检：
+
+1. **模式对齐**：项目里有没有类似实现可以参考？我是否遵循了？
+2. **最简单方案**：有没有更简单的写法？我是否过度设计了？
+3. **影响范围**：这个修改会影响多少调用者？有没有遗漏的联动修改？
+4. **破坏性**：是不是 Breaking Change？如果是，用户知道吗？
 ```
 
 ### 8.2 System Prompt 组装逻辑
@@ -1005,15 +1170,32 @@ oldString 匹配到 {count} 处:
 
 空 oldString + 文件不存在:
 ✅ 文件已创建: {filePath} ({lineCount} 行, {byteCount} 字节)
+
+自动 readLints 结果（⏳ 规划中，editFile/writeFile 成功后自动追加）:
+⚠️ 该文件修改后存在 2 个编译错误:
+  45:12: Unresolved reference: findById [ERROR]
+  78:5: Type mismatch: inferred type is String but Unit was expected [ERROR]
 ```
+（无新诊断时不追加）
+
+**UI 展示（⏳ 规划中）：** `editFile` 成功后，ToolCallCard 内联展示 `SimpleDiff` 生成的可视化 diff（ADD 绿色/DEL 红色/CTX 灰色），替换当前的前后 3 行文本对比。
 
 ### runShell
 
+**返回值格式（⏳ 强化版，错误优先）：**
+
 ```
-成功:
+成功（退出码 0 + stderr 空）:
 $ {command}
 {stdout}
-退出码: {exitCode} | 耗时: {duration}s | {outputLineCount} 行输出
+退出码: 0 | 耗时: {duration}s | {outputLineCount} 行输出
+
+成功但有 stderr（退出码 0 + stderr 非空，构建工具常见）:
+$ {command}
+{stdout}
+⚠️ 命令成功但有以下输出（stderr）:
+{stderr}
+退出码: 0 | 耗时: {duration}s
 
 超时（timeout 由 LLM 在 tool call 时传入，>0 时生效）:
 $ {command}
@@ -1025,12 +1207,20 @@ $ {command}
 ... (共 {totalLines} 行输出，完整输出见 IDE 工具卡片)
 退出码: {exitCode} | 耗时: {duration}s
 
-命令失败:
-$ {command}
+命令失败（退出码非零，强化标注）:
+⚠️ 命令执行失败 (退出码: {exitCode})
+STDERR:
 {stderr}
-退出码: {exitCode}（非零）| 耗时: {duration}s
+STDOUT:
+{stdout}
+耗时: {duration}s
 提示: 检查命令参数是否正确，路径是否存在。
 ```
+
+**格式说明：**
+- ⚠️ 标记的前置确保 LLM 在流式解析时先看到错误信息
+- 失败时 stderr 排在 stdout 前面（错误信息优先）
+- 成功但 stderr 非空的情况单独处理（如 gradle 的 warning 输出在 stderr），不误报为失败
 
 ### listFiles
 
@@ -1112,6 +1302,20 @@ $ {command}
 状态: {completed | failed | cancelled}
 结果摘要:
 {summary (≤ 2000 tokens)}
+详情: sub-session #{sessionId}
+```
+
+### createPlan（⏳ 规划中）
+
+```
+✅ 已创建执行计划: {taskSummary}
+步骤数: {stepCount}
+步骤列表:
+1. {step1.description} — 工具: {step1.tool}, 文件: {step1.files}
+2. {step2.description} — 工具: {step2.tool}, 文件: {step2.files}
+...
+计划已持久化，按步骤逐步执行，每步完成后暂停确认。
+```
 详情: sub-session #{sessionId}
 ```
 

@@ -25,7 +25,14 @@ Plugin 2.2.1。
 
 ## 架构（概览）
 
-完整设计见 [`DESIGN.md`](DESIGN.md)，技术契约见 [`docs/tech-spec.md`](docs/tech-spec.md)。
+项目文档按功能拆分，主文档见 [`README.md`](README.md)，各功能子文档如下：
+
+| 功能          | 文档                                                                                     |
+|-------------|----------------------------------------------------------------------------------------|
+| Agent 对话    | [`docs/agent.md`](docs/agent.md)（设计概览）+ [`docs/tech-spec.md`](docs/tech-spec.md)（技术契约） |
+| 代码自动补全      | [`docs/completion.md`](docs/completion.md)                                             |
+| Git Message | [`docs/git-message.md`](docs/git-message.md)                                           |
+| UI/UX 设计    | [`docs/ui-ux-spec.md`](docs/ui-ux-spec.md)                                             |
 
 ```
 ┌──────────────────────────────────────────────────────┐

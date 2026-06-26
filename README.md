@@ -1,36 +1,64 @@
 # Code Assistant
 
-面向 IntelliJ IDEA 及所有 JetBrains IDE 的**免费 AI 编程助手插件**。
+面向 IntelliJ IDEA 及所有 JetBrains IDE 的**免费 AI 编程助手插件**（IntelliJ Platform Plugin, type
+`IC`）。
 
-通过 DeepSeek API 提供 Agent 对话、代码补全和 Git commit message 自动生成。用户自带 DeepSeek API Key。
+通过 DeepSeek API 提供三大核心功能：**Agent 对话**、**代码自动补全**、**Git Commit Message 自动生成**
+。用户自带 DeepSeek API Key。
 
-## 功能
+## 功能概览
 
-- **💬 Agent 对话** — 统一聊天模式，支持工具调用（读/写文件、Shell、搜索等）
-- **📋 Plan Mode** — `/plan` 命令生成可审查的执行计划，逐步确认后执行
-- **⌨️ 代码补全** — FIM（Fill-in-the-Middle）代码补全
-- **📝 Commit 生成** — 基于 VCS diff 自动生成 Git commit message
-- **🔌 MCP 支持** — 连接外部工具服务（数据库、文件系统、API）
-- **🎯 Skill 系统** — 兼容 Claude Code SKILL.md 格式，自定义 Agent 能力
-- **🖼️ 图片粘贴** — 支持剪贴板图片直接粘贴到对话中
-- **📎 @file 引用** — @ 文件名即可将文件内容注入上下文
-- **🤖 多 Agent 协作** — 父 Agent 可 spawn 子 Agent 并行处理子任务
-- **💭 思考过程** — 展示 Agent 推理过程，折叠/展开
+| 功能                 | 说明                                                         | 文档                                           |
+|--------------------|------------------------------------------------------------|----------------------------------------------|
+| 💬 **Agent 对话**    | AI 编程代理：工具调用、Plan Mode、多 Agent、Skill 系统、MCP 外部工具           | [`docs/agent.md`](docs/agent.md)             |
+| ⌨️ **代码自动补全**      | FIM（Fill-in-the-Middle）代码补全，PSI 上下文增强，缓存加速                 | [`docs/completion.md`](docs/completion.md)   |
+| 📝 **Git Message** | 基于 `git diff` 自动生成 Conventional Commits 规范的 commit message | [`docs/git-message.md`](docs/git-message.md) |
 
-## 开发状态
+### Agent 对话核心能力
 
-🚧 **Alpha 阶段（v2.0.0）** — 核心功能已实现，正在持续完善中。Agent Mode、Plan Mode、MCP、Skills
-系统均可使用，但可能存在边缘情况。尚未发布到 JetBrains Marketplace，需从源码构建。
+- 8 个内置工具（读文件/写文件/编辑文件/执行 Shell/列目录/搜索内容/读诊断/派生子 Agent）
+- Plan Mode：`/plan` 命令生成可审查的执行计划，逐步确认后执行
+- **LLM 自动规划（规划中）**：System Prompt 复杂度预判 + 轮次预警 + `createPlan` 工具让 LLM 主动拆分超长任务
+- MCP 支持：连接外部工具服务（数据库、文件系统、API）
+- Skill 系统：兼容 Claude Code SKILL.md 格式，自定义 Agent 能力
+- 多 Agent 协作：父 Agent 可 spawn 子 Agent 并行处理子任务
+- 上下文自动压缩（Auto-Compact）：消息超限时自动压缩旧消息为摘要
+- 思考过程展示、图片粘贴、@file 引用、流式 Markdown 渲染
 
-### 已知限制
+## 架构概览
 
-- 仅支持 DeepSeek API（`deepseek-v4-pro` 模型），不支持其他 LLM 提供商
-- MCP `resources/list` 和 `prompts/list` 暂不支持
-- 多 Agent 嵌套上限 1 层（子 Agent 不可再 spawn）
-- Sessions 全文搜索暂未实现（v1 仅 title 过滤）
-- `searchContent` 当前仅支持单词边界匹配（v1 限制）
-- `readLints` 仅支持单文件诊断
-- `@file` glob 匹配上限 50 个文件
+```
+┌──────────────────────────────────────────────────────┐
+│  UI Layer (ui/ 包)                                    │
+│  TabBar → CardLayout 切换 7 个页面                      │
+│  ├─ ui/page/: WelcomePage, ChatPage, SessionsPage,   │
+│  │            TokenUsagePage, McpPage, SkillsPage,   │
+│  │            SettingsPage                           │
+│  └─ ui/chat/: ChatBubbleRenderer, ChatViewModel,     │
+│              ChatInputArea, ToolCallCard, PlanCard    │
+├──────────────────────────────────────────────────────┤
+│  Agent Layer (agent/ 包)                              │
+│  AgentLoop → stream → parse → executeTool → feedback │
+│  AgentSession (状态机) + PlanExecutor (计划执行)       │
+│  ToolRegistry + ToolExecutor (工具注册/分发)           │
+│  MultiAgentManager (多 Agent 调度)                     │
+├──────────────────────────────────────────────────────┤
+│  Completion Layer (completion/ 包)                    │
+│  AiCompletionProvider → context collection → FIM API │
+│  CompletionCache + ContextEnhancer + PostProcessor    │
+├──────────────────────────────────────────────────────┤
+│  Session Layer (session/ 包)                          │
+│  SessionManager + SessionStore (JSON 持久化)           │
+├──────────────────────────────────────────────────────┤
+│  Skills & MCP (skills/ + mcp/ 包)                     │
+│  SkillManager (SKILL.md 扫描/注册)                    │
+│  McpManager (MCP Server 生命周期)                      │
+├──────────────────────────────────────────────────────┤
+│  Actions: GenerateCommitAction (Commit 消息生成)       │
+│  Provider: AnthropicOkHttpClient → DeepSeek           │
+│  Completion: AiCompletionProvider → DeepSeekFimClient │
+└──────────────────────────────────────────────────────┘
+```
 
 ## 快速开始
 
@@ -45,26 +73,62 @@
 ## 构建
 
 ```bash
-# 构建插件 zip（产物在 build/distributions/）
-./gradlew buildPlugin
-
-# 启动 sandbox IntelliJ IDEA（改代码后重新编译即热加载）
-./gradlew runIde
-
-# 运行全部测试
-./gradlew test
+./gradlew buildPlugin      # 构建插件 zip（产物在 build/distributions/）
+./gradlew runIde           # 启动 sandbox IntelliJ IDEA（autoReloadPlugins=true：改代码后重新编译即热加载）
+./gradlew test             # 运行全部 JUnit 测试
 ```
 
-**环境要求：** JVM 21、Kotlin 2.0.21、IntelliJ Platform 2024.3
+**环境：** JVM 21、Kotlin 2.0.21、IntelliJ Platform 2024.3（IntelliJ IDEA Community）、Gradle IntelliJ
+Platform Plugin 2.2.1
 
-## 文档
+## 快捷键
 
-| 文档                                               | 说明                        |
-|--------------------------------------------------|---------------------------|
-| [DESIGN.md](DESIGN.md)                           | Agent Mode 总体设计           |
-| [docs/tech-spec.md](docs/tech-spec.md)           | 技术契约（接口、线程模型、JSON Schema） |
-| [docs/ui-ux-spec.md](docs/ui-ux-spec.md)         | UI/UX 设计规范                |
-| [docs/ui-prototype.html](docs/ui-prototype.html) | 可交互 UI 原型                 |
+| 快捷键（Windows/Linux） | 快捷键（macOS）    | 操作             |
+|--------------------|---------------|----------------|
+| `Ctrl+Shift+K`     | `Cmd+Shift+K` | 打开/关闭 Agent 面板 |
+| `Alt+P`            | `Cmd+P`       | 手动触发代码补全       |
+| `↑` / `↓`          | `↑` / `↓`     | 补全候选切换         |
+| `Enter`            | `Enter`       | 发送消息           |
+| `Shift+Enter`      | `Shift+Enter` | 输入框换行          |
+| `Escape`           | `Escape`      | 停止生成 / 关闭弹窗    |
+| `Ctrl+Shift+N`     | `Cmd+Shift+N` | 新建会话           |
+
+## 文档索引
+
+| 文档                                           | 说明                                                            |
+|----------------------------------------------|---------------------------------------------------------------|
+| [`docs/agent.md`](docs/agent.md)             | Agent 对话 — 架构、Agent Loop、工具系统、Plan Mode、多 Agent、MCP、Skills、UI |
+| [`docs/completion.md`](docs/completion.md)   | 代码自动补全 — FIM 流程、PSI 上下文增强、缓存、后处理、统计                           |
+| [`docs/git-message.md`](docs/git-message.md) | Git Message — diff 构建、Prompt 模板、流式生成、按钮交互                     |
+| [`docs/tech-spec.md`](docs/tech-spec.md)     | Agent 技术契约 — 接口定义、线程模型、JSON Schema、System Prompt              |
+| [`docs/ui-ux-spec.md`](docs/ui-ux-spec.md)   | Agent UI/UX 设计规范 — 色板、字体、间距、组件状态、动效                           |
+
+## 配置项
+
+所有配置统一在 **IDE Settings > Tools > Code Assistant** 中管理：
+
+| 配置项           | 默认值               | 说明                  |
+|---------------|-------------------|---------------------|
+| API Key       | —                 | 从 PasswordSafe 安全存储 |
+| Model         | `deepseek-v4-pro` | V4 Flash / V4 Pro   |
+| 代码补全          | 启用                | 开关                  |
+| 补全 max_tokens | 256               | 范围 1-1024           |
+| Commit Prompt | 默认模板              | 自定义模板，`{diff}` 占位   |
+| Agent 最大轮次    | 15（0=不限）          | 达到上限后自动终止           |
+| 多 Agent 并发上限  | 3                 | 父 + 子 Agent 总计      |
+
+## 开发状态
+
+🚧 **Alpha 阶段（v2.0.0）** — 核心功能已实现，正在持续完善中。尚未发布到 JetBrains Marketplace，需从源码构建。
+
+### 已知限制
+
+- 仅支持 DeepSeek API，不支持其他 LLM 提供商
+- MCP `resources/list` 和 `prompts/list` 暂不支持
+- 多 Agent 嵌套上限 1 层（子 Agent 不可再 spawn）
+- Sessions 全文搜索暂未实现（v1 仅 title 过滤）
+- `searchContent` 当前仅支持单词边界匹配
+- `@file` glob 匹配上限 50 个文件
 
 ## 反馈
 
