@@ -319,7 +319,7 @@ Agent 气泡:
 │ PENDING       │ ⏳ Gray 500 │ 等待执行，fg=#6B7280         │
 │               │ icon=Step_0│                  │
 ├───────────────┼──────────┼──────────────────┤
-│ AWAITING_APPR │ 🔒 黄色   │ 等待用户审批     │
+│ AWAITING_APPROVAL │ 🔒 黄色   │ 等待用户审批     │
 │               │ icon=Warning│ [批准] [拒绝]  │
 │               │ bg=#FFFBEB│ 无超时           │
 ├───────────────┼──────────┼──────────────────┤
@@ -662,25 +662,96 @@ PlanCard 交互规则:
 
 ---
 
-## 七、会话列表虚拟化
+## 七、消息列表虚拟化
 
 当 ChatPage 中消息超过 100 条时，使用虚拟化渲染避免 OOM：
 
 ```
 实现策略:
-┌─────────────────────────────────────────┐
-│ JScrollPane viewport                     │
-│   ├─ 可见区域: 渲染完整 Bubble 组件       │
-│   ├─ 上方不可见: 占位 JPanel(height=N)    │
-│   └─ 下方不可见: 占位 JPanel(height=M)    │
-│                                          │
-│ 不引入第三方虚拟列表库                      │
-│ 自定义实现: JScrollPane +                  │
-│   Adjustable + componentListener          │
-│   → 监听 viewport 变化 → 计算可见行        │
-│   → 只渲染可见 Bubble + 上下各 3 个 buffer  │
-│                                          │
-│ 触发条件: messages.size > 100            │
-│ 100 条以内: 全量渲染（无性能问题）          │
-└─────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│ JScrollPane viewport                                      │
+│   ├─ 可见区域: 渲染完整 Bubble 组件                        │
+│   ├─ 上方不可见: 占位 JPanel(height=N)                     │
+│   └─ 下方不可见: 占位 JPanel(height=M)                     │
+│                                                           │
+│ 不引入第三方虚拟列表库                                     │
+│ 自定义实现: JScrollPane + viewport 监听                    │
+│   → JScrollPane.getViewport().addChangeListener()          │
+│     → 监听 viewportPosition / viewportSize 变化            │
+│   → 父容器 addComponentListener → componentResized()       │
+│     → 监听面板宽度变化（影响气泡换行+高度）                  │
+│   → 计算可见消息索引 → 只渲染可见 Bubble + 上下各 3 个 buffer │
+│                                                           │
+│ 触发条件: messages.size > 100                             │
+│ 100 条以内: 全量渲染（无性能问题）                          │
+└──────────────────────────────────────────────────────────┘
+
+可见窗口计算伪代码:
+
+  // 输入: allMessages (全量消息列表)
+  //       每个消息的高度缓存 heights[i] (px)
+  //       viewportTop (viewport 顶部偏移, 来自 getViewPosition().y)
+  //       viewportHeight (viewport 可视高度, 来自 getExtentSize().height)
+  // 输出: visibleStart, visibleEnd (需要渲染的消息索引范围)
+
+  function computeVisibleRange():
+      accY = 0
+      visibleStart = -1
+      visibleEnd = -1
+
+      // 1. 由累积高度定位 visibleStart
+      for i in 0 .. allMessages.size - 1:
+          if accY + heights[i] > viewportTop:
+              visibleStart = i
+              break
+          accY += heights[i]
+
+      // 2. 由可视区域底部定位 visibleEnd
+      bottomY = viewportTop + viewportHeight
+      for i in visibleStart .. allMessages.size - 1:
+          if accY >= bottomY:
+              visibleEnd = i - 1
+              break
+          accY += heights[i]
+      if visibleEnd < 0:
+          visibleEnd = allMessages.size - 1
+
+      // 3. 扩展 buffer（上下各 3 条，防快速滚动白屏）
+      visibleStart = max(0, visibleStart - 3)
+      visibleEnd = min(allMessages.size - 1, visibleEnd + 3)
+
+      return (visibleStart, visibleEnd)
+
+
+变高气泡处理（关键难点）:
+
+  气泡高度不可预测的原因:
+    - 消息文本长度不一，换行行数随面板宽度动态变化
+    - 流式消息内容持续增长（高度在渲染过程中不断变化）
+    - 工具调用卡片可折叠/展开，折叠前后高度差异大
+    - 思考过程块可折叠/展开
+
+  解决策略: 分两步渲染 + 高度缓存
+
+  第一步（测量渲染）:
+    for each message in 待渲染范围:
+        bubble = createBubble(message)
+        bubble.setSize(viewportWidth, Short.MAX_VALUE)  // 给足高度让文本自然换行
+        prefSize = bubble.getPreferredSize()             // Swing 计算出实际所需高度
+        heights[message.index] = prefSize.height         // 缓存该消息高度
+        bubble.dispose()  // 丢弃测量用的临时组件
+
+  第二步（布局渲染）:
+    根据 heights[] 和 computeVisibleRange() 定位可见气泡
+    仅创建 visibleStart..visibleEnd 范围的实际 Bubble 组件
+    上方占位 panel.height = sum(heights[0..visibleStart-1])
+    下方占位 panel.height = sum(heights[visibleEnd+1..N-1])
+
+  高度缓存失效触发重新测量:
+    - 面板宽度变化 (componentResized)
+    - 消息内容变更 (流式追加、markdown 重新解析)
+    - 工具卡片折叠/展开
+    - 思考过程块折叠/展开
+    失效策略: 将该消息及之后所有消息的高度缓存标记为 dirty
+             下一次滚动/渲染时对 dirty 范围重新执行步骤一
 ```
