@@ -908,8 +908,10 @@ toast "API Key 无效"，UNKNOWN（网络超时）→ toast "网络不可用，K
 LLM 丢失关键上下文。
 
 **触发时机：** 每次 `AgentLoop.run()` 构建 `params` 后、发送 API 请求前，估算当前 `messages` + system
-prompt + tools 的总 token 数。当估算值超过模型上下文窗口的 **80%** 时触发压缩。模型上下文窗口写死为 *
-*1,000,000 tokens**（DeepSeek V4 的 1M 上下文上限）。token 估算使用统一策略（见 6.5 节），不做精确
+prompt + tools 的总 token 数。当估算值超过模型上下文窗口的 **70%** 时触发压缩（1M × 0.7 = 700K
+tokens）。模型上下文窗口写死为 **1,000,000 tokens**（DeepSeek V4 的 1M 上下文上限）。选择 70%
+而非更接近 1.0 是因为 token 估算有 ±20% 误差，最坏情况下 700K / 0.8 = 875K 仍在 1M 窗口内留有安全
+余量；若设 80%，最坏情况实际已达 1M，存在溢出风险。token 估算使用统一策略（见 6.5 节），不做精确
 tokenize。
 
 **压缩策略（保留窗口 + 摘要）：**
@@ -982,7 +984,7 @@ fun estimateTokens(text: String): Int {
 
 **适用场景：**
 
-- Auto-Compact 阈值判定（1M × 0.8 = 800K tokens 触发）
+- Auto-Compact 阈值判定（1M × 0.7 = 700K tokens 触发）
 - 输入框实时 token 估算显示
 - `session.totalTokens` 持久化（API 返回精确值优先，fallback 估算）
 - 子 Agent 结果摘要截断（≤ 2000 tokens）
