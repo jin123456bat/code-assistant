@@ -70,12 +70,14 @@ com.aiassistant/
 AgentLoop
 ├── 构造: AgentLoop(session, toolRegistry, client, settings)
 ├── run(userMessage: String): Flow<AgentEvent>
-│   AgentEvent = TextDelta | ToolCallStarted | ToolCallCompleted | TurnCompleted | Error
+│   AgentEvent = TextDelta | ToolCallStarted | ToolCallCompleted | TurnCompleted | Error | StateChanged
+// StateChanged(newState: AgentState) — 状态变更事件，覆盖 AWAITING_APPROVAL/EXECUTING/IDLE/CANCELLED/ERROR 等转换
 ├── cancel()
 ├── isRunning: Boolean
 ├── currentState: AgentState            // 从 AgentSession 读取
-├── compactIfNeeded(messages, modelLimit): Boolean  // 估算 token 数，超过 80% 阈值则压缩旧消息为摘要
-├── compactThreshold: Double = 0.8      // 触发压缩的上下文使用率阈值（对齐 Claude Code）
+├── compactIfNeeded(system: String, messages: List, tools: String, modelLimit): Boolean
+│                         // 估算实际总 token = system + messages + tools。超过 compactThreshold × modelLimit 则压缩
+├── compactThreshold: Double = 0.8      // 触发压缩的上下文使用率阈值（基于实际总 token，对齐 Claude Code）
 ├── modelContextLimit: Int = 1_000_000  // 模型上下文窗口大小（DeepSeek V4 的 1M tokens，写死）
 ├── maxAutoContinue: Int = 5            // max_tokens 自动续写最大次数，防止死循环
 ├── autoContinueMessage: String = "继续" // max_tokens 时自动发送的续写消息
@@ -141,6 +143,7 @@ AgentSession
 ├── cancel()                          // 标记 cancelled=true，清理 runningProcesses
 ├── onStateChanged: (AgentState) -> Unit   // 状态变更回调（UI 注册）
 ├── onMessageAdded: (Message) -> Unit      // 消息追加回调
+├── rollbackTo(messageId: String)         // 回退：标记 messageId 之后的消息 deleted=true，保留之前历史
 └── totalTokens: TokenUsage                // 输入/输出 token 累计
 
 AgentState = IDLE | PROCESSING | AWAITING_APPROVAL | EXECUTING | PAUSED | CANCELLED | ERROR
@@ -151,12 +154,17 @@ Message:
 ├── content: String
 ├── timestamp: Instant
 ├── toolCalls: List<ToolCallRecord>?   // ASSISTANT 消息可能含工具调用
-└── tokenUsage: TokenDelta?            // ASSISTANT 消息的 token 消耗
+├── tokenUsage: TokenDelta?            // ASSISTANT 消息的 token 消耗
+├── feedback: String?                  // 用户反馈 "positive" | "negative"，仅 ASSISTANT 消息
+├── planFreeChat: Boolean = false      // Plan 暂停期间的自由聊天消息标记，PlanExecutor 构建 step prompt 时跳过
+├── feedback: String?                  // 用户反馈 "positive" | "negative"，仅 ASSISTANT 消息
+└── deleted: Boolean = false           // 回退标记，true 时持久化保留但 UI 不渲染。撤销回退时恢复为 false
 
 TokenUsage:
 ├── inputTokens: Long
 ├── outputTokens: Long
 └── timestamp: Instant
+// TokenUsage 是 Session 级累计聚合，TokenDelta（见 2.4 ChatMessage）是单条消息级增量。两者关系见 2.4。
 ```
 
 ---
@@ -177,13 +185,38 @@ ToolRegistry
 
 ToolInfo (ToolRegistry 内部类):
 ├── name: String                       // readFile, writeFile, ...
-├── description: String                // LLM 看到的工具描述
+├── description: String                // LLM 看到的工具描述，**必须包含上限声明**
 └── usage: String                      // 使用示例
 
 工具数据类 (ToolModels.kt):
-  8 个 @JsonClassDescription 注解的 data class，通过 SDK toolFromClass() 生成 JSON Schema。
+  9 个 @JsonClassDescription 注解的 data class（含 createPlan ⏳ 规划中），通过 SDK toolFromClass() 生成 JSON Schema。
   工具执行分发 → ToolExecutor.kt 通过 when(toolName) 路由。
+
+ToolInput.kt:
+  存放每个工具的参数基类/接口（如 ToolInput 接口，定义 timeout 公共字段）。
+  8 个具体 ToolInput 数据类（ReadFileInput / WriteFileInput / ...），各带 @JsonClassDescription。
+  Anthropic SDK 通过 toolFromClass() 将 ToolInput 类转为 JSON Schema。
+  与 ToolModels.kt 的关系：ToolModels.kt 存放工具元数据（名称/描述/上限），ToolInput.kt 存放参数定义。
 ```
+
+**工具描述中的上限声明：**
+
+每个工具的 `description` 字段必须包含返回值上限，让 LLM **事前知道**限制，而非仅靠事后截断标注。各工具
+description 应包含的上限声明：
+
+| 工具              | description 中应包含的上限声明                                                                                        |
+|-----------------|--------------------------------------------------------------------------------------------------------------|
+| `readFile`      | `单次最多返回 500 行。如果文件行数超过此限制，返回内容会被截断，请使用 startLine 参数分页读取剩余内容。`                                                |
+| `searchContent` | `最多返回 50 条匹配。如果匹配数超过此限制，结果会被截断，请使用更精确的搜索词缩小范围。`                                                              |
+| `listFiles`     | `最多返回 200 个条目（文件+目录）。如果超出此限制，结果会被截断，请使用 dirPath 和 maxDepth 缩小范围。`                                            |
+| `runShell`      | `最多返回 200 行输出（stdout+stderr）。如果超出此限制，传给 LLM 的内容会被截断，完整输出保留在 IDE 工具卡片中。timeout 参数由 LLM 根据命令类型自行判断传入（秒），0=不限。` |
+| `readLints`     | `最多返回 50 条诊断，按 severity 排序（ERROR > WARNING > INFO）。如果超出此限制，低严重度诊断可能不显示。`                                     |
+| `editFile`      | `newString 最多 3000 行。超过此限制的操作会被拒绝。`                                                                          |
+| `writeFile`     | `内容最多 3000 行。超过此限制的操作会被拒绝。`                                                                                  |
+| `spawnAgent`    | `子 Agent 结果摘要最多 2000 tokens。完整执行过程保存为独立 Session。`                                                            |
+
+> **双重告知原则：** 上限同时存在于工具描述（事前，LLM 调用前就知道）和返回值截断标注（事后，LLM
+> 拿到结果后确认）。两者不可互相替代——事前告知防止误判，事后标注确保发现遗漏。
 
 **执行分发（每个 AgentTool 内部）：**
 
@@ -205,6 +238,15 @@ ToolInfo (ToolRegistry 内部类):
 | 文件存在性 | `readFile`、`editFile`（非新建） | VFS 中不存在 → 拒绝执行，返回错误 |
 | readFile 前置 | `editFile`、`writeFile`（覆盖模式） | 当前 turn 中该文件未被 `readFile` 过 → 拒绝执行，返回 `"请先用 readFile 读取 {filePath} 后再修改"` |
 | modificationStamp | `editFile`、`writeFile`（覆盖模式） | 文件 stamp 与上次 `readFile` 时不一致 → 拒绝执行，返回 `"文件已被外部修改"` |
+
+**校验失败恢复规则：** 每种拒绝返回的错误消息中自带恢复指引，Agent Loop 不自动重试。LLM
+需根据错误消息中的指引自行决定下一步：
+
+| 校验失败类型      | 错误消息中的指引                            | LLM 的恢复动作                                    |
+|-------------|-------------------------------------|----------------------------------------------|
+| 文件不存在       | `"提示：使用 listFiles 查看目录结构"`          | 用 `listFiles` 确认路径后重新调用                      |
+| readFile 前置 | `"请先用 readFile 读取 {filePath} 后再修改"` | 调用 `readFile` 读取文件后重新 `editFile`/`writeFile` |
+| stamp 不匹配   | `"请使用 readFile 重新读取文件后再试"`          | 调用 `readFile` 获取最新内容和 stamp 后重新修改            |
 
 **约束：**
 - 文件存在性校验在 `ToolExecutor` 分发前执行（统一入口）
@@ -303,6 +345,10 @@ ChatViewModel
 │   → session.totalTokens 归零
 │   → 复用当前 session.id，不新建文件
 │
+├── rollbackToMessage(messageId: String)     // 回退：标记 messageId 之后的消息 deleted=true
+├── undoRollback()                           // 撤销回退：恢复最近回退的消息 deleted=false
+└── hasPendingRollback: Boolean              // 是否存在可撤销的回退
+│
 └── InputState:
     ├── manualRefs: List<FileRef>          // @file 手动引用（可多个）
     ├── selectionRef: FileRef?             // 选中代码引用（仅一个）
@@ -331,7 +377,10 @@ ChatMessage:
 ├── content: String                        // Markdown 源码
 ├── toolCall: ToolCallUIData?              // TOOL_CALL 类型的额外数据
 ├── timestamp: Instant
-└── tokenDelta: TokenDelta?                // AGENT_TEXT 的 token 消耗
+└── tokenDelta: TokenDelta?                // AGENT_TEXT 的单条消息级 token 增量
+
+// TokenDelta 是单条消息的增量记录。TokenUsage（见 2.2 AgentSession）是整个 Session 的累计聚合。
+// Session.totalTokens = Σ(TokenDelta) + compact 丢弃消息的估算值。
 
 ToolCallUIData:
 ├── toolName: String
@@ -390,11 +439,12 @@ PlanCard
 ├── 构造: PlanCard(plan: Plan)
 ├── setStepState(stepId: String, state: StepState)   // 更新单步状态
 ├── onResumeRequested: (() -> Unit)?                 // [▶] 回调
-├── onSkipRequested: ((stepId: String) -> Unit)?     // [跳过] 回调
-├── onAbortRequested: (() -> Unit)?                  // [终止] 回调
+├── onRetryRequested: ((stepId: String) -> Unit)?     // [↻] 回调
+├── onSkipRequested: ((stepId: String) -> Unit)?     // [⏭] 回调
+├── onAbortRequested: (() -> Unit)?                  // [✕] 回调
 ├── setCurrentStepIndex(index: Int)                  // 高亮当前步骤
-├── createPlan(task: String, steps: List<PlanStep>)  // ⏳ 规划中：LLM 通过 createPlan 工具主动创建
 └── 渲染: JPanel (计划摘要 + 步骤列表 + 操作按钮)
+// createPlan 逻辑在 PlanExecutor.createPlanFromTool()，PlanCard 仅负责 UI 渲染和按钮回调
 ```
 
 ---
@@ -437,7 +487,7 @@ Plan:
 PlanStep:
 ├── id: String
 ├── description: String                    // 步骤描述
-├── tool: String                           // 预期工具名
+├── tool: String                           // 建议工具名。LLM 应优先使用但不强制，可调用其他工具并在 step result 中说明原因
 ├── files: List<String>                    // 涉及文件（含行号 "UserService.kt:40-60"）
 ├── status: PENDING | EXECUTING | DONE | ERROR | SKIPPED | CANCELLED
 ├── result: String?                        // 执行结果
@@ -482,6 +532,7 @@ SessionIndex:
 ├── updatedAt: Instant
 ├── messageCount: Int
 ├── totalTokens: Long
+// totalTokens = inputTokens + outputTokens 累加值，从 API usage 返回值获取
 ├── toolCallCount: Int
 └── hasActivePlan: Boolean
 
@@ -508,7 +559,7 @@ SkillManager
 ├── disableSkill(name: String)
 ├── getByCommand(command: String): Skill?               // 按 /command 查找（如 /review）
 ├── getSystemPromptExtension(): String               // 所有已启用 skill 的摘要
-└── getTriggeredContent(skills: List<Skill>): String // 匹配 trigger 的 skill 正文，最多 3 个，每个 ≤ 800 tokens
+└── getTriggeredContent(skills: List<Skill>): String // LLM 通过 tool call 触发的 skill 正文，最多 3 个，每个 ≤ 800 tokens。非关键词自动匹配，由 LLM 自主判断调用
 
 Skill:
 ├── name: String
@@ -542,7 +593,8 @@ McpManager
     └── latencyMs: Long?
 
 McpServerState:
-    CONFIGURED | INITIALIZING | RUNNING | CRASHED | STOPPED | DISCONNECTED | ERROR
+    CONFIGURED | INITIALIZING | RUNNING | CRASHED | STOPPED | DISCONNECTED | ERROR | INIT_ERROR
+// INIT_ERROR：初始化握手超时（退避重试 3 分钟后仍失败），需用户手动 [重连]
 
 McpConfigStore
 ├── load(): McpConfig
@@ -663,6 +715,43 @@ ChatInputArea
 
 ---
 
+### 2.15 ApprovalDialog（审批弹窗）
+
+**职责：** 工具执行前的用户审批，阻塞 Agent Loop 等待用户操作。
+
+```
+ApprovalDialog
+├── 类型: MODAL（阻塞父窗口），可拖动
+├── 布局: BorderLayout
+│   ├── NORTH: JLabel 标题行
+│   │   ├── 首次审批: "允许 {toolName} 执行？"（蓝色图标）
+│   │   ├── 危险命令: "⚠️ 危险操作"（红色图标，不可跳过）
+│   │   └── 关键操作: "确认 {操作类型}？"（黄色图标）
+│   ├── CENTER: JTextPane（只读）
+│   │   ├── 说明行（如"Code Assistant 将执行: rm -rf /path"）
+│   │   └── 代码块展示完整命令/参数
+│   └── SOUTH: JPanel(FlowLayout.RIGHT) 按钮行
+│       ├── [允许一次] — 执行本次，下次再弹（默认按钮）
+│       ├── [允许此会话] — 仅首次审批场景，会话内后续不弹
+│       ├── [拒绝] — 不执行，ToolCallCard → REJECTED
+│       └── 危险命令无"允许此会话"按钮
+├── 超时: 无超时（CountDownLatch 永久等待）
+│   └── Agent 状态保持 AWAITING_APPROVAL，Agent Loop 阻塞在 latch.await()
+└── 生命周期: dispose() 时必须 countDown() 释放 latch，防止 EDT 死锁
+```
+
+**审批触发规则：**
+
+| 场景         | 触发条件                                                | 审批类型           |
+|------------|-----------------------------------------------------|----------------|
+| 首次工具使用     | 每个会话每种工具首次调用                                        | 首次审批（可"允许此会话"） |
+| Shell 危险命令 | `rm -rf /`, `git push --force`, `sudo`, `chmod 777` | 危险命令确认（不可跳过）   |
+| 公共 API 变更  | editFile/writeFile 修改 `public`/`open` 方法签名          | 关键操作确认（⏳ 规划中）  |
+| 大范围修改      | 同一 turn 修改 ≥5 个文件                                   | 关键操作确认（⏳ 规划中）  |
+| 文件删除       | runShell 含 `rm ` 且目标在项目内                            | 关键操作确认（⏳ 规划中）  |
+
+---
+
 ## 三、messageBus 事件契约
 
 | Topic                   | 消息类型              | 字段                                                                     | 发布者            | 订阅者                    |
@@ -728,15 +817,16 @@ ChatInputArea.enterPressed()
     → AgentSession.addMessage(USER, userContent)
     → AgentSession.setState(PROCESSING)
     → AgentLoop.run(userContent)
-        → 构建 params：
-            system = SystemPromptBuilder.build(toolRegistry, skillManager)
-            messages = session.messages + [userContent]
-            tools = toolRegistry.toToolDefinitions()
-        → compactIfNeeded(messages, modelContextLimit)  // 估算 token 数，超过 80% 阈值 → 压缩旧消息为摘要
-            → 如触发压缩：独立 API 调用（不带 tools, max_tokens=1024）生成摘要
-            → session.messages = [摘要消息, ...近期原文(≥2轮)]
-            → SessionStore.save()
         → while (turn < maxTurns && !cancelled):
+            → 构建 params：
+                system = SystemPromptBuilder.build(toolRegistry, skillManager)
+                messages = session.messages       // 每轮从 session.messages 重建
+                tools = toolRegistry.toToolDefinitions()
+            → compactIfNeeded(system, messages, tools, modelContextLimit)  // 估算实际总 token（system + messages + tools），超 80% 阈值则压缩 messages
+                → 如触发压缩：独立 API 调用（不带 tools, max_tokens=1024）生成摘要
+                → session.messages = [摘要消息, ...近期原文(≥2轮)]
+                → 重建 params.messages = session.messages
+                → SessionStore.save()
             → client.messages().createStreaming(params)
               .forEach { chunk →
                 when (chunk):
@@ -794,6 +884,8 @@ ChatViewModel.sendMessage("/plan 重构 UserService", ...)
   → PlanExecutor.resumeNextStep()
     → 获取 nextStep (currentStepIndex 对应的 PENDING step)
     → 构建 stepPrompt: "执行步骤: {step.description}。文件: {step.files}。工具: {step.tool}"
+    → stepPrompt 上下文仅含：上一步 toolResult + 当前 step 定义 + Plan summary
+    → 跳过所有 planFreeChat=true 的消息
     → AgentLoop.run(stepPrompt)
     → 更新 step.status + step.result + step.fileStamps
     → currentStepIndex++
@@ -812,6 +904,7 @@ ChatViewModel.sendMessage("/plan 重构 UserService", ...)
   "title": "重构 UserService",
   "createdAt": "2026-06-24T14:30:00Z",
   "updatedAt": "2026-06-24T14:45:00Z",
+  "systemPromptVersion": 1,
   "messages": [
     {
       "id": "msg-1",
@@ -848,7 +941,7 @@ ChatViewModel.sendMessage("/plan 重构 UserService", ...)
     "id": "plan-1",
     "status": "PAUSED",
     "summary": "重构 UserService.findById 为 suspend 函数",
-    "currentStep": 1,
+    "currentStepIndex": 1,
     "steps": [
       {
         "id": "step-1",
@@ -940,8 +1033,8 @@ AppSettingsService（SettingsConfigurable 读写）
 ├── apiKey: String                               // PasswordSafe 存储
 ├── model: String = "deepseek-v4-pro"            // 下拉选择（V4 Flash / V4 Pro）
 ├── completionEnabled: Boolean = true             // 代码补全开关
-├── prompt: String                                // Commit message 模板（{diff} 占位）
-├── maxAgentTurns: Int (default 15, 0=不限)       // Agent 最大轮次
+├── commitPrompt: String                          // Commit 消息模板（{diff} 占位）
+├── maxAgentTurns: Int                      // 最大轮次，默认 15。0 时内部转为 Int.MAX_VALUE（不限轮次）
 └── maxConcurrentAgents: Int (default 3)          // 多 Agent 并发上限
 ```
 
@@ -1045,8 +1138,10 @@ systemContent = [
   基础 System Prompt（8.1 节原文，变量替换 projectName/projectBasePath/currentFileName）,
 
   "## 可用工具\n" + ToolRegistry.generateToolDescriptions(),
-  // 每个工具的 name + JSON Schema（由 Anthropic SDK 的 @JsonClassDescription 自动生成）
-  // 示例格式: "- readFile(filePath: string, startLine?: int, endLine?: int): 读取项目内指定文件的内容"
+  // 每个工具的 name + JSON Schema（由 Anthropic SDK 的 @JsonClassDescription 自动生成）。
+  // 工具描述中必须包含上限声明，示例格式:
+  // "- readFile(filePath: string, startLine?: int, endLine?: int, timeout: int): 读取项目内指定文件的内容。单次最多返回 500 行，超出请用 startLine 分页。"
+  // 上限声明规则见 2.3 ToolRegistry > 工具描述中的上限声明。
 
   SkillManager.getSystemPromptExtension(),
   // "## 可用 Skills\n- code-review: 审查代码质量 (触发词: review, 审查)\n- refactor: 重构代码 (触发词: 重构, refactor)"
@@ -1101,6 +1196,24 @@ fun buildContext(
 
 **去重规则：** 同一文件既被 @file 引用（完整文件）又被选中（部分行）→ attachments 列表中去掉选中引用，只保留完整文件引用，但在
 header 中附加行号提示 `[File: UserService.kt — 用户关注行 40-60]`。
+
+### 8.4 System Prompt 版本兼容
+
+System Prompt 会随版本迭代修改。旧 Session 中消息是用旧 prompt 生成的，加载后与新 prompt 混合可能产生行为偏差。
+
+**版本号：** Session JSON 中记录 `systemPromptVersion: Int`，初始值为 1。每次对 8.1 节 Prompt
+内容做实质性修改（非错别字修正）时递增。
+
+**加载兼容策略：**
+
+| 版本差                   | 策略                                                                                            |
+|-----------------------|-----------------------------------------------------------------------------------------------|
+| 相同                    | 正常加载，不做任何处理                                                                                   |
+| Patch 变更（如 1→2，仅增加规则） | 新 prompt + 旧 messages，正常使用。追加一条 system 消息："System Prompt 已更新至 v{new}，新增了 X 规则。"               |
+| Major 变更（如跨越 3 个版本以上） | 加载成功但 toast 提示："对话的 System Prompt 版本较旧(v{old})，已升级至 v{new}。建议开启新会话。" 旧 messages 保留但行为可能不完全一致。 |
+
+**compact 摘要的版本：** compact 生成的摘要消息也记录 `systemPromptVersion`。加载时若摘要版本与当前
+prompt 版本不同，不重新生成摘要（太昂贵），直接用。
 
 ---
 
@@ -1315,8 +1428,6 @@ STDOUT:
 2. {step2.description} — 工具: {step2.tool}, 文件: {step2.files}
 ...
 计划已持久化，按步骤逐步执行，每步完成后暂停确认。
-```
-详情: sub-session #{sessionId}
 ```
 
 **通用约束：**

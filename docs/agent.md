@@ -25,7 +25,7 @@ Mode、多 Agent、Skill 系统和 MCP 外部工具。
 ├──────────────────────────────────────────────────────┤
 │  Tool Layer: ToolRegistry (内置 Tools + MCP Tools)    │
 │  ReadFile/WriteFile/EditFile/RunShell/ListFiles/      │
-│  SearchContent/ReadLints/SpawnAgent                    │
+│  SearchContent/ReadLints/SpawnAgent/CreatePlan          │
 ├──────────────────────────────────────────────────────┤
 │  Provider: AnthropicOkHttpClient → DeepSeek            │
 │  Skill System: SkillManager → SKILL.md 扫描            │
@@ -69,14 +69,14 @@ Mode、多 Agent、Skill 系统和 MCP 外部工具。
 
 Agent 相关设置统一在 **IDE Settings > Tools > Code Assistant** 中管理：
 
-| 配置项           | 默认值               | 说明                      |
-|---------------|-------------------|-------------------------|
-| API Key       | —                 | PasswordSafe 安全存储，显示掩码  |
-| Model         | `deepseek-v4-pro` | 下拉选择（V4 Flash / V4 Pro） |
-| Agent 最大轮次    | 15（0=不限）          | 达到上限后自动终止               |
-| 多 Agent 并发上限  | 3                 | 父 + 子 Agent 总计并发数       |
-| 代码补全          | 启用                | 开关                      |
-| Commit Prompt | 默认模板              | 自定义 commit message 模板   |
+| 配置项          | 默认值               | 说明                      |
+|--------------|-------------------|-------------------------|
+| API Key      | —                 | PasswordSafe 安全存储，显示掩码  |
+| Model        | `deepseek-v4-pro` | 下拉选择（V4 Flash / V4 Pro） |
+| Agent 最大轮次   | 15（0=不限）          | 达到上限后自动终止               |
+| 多 Agent 并发上限 | 3                 | 父 + 子 Agent 总计并发数       |
+| 代码补全         | 启用                | 开关                      |
+| Commit 消息模板  | 默认模板              | 自定义 commit message 模板   |
 
 ### 快捷键
 
@@ -103,11 +103,35 @@ UNSET ──saveKey()──→ VALIDATING ──200──→ VALID
 保存 Key 后**乐观导航**立即跳转 Chat，验证在后台继续。VALID 静默通过，INVALID → toast "API Key 无效"
 ，UNKNOWN → toast "网络不可用"。
 
+### API 错误处理
+
+| 错误类型  | HTTP 状态码              | 处理策略                                                                                                          |
+|-------|-----------------------|---------------------------------------------------------------------------------------------------------------|
+| 认证失败  | 401                   | 不重试，状态 → INVALID，toast "API Key 无效"                                                                           |
+| 速率限制  | 429                   | 读取 `Retry-After` header（秒），暂停当前请求。如 header 缺失则默认等 30s。Agent 状态 → PAUSED（可恢复），显示倒计时。连续 3 次 429 → 建议用户降低并发或切换模型 |
+| 服务器错误 | 5xx                   | 退避重试：1s → 3s → 9s，最多 3 次。3 次均失败 → ERROR                                                                       |
+| 网络超时  | 无响应                   | 退避重试：2s → 5s → 10s，最多 3 次。3 次均超时 → UNKNOWN，已渲染内容保留 + 标注 `[连接中断]`                                              |
+| 请求体过大 | 400（context too long） | 不重试，强制触发 compact 后重发。compact 后仍过大 → 提示用户减少上下文                                                                 |
+
+**PAUSED vs ERROR 的区别：** 可自动恢复的场景（429、网络瞬时中断）用 PAUSED——Agent
+等待后自动继续，不需要用户手动 [重试]。不可自动恢复的（401、compact 后仍过大）用 ERROR——需要用户介入。
+
+**连续错误升级规则：**
+
+| 条件                       | 动作                                          |
+|--------------------------|---------------------------------------------|
+| 同一 tool call 连续 3 次失败    | 提示"该操作连续失败 3 次，建议跳过或手动处理"，LLM 应放弃该操作        |
+| 同一 Session 内累计 5 个 ERROR | 弹出提示"已出现多个错误，建议使用 /plan 拆分任务"               |
+| API 4xx 错误（401/403 除外）   | 不自动重试，直接 ERROR                              |
+| 网络错误（超时/DNS）             | 最多自动重试 3 次（退避：2s → 5s → 10s），3 次均失败 → ERROR |
+| 连续 3 次 429               | 建议用户降低并发或切换模型，Agent → PAUSED                |
+
 ## 三、Agent Loop（核心逻辑）
 
 ```
-while (turn < maxTurns && !cancelled):
-  ├─ compactIfNeeded()                             ← 每次 API 请求前检查
+val effectiveMaxTurns = if (maxTurns == 0) Int.MAX_VALUE else maxTurns  // 0=不限，内部转为最大值
+while (turn < effectiveMaxTurns && !cancelled):
+  ├─ compactIfNeeded(system, messages, tools, modelLimit) ← 估算实际总 token，超 modelLimit × 0.8 阈值则压缩 messages
   ├─ if (turn >= maxTurns * 0.6):                  ← 轮次预警（规划中）
   │    附加系统提示"已执行 N 轮，评估剩余工作量"
   ├─ client.messages().createStreaming(params)    ← OkHttp, background
@@ -132,21 +156,29 @@ while (turn < maxTurns && !cancelled):
   ├─ params.add(toolUses + toolResults)           ← 追加到消息
   ├─ turn++
   │
-stop: cancelled → client.close() + runningProcesses.forEach { destroyForcibly() }
+stop: cancelled → 按[第十三节清理顺序](#十三项目关闭清理)逐步关闭（先等待子 Agent 3s → 等 WriteCommandAction 5s → client.close() → destroyForcibly()）
 ```
 
-### 8 个工具（对齐 Claude Code 能力集）
+### 9 个工具（含 createPlan ⏳ 规划中，对齐 Claude Code 能力集）
 
-| 工具              | 对应 Claude | 实现                   | 说明                      |
-|-----------------|-----------|----------------------|-------------------------|
-| `readFile`      | Read      | PSI/VFS              | 读文件内容，支持行范围             |
-| `writeFile`     | Write     | WriteCommandAction   | 覆盖写入整个文件                |
-| `editFile`      | Edit      | WriteCommandAction   | 精确字符串替换（old→new）        |
-| `runShell`      | Bash      | GeneralCommandLine   | Shell 命令，超时由 LLM 传入（必填） |
-| `listFiles`     | Glob      | VFS + FilenameIndex  | 目录结构 + 文件名模式匹配          |
-| `searchContent` | Grep      | PsiSearchHelper + 正则 | 项目内文本搜索                 |
-| `readLints`     | —         | IDE Inspections      | 读取当前文件的 errors/warnings |
-| `spawnAgent`    | Task      | AgentLoop 复用         | 启动子代理处理子任务              |
+| 工具              | 对应 Claude | 实现                   | 说明                                                            | LLM 事前知晓上限         |
+|-----------------|-----------|----------------------|---------------------------------------------------------------|--------------------|
+| `readFile`      | Read      | PSI/VFS              | 读文件内容，支持行范围                                                   | 单次 ≤ 500 行，超出需分页   |
+| `writeFile`     | Write     | WriteCommandAction   | 覆盖写入整个文件                                                      | 内容 ≤ 3000 行        |
+| `editFile`      | Edit      | WriteCommandAction   | 精确字符串替换（old→new）                                              | newString ≤ 3000 行 |
+| `runShell`      | Bash      | GeneralCommandLine   | Shell 命令，timeout 必填（默认 120s，LLM 按需调整）                         | 输出 ≤ 200 行         |
+| `listFiles`     | Glob      | VFS + FilenameIndex  | 目录结构 + 文件名模式匹配                                                | ≤ 200 条目           |
+| `searchContent` | Grep      | PsiSearchHelper + 正则 | 项目内文本搜索                                                       | ≤ 50 条匹配           |
+| `readLints`     | —（扩展工具）   | IDE Inspections      | 读取当前文件的 errors/warnings（非 Claude Code 原生能力，Code Assistant 扩展） | ≤ 50 条诊断           |
+| `spawnAgent`    | Task      | AgentLoop 复用         | 启动子代理处理子任务                                                    | 结果摘要 ≤ 2000 tokens |
+
+> **双重告知：** 每个工具的上限同时在工具描述中声明（事前，LLM 调用前通过 JSON Schema 的 description
+> 字段知晓）和返回值截断标注中体现（事后，详见下方截断策略表）。两者不可互相替代——事前防止误判，事后确保发现遗漏。工具描述中的上限声明规范见 [
+`tech-spec.md` 2.3](tech-spec.md#23-toolregistry)。
+
+**工具执行顺序：** 同一轮中 LLM 可能返回多个 `tool_use`。**按 LLM 返回的顺序串行执行**
+，不并行。前一个工具的结果会立即追加到 `params.messages`，后续工具可以看到前面工具的执行结果。LLM
+应通过返回顺序控制执行依赖（如先 `readFile` 后 `editFile`）。
 
 ### 工具返回结果截断策略
 
@@ -160,9 +192,13 @@ stop: cancelled → client.close() + runningProcesses.forEach { destroyForcibly(
 | `editFile`/`writeFile` | 写入 ≤ 3000 行         | 超过拒绝并返回错误                   |
 | `spawnAgent`           | 返回 ≤ 2000 tokens 摘要 | 完整结果保存到子 session            |
 
+> 事前上限声明（工具 description 中的文字）见 [`tech-spec.md` 2.3](tech-spec.md#23-toolregistry)，Token
+> 估算策略见 [`tech-spec.md` 第十节](tech-spec.md#十token-估算统一策略)。
+
 ### Shell 安全
 
-- 无硬性超时（LLM 自行判断并在 tool call 时传入）
+- timeout 参数必填（秒），默认值 120s。LLM 可根据命令类型调整（编译类 300s，简单命令 30s）。0=不限，System
+  Prompt 要求 LLM 必须传非 0 值
 - 实时流式输出 → batch 100ms → invokeLater 更新 UI（防 EDT 洪水）
 - 工作目录限定项目根
 - 危险模式二次确认：`rm -rf /`、`git push --force`、`sudo`、`chmod 777`（不可跳过）
@@ -173,9 +209,9 @@ LLM 输出被 max_tokens 截断时，自动发送 "继续" 消息续写：
 
 ```
 "max_tokens" → 自动追加 user message "继续" → continue while
-  - "继续"不持久化（仅临时在 params.messages 中）
+  - "继续"不持久化（仅临时在 params.messages 中）。Session 加载时检测最后一条 assistant 消息：若 `stop_reason="max_tokens"` 且消息内容不完整（无 `end_turn`），自动注入一条 system 消息 "继续" 触发续写。
   - 不计入 turn 计数
-  - 最多连续续写 5 次
+  - 最多连续续写 5 次（每次续写都检查 stop_reason，避免死循环）
 ```
 
 ### 流式输出中断处理
@@ -221,7 +257,29 @@ IDLE ──sendMessage()──→ PROCESSING ──LLM 返回输出──→ IDL
 | CANCELLED         | 用户中断，清理中                        |
 | ERROR             | API 调用失败或 tool 执行异常             |
 
+**瞬态持久化规则：** `CANCELLED` 和 `ERROR` 不写入 Session JSON。Session 加载时若发现最后持久化的状态为
+CANCELLED 或 ERROR（崩溃场景），自动重置为 IDLE。`PROCESSING` / `AWAITING_APPROVAL` / `EXECUTING` /
+`PAUSED` 持久化，IDE 重启后可恢复。
+
+### 对话回退
+
+用户右键某条消息 → "从此处重试"：
+
+- 删除该消息**之后**的所有消息（含选中的那条的回复链）
+- 保留选中消息之前的历史
+- 从选中消息重新发送到 LLM
+- 回退后的消息不立即删除（标记 `deleted: true`），用户可通过"撤销回退"恢复
+
+Plan Mode 中已有单步重试（`[↻ 重试]`），不适用此机制。
+
 ## 五、Plan Mode
+
+### 职责边界
+
+- **PlanCard**：纯 UI 组件，负责渲染计划状态 + 按钮交互。按钮点击通过回调委托给 `PlanExecutor`，不直接修改
+  Plan 状态。
+- **PlanExecutor**：负责所有 Plan 状态转换和执行逻辑。持有 `AgentLoop` 引用，通过 `resumeNextStep()` /
+  `retryStep()` / `skipStep()` / `abortPlan()` 控制流程。
 
 ### 计划卡片
 
@@ -246,11 +304,36 @@ Step N 执行完 → 自动暂停
 - **暂停时可自由聊天**：消息追加到同一 Session
 - **计划持久化**：跨会话保留，关闭 IDE 再打开可恢复
 
+### Plan 暂停期间的消息隔离
+
+暂停期间用户发送的消息标记为 `planFreeChat: true`，与 Plan 执行步骤的消息区分：
+
+```
+消息标记规则：
+  Step 执行中的消息 → Agent 自动发送，planFreeChat=false
+  暂停期间用户手动输入 → planFreeChat=true
+  暂停期间 Agent 回复 → planFreeChat=true（与用户消息成对）
+```
+
+**下一步执行时的上下文构建：**
+
+| 包含                            | 不包含         |
+|-------------------------------|-------------|
+| 上一步的 toolResult               | 暂停期间的自由聊天消息 |
+| Plan 原始 steps 列表              | —           |
+| 当前 step 的 description + files | —           |
+
+自由聊天消息不会污染 Plan 后续步骤的上下文。PlanExecutor 构建 step prompt 时只取上一步 toolResult +
+当前 step 定义，跳过所有 `planFreeChat=true` 的消息。但自由聊天消息**仍然持久化**到 Session，用户可在
+Plan 完成后回看。
+
+**恢复后自由聊天消息的处理：** Plan 执行完后（COMPLETED/CANCELLED），`planFreeChat` 标记不再有意义，后续消息均视为普通对话。
+
 ### Plan 恢复边界处理
 
 | 场景             | 行为                                      |
 |----------------|-----------------------------------------|
-| Step 引用文件已删除   | 标记 ERROR，等待用户决定                         |
+| Step 引用文件已删除   | 标记 ERROR，用户可选 [重试] / [跳过] / [手动修复后继续]   |
 | Step 引用文件被外部修改 | 检查 `modificationStamp` → 提示 diff → 用户决定 |
 | 用户修改了后续步骤      | 持久化到 `plan.modifiedSteps`               |
 | 多个会话各有暂停计划     | 允许，每个独立存储                               |
@@ -262,7 +345,7 @@ Step N 执行完 → 自动暂停
   "plan": {
     "status": "PAUSED",
     "summary": "将 UserService.findById 改为 suspend",
-    "currentStep": 2,
+    "currentStepIndex": 1,
     "steps": [
       {
         "id": "step-1",
@@ -347,6 +430,15 @@ System Prompt。
 | 计划准确性 | LLM 凭用户描述猜测 | LLM 已读代码，步骤更精准   |
 | 用户体验  | 需要用户知道何时用   | 全自动，用户无感         |
 
+## Plan Step 工具自由度
+
+Step 的 `tool` 字段是**建议**而非**约束**。LLM 可以：
+
+- 调用预期之外的工具（如 step 预期 `editFile` 但 LLM 先 `readFile` 确认内容）
+- 访问 `step.files` 之外的文件（需用 `listFiles` 确认路径后 `readFile`）
+
+但 LLM 应在 step result 中说明偏离建议的原因。
+
 **工具描述提示词（供 LLM 理解何时使用）：**
 > 当任务涉及 3 个以上文件或预计需要 5 轮以上完成时，在执行关键修改前先调用 createPlan
 > 创建执行计划。创建后按计划步骤逐步执行，每步完成后标记状态。
@@ -377,8 +469,45 @@ System Prompt。
 - **并发控制**：`Semaphore(3)` 限制全局最大并发（父 + 子总计）
 - **文件写锁**：`ConcurrentHashMap<VirtualFile, ReentrantLock>`（所有 Agent 共享）
 - **递归限制**：最多 1 层嵌套（子不可再 spawn 孙）
-- **结果摘要**：≤ 2000 tokens 写入父的 toolResult
+- **结果摘要**：≤ 2000 tokens 写入父的 toolResult。摘要 = 子 Agent 最后一轮 assistant 消息 + 所有 tool
+  call 结果原文拼接，截断到 2000 tokens。不额外调用 LLM 生成摘要。
 - **子 Session**：独立持久化（`session.parentId` 关联）
+
+### 子 Agent UI 呈现
+
+子 Agent 在父面板中以**内联折叠块**形式展示：
+
+1. spawnAgent ToolCallCard：
+  - 头部显示 "🤖 子 Agent: {taskSummary}" + 状态（PENDING → EXECUTING → DONE）
+  - 折叠面板内：子 Agent 流式文本实时追加（30ms batch flush）、子 ToolCallCard 嵌套展示（可折叠）、错误红色标注
+  - 底部显示耗时 + "详情: sub-session #{sessionId}"（点击跳转 SessionsPage）
+
+2. 实时渲染：
+  - 子 Agent 流式输出追加到父面板的 SpawnAgentToolCallCard 中，不新建独立面板
+  - 父 Agent 暂停等待子 Agent 结果（子 Agent 完成前父 Agent 不再发起新请求）
+
+3. SessionsPage 父子关联：
+  - SessionIndex 添加 `parentId: String?` 字段
+  - 子 Session 在列表中缩进 + `└─` 前缀展示
+  - 点击子 Session 打开只读历史面板
+
+### Agent 间通信规则
+
+```
+父 Agent
+  ├─ spawnAgent(taskA) → 子 Agent A
+  │     └─ 返回 resultA → 父 Agent
+  ├─ spawnAgent(taskB) → 子 Agent B
+  │     └─ 返回 resultB → 父 Agent
+  └─ 父 Agent 汇总 resultA + resultB → 继续执行
+```
+
+- **v1 规则**：子 Agent 之间**禁止直接通信**。所有协调通过父 Agent——父 Agent spawn 子 Agent →
+  收集结果 → 决定是否 spawn 更多子 Agent。
+- **并发建议**：默认串行（一次只 spawn 一个子 Agent，等结果回来后决定下一个）。LLM 在确定任务完全独立时才并行
+  spawn（最多 3 个）。
+- **文件修改通知**：子 Agent 修改文件后，父 Agent 从 toolResult 中获知文件变更。父 Agent 应主动
+  `readFile` 获取最新状态后再传递给其他子 Agent。
 
 ### 文件写入并发控制
 
@@ -392,6 +521,18 @@ System Prompt。
 - 写入流程：Jackson → `.tmp` → `Files.move(ATOMIC_MOVE)` → `FileChannel.tryLock()` OS 级排他锁
 - 读取容错：`JsonParseException` → 跳过；`FileNotFoundException` → 从 index 移除
 
+### 会话导出（v1）
+
+Sessions 页面提供"导出"按钮，将 Session JSON 转换为 Markdown 对话记录：
+
+- 用户消息 → `### 用户` + 原文
+- Agent 文本 → 原文（含 Markdown 格式）
+- Tool call → `<details><summary>🔧 {toolName}</summary>\n\n```\n{result}\n```\n</details>`
+- 错误 → `> ⚠️ 错误: {content}`
+- 导出文件命名：`{session.title}-{date}.md`
+
+会话合并/拆分标记为 v2。
+
 ### Session Index
 
 ```json
@@ -403,6 +544,7 @@ System Prompt。
     "updatedAt": "2026-06-24T14:45:00Z",
     "messageCount": 12,
     "totalTokens": 8200,
+    // totalTokens = inputTokens + outputTokens，取 API usage 返回值累加
     "toolCallCount": 5,
     "hasActivePlan": true
   }
@@ -418,9 +560,24 @@ System Prompt。
 从所有 session 文件的 `totalTokens` 聚合 → 按会话/日/月三种视图 → sparkline 趋势图（Custom JComponent
 手绘，30 天按日折线）。
 
-## 八、上下文自动压缩（Auto-Compact）
+## 八、上下文管理
 
-当消息历史 token 数超过模型上下文窗口的 **80%** 时（1M × 0.8 = 800K tokens），自动压缩旧消息。
+### Token 预算感知（轻量）
+
+System Prompt 中动态追加一行 Token 使用情况，让 LLM 主动控制输出长度：
+
+```
+当前上下文: 已用 ~N% (约 X / Y tokens)。如接近上限，请精简输出、减少不必要的 tool call。
+```
+
+- 显示阈值：实际 token > 模型上限的 50% 时开始显示
+- 超过 80% 时措辞升级为"⚠️ 上下文即将耗尽，请立即收尾"
+- 不阻断 Agent Loop，仅作为上下文提示
+
+### Auto-Compact（上下文自动压缩）
+
+当**实际总 token**（System Prompt + messages + Tools）超过模型上下文窗口的 **80%** 时（1M × 0.8 = 800K
+tokens），自动压缩 `session.messages` 中的旧消息。
 
 ### 超长任务的三层防线
 
@@ -434,11 +591,34 @@ System Prompt。
 
 ### 压缩策略
 
-1. 保留最近 N 条消息原文（`N = max(4, messages.size / 3)`，至少保留最后 2 轮）
+1. 保留最近 N 条消息原文。`N = max(保留最近 2 轮的消息数, ceil(messages.size / 3))`。"保留最近 2 轮"
+   是硬下限——即使 `messages.size` 很大，最近 2 轮（至少 4 条：user + assistant × 2）也绝不压缩
 2. 早期消息 → 独立 API 调用生成摘要（不带 tools，`max_tokens=1024`）
 3. 摘要插入消息列表头部，替换被压缩消息
 4. 多次压缩时，之前摘要参与新一轮压缩（幂等）
 5. Plan 摘要注入压缩 prompt，确保计划上下文不丢失
+
+### 压缩范围
+
+`compactIfNeeded()` 基于**实际总 token** 判断是否触发压缩：
+
+```
+实际总 token = System Prompt + session.messages + Tools 定义
+触发条件: 实际总 token > modelContextLimit × 0.8 (= 800K)
+```
+
+触发后**只压缩 `session.messages`**（将旧消息替换为摘要），System Prompt 和 Tools 定义保持不变。
+
+| 组成部分               | 是否被 compact 压缩 | 是否每次重建                                          | 说明                                         |
+|--------------------|----------------|-------------------------------------------------|--------------------------------------------|
+| `session.messages` | ✅ 会（超阈值时）      | 否，持久化保留                                         | 唯一被压缩的部分                                   |
+| System Prompt      | ❌ 不会           | 是，每次 `SystemPromptBuilder.build()`              | 含基础角色 + 工具使用原则 + 防幻觉规则 + 复杂度判断等            |
+| Tools 定义           | ❌ 不会           | 是，每次从 `ToolRegistry.generateToolDescriptions()` | 每个工具的 JSON Schema + 上限声明                   |
+| Skill 注入正文         | ✅ 会参与压缩        | 否，仅首条消息时注入一次                                    | 压缩时保留 Skill 关键约束（name/command/核心规则），丢弃示例代码 |
+
+**Skill 注入的特殊情况：** 用户 `/command` 触发的 SKILL.md 正文以 System Prompt 前缀形式注入。Skill
+正文也参与 compact——压缩时将 Skill 正文的关键约束（name、command、核心规则）与 messages 一起生成摘要。摘要保留
+Skill 的关键行为要求。建议 Skill 正文控制在 2000 tokens 以内以减少压缩频率。
 
 ### Token 估算（统一策略）
 
@@ -523,7 +703,7 @@ CONFIGURED → INITIALIZING (握手 5s 超时) → RUNNING
 
 - CRASHED → 等 2s 自动重启 1 次。再次崩溃 → CRASHED（需手动 [重连]）
 - DISCONNECTED → 每 5s 自动重连（最多 10 次）
-- INITIALIZING → 退避重试：2s → 5s → 10s → 15s...，最多 3 分钟
+- INITIALIZING → 退避重试：2s → 5s → 10s → 15s...，最多 3 分钟。超时 → INIT_ERROR，需用户手动 [重连]
 - Server 工具通过 `tools/list` 获取，注册到 `ToolRegistry`
 - 同名工具加前缀 `serverName/toolName`，内置工具优先级高于 MCP 工具
 - v1 不支持 `resources/list` 和 `prompts/list`
@@ -561,7 +741,11 @@ CONFIGURED → INITIALIZING (握手 5s 超时) → RUNNING
 
 ### 思考过程
 
-DeepSeek V4 `reasoning_content` 以折叠块展示（默认收起），浅橙背景 `#FFF8F0`，不持久化。
+DarkSeek V4 `reasoning_content` 以折叠块展示（默认收起），浅橙背景 `#FFF8F0`，不持久化。
+
+### 颜色主题
+
+亮/暗双主题通过 `AppColors` 令牌统一管理。完整色板定义见 [`ui-ux-spec.md`](ui-ux-spec.md)。
 
 ### 工具调用卡片（8 状态）
 
@@ -604,17 +788,27 @@ CANCELLED。
 | 代码字体      | `JetBrains Mono, PLAIN, 13`（降级 `Monospaced`） |
 | TabBar 按钮 | 44×32 px，高亮 `Color(100, 140, 220)` 底边框 2px   |
 
+### 用户反馈
+
+每条 assistant 消息右下角附加 👍/👎 按钮：
+
+- 点击后记录到 Session JSON 对应消息的 `feedback: "positive" | "negative"` 字段
+- 不影响当前对话流程，无额外 UI 弹窗
+- v1 仅收集，不做自动分析。后续可用于评估 Agent 输出质量
+
 ## 十二、messageBus 事件总线
 
-| Topic                   | 消息类型                                 | 发布者            | 订阅者                    |
-|-------------------------|--------------------------------------|----------------|------------------------|
-| `SessionChanged`        | sessionId + CREATED/UPDATED/DELETED  | SessionManager | SessionsPage, ChatPage |
-| `AgentStateChanged`     | newState (IDLE/PROCESSING/...)       | AgentSession   | ChatPage, TabBar       |
-| `TokenUsageUpdated`     | sessionId + delta                    | AgentSession   | TokenUsagePage         |
-| `McpServerStateChanged` | serverId + newState                  | McpManager     | McpPage                |
-| `ApiKeyValidated`       | VALID/INVALID/UNKNOWN                | WelcomePage    | ChatPage, SettingsPage |
-| `PlanStateChanged`      | sessionId + planStatus + currentStep | PlanExecutor   | ChatPage, SessionsPage |
-| `PageSwitched`          | from + to (PageId)                   | ChatToolWindow | 所有 Page                |
+| Topic                   | 发布者            | 订阅者                    |
+|-------------------------|----------------|------------------------|
+| `SessionChanged`        | SessionManager | SessionsPage, ChatPage |
+| `AgentStateChanged`     | AgentSession   | ChatPage, TabBar       |
+| `TokenUsageUpdated`     | AgentSession   | TokenUsagePage         |
+| `McpServerStateChanged` | McpManager     | McpPage                |
+| `ApiKeyValidated`       | WelcomePage    | ChatPage, SettingsPage |
+| `PlanStateChanged`      | PlanExecutor   | ChatPage, SessionsPage |
+| `PageSwitched`          | ChatToolWindow | 所有 Page                |
+
+> 完整字段定义和消息类型见 [`tech-spec.md` 第三节](tech-spec.md#三messagebus-事件契约)。
 
 ## 十三、项目关闭清理
 
@@ -632,14 +826,7 @@ CANCELLED。
 
 ## 十四、配置项汇总
 
-| 配置项           | 默认值               | 说明                |
-|---------------|-------------------|-------------------|
-| API Key       | —                 | PasswordSafe 安全存储 |
-| Model         | `deepseek-v4-pro` | V4 Flash / V4 Pro |
-| Agent 最大轮次    | 15（0=不限）          | 达到上限自动终止          |
-| 多 Agent 并发上限  | 3                 | 父 + 子总计           |
-| 代码补全          | 启用                | 独立开关              |
-| Commit Prompt | 默认模板              | `{diff}` 占位符      |
+> 同 [第二节 IDE Settings](#二多页面架构)，此处仅做索引。详细配置说明见第二节配置表格。
 
 ## 十五、防止 LLM 幻觉
 
@@ -666,19 +853,9 @@ LLM 会产生几种典型幻觉：**凭空编造文件路径和 API**、**基于
 
 ### 15.2 加强方案
 
-#### 方案一：System Prompt 反幻觉指令（零成本，立刻生效）
+#### 方案一：System Prompt 反幻觉指令（零成本 ✅ 已实施）
 
-在 System Prompt 中显式加入：
-
-> ```
-> ## 防止幻觉
->
-> 1. 绝不编造不存在的 API、类名、方法名。引用任何 API 前必须通过 readFile 或 searchContent 确认其真实存在。
-> 2. 不确定文件是否存在时，先用 listFiles 或 readFile 确认，不要假设路径。
-> 3. 修改代码前必须用 readFile 读取目标区域的真实内容，不要凭记忆或猜测。
-> 4. Shell 命令执行后，先检查退出码和 stderr，再根据实际结果（而非预期结果）决定下一步。
-> 5. 如果信息不足，主动说明"我需要先读取 X 文件来确认"，而不是猜测。
-> ```
+> 已实施于 [`tech-spec.md` 8.1](tech-spec.md#81-agent-基础-system-prompt) System Prompt 的「防止幻觉」段落。
 
 #### 方案二：文件路径 VFS 校验
 
@@ -942,7 +1119,12 @@ editFile 成功后
 
 #### 方案二：方案自检清单（System Prompt 追加）
 
-每次提出修改方案前（在回复中或 Plan 创建前），Agent 自问以下问题并在回复中简要说明：
+每次提出修改方案前，满足以下**任一条件**时 Agent 在回复中简要自检（一行即可）：
+
+**触发条件：** 涉及 3 个以上文件 或 新增/删除方法签名（`fun`/`def`/`function`）或 创建新文件 或 Plan
+Mode 执行中。单文件微调（如修改变量名、加注释）不触发。
+
+Agent 自问以下问题：
 
 > 1. **模式对齐**：项目里有没有类似实现可以参考？我是否遵循了？
 > 2. **最简单方案**：有没有更简单的写法？我是否过度设计了？
@@ -1010,15 +1192,41 @@ readFile 返回 UserService.kt
   └─ 用户最终审查（Diff 可视化）      ← 第十六节方案三
 ```
 
-### 17.5 三个维度的正确性对比
+### 17.5 四维防线总图
 
-|      | 代码正确性（第十六节）  | 方案正确性（本节）      | 防幻觉（第十五节）     |
-|------|--------------|----------------|---------------|
-| 问的问题 | 改对了吗？        | 方案对吗？          | 说的是真的吗？       |
-| 关注点  | 编译通过、测试通过    | 架构合理、风格一致      | 不编造 API/路径    |
-| 典型错误 | 类型错误、NPE     | 过度设计、破坏性修改     | 捏造不存在的类名      |
-| 防御时机 | 修改后          | 修改前            | 全过程           |
-| 关键手段 | 自动 readLints | Plan 审查 + 同类参考 | 精确匹配 + VFS 校验 |
+以下是全部四套"三层"体系的统一视图。按时间轴对齐：**执行前 → 执行中 → 执行后**。
+
+| 防线层次      | 时间点 | 防幻觉（第十五节）                                                 | 代码正确性（第十六节）                                       | 方案正确性（第十七节）                        | 超长任务（第八节）                              |
+|-----------|-----|-----------------------------------------------------------|---------------------------------------------------|------------------------------------|----------------------------------------|
+| **第 1 层** | 执行前 | **事前预防**：System Prompt 反幻觉指令 + 复杂度判断                      | **Agent 自检**：System Prompt 自检指令                   | **方案合理性**：Plan 审查 + 方案设计原则 + 自检清单  | **预防**：LLM 自动规划 / System Prompt 复杂度自判  |
+| **第 2 层** | 执行中 | **事前硬约束**：readFile 前置 + VFS 校验 + editFile 精确匹配 + stamp 校验 | **Agent 主动验证**：修改后自动 readLints + 编译/测试 + 影响范围分析   | —（方案正确性只有事前和事后）                    | **预警**：轮次预警（turn ≥ maxTurns × 0.6 时提示） |
+| **第 3 层** | 执行后 | **事后纠偏**：Shell 输出强化标注 + 工具结果自检反馈环 + 截断标注                  | **用户审查**：Diff 可视化 + Plan 逐步暂停 + ToolCallCard 前后对比 | **审查兜底**：AI 代码审查 + 用户最终审查 + 关键操作确认 | **兜底**：Auto-Compact（800K tokens 阈值压缩）  |
+
+```
+时间轴：  执行前                 执行中                 执行后
+         ├──────────────────────┼──────────────────────┤
+防幻觉    │ 事前预防              │ 事前硬约束             │ 事后纠偏
+         │ (Prompt 指令)        │ (VFS/精确匹配/stamp)  │ (输出标注/反馈环)
+         ├──────────────────────┼──────────────────────┤
+代码正确性 │ Agent 自检           │ Agent 主动验证         │ 用户审查
+         │ (Prompt 自检指令)     │ (自动 lint/编译/测试)   │ (Diff 可视化/Plan)
+         ├──────────────────────┼──────────────────────┤
+方案正确性 │ 方案合理性            │ (无 — 方案在执行前      │ 审查兜底
+         │ (Plan 审查/同类参考)   │  就决定了)            │ (AI Review/用户审查)
+         ├──────────────────────┼──────────────────────┤
+超长任务   │ 预防                 │ 预警                  │ 兜底
+         │ (LLM 自动规划)        │ (轮次预警)             │ (Auto-Compact)
+         └──────────────────────┴──────────────────────┘
+```
+
+**各维度的核心问题：**
+
+| 维度    | 问的问题    | 典型错误       | 关键防御           |
+|-------|---------|------------|----------------|
+| 防幻觉   | 说的是真的吗？ | 捏造 API/路径  | 精确匹配 + VFS 校验  |
+| 代码正确性 | 改对了吗？   | 类型错误、NPE   | 自动 readLints   |
+| 方案正确性 | 方案对吗？   | 过度设计、破坏性修改 | Plan 审查 + 同类参考 |
+| 超长任务  | 会跑飞吗？   | 无限循环、上下文溢出 | Auto-Compact   |
 
 ### 17.6 推荐实施路径
 
@@ -1030,7 +1238,20 @@ readFile 返回 UserService.kt
 | 4   | 同类代码自动参考             | AgentLoop 工具结果增强 | 减少风格不一致               |
 | 5   | AI 代码审查              | 独立 API 调用        | 独立视角兜底                |
 
-> 方案 1+2 零成本立即可做，方案 3 防御面广性价比高，方案 4+5 是系统性优化。
+> 方案 1+2 零成本立即可做，方案 3 防御面广性价比高，方案 4+5 是系统性优化。方案 5（AI
+> 代码审查）虽排最后但独特价值在于"独立视角"——Agent 自己发现不了的问题，另一个不带 tools 的小模型可能会发现。建议在方案
+> 2（自动 readLints）落地后优先实施。
+
+### 独立评估（AI Code Review）
+
+每次 Agent 任务完成（`end_turn`）后，自动用独立 API 调用做轻量代码审查：
+
+- 独立 API 调用：不带 tools，`max_tokens=512`，system prompt = "你是代码审查专家"
+- 输入：当前 Session 中所有 `editFile`/`writeFile` 的 diff 聚合
+- 关注：风格不一致、过度设计、可能破坏的调用者、可复用的已有工具
+- 输出：仅报告有问题的地方。无问题则输出"无问题"
+- 结果以系统消息追加到对话，Agent 可以在下一轮修正
+- 不阻塞流程（审查结果作为参考信息呈现）
 
 ## 十八、已知限制
 
