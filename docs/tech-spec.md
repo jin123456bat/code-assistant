@@ -9,7 +9,7 @@
 ```
 com.aiassistant/
 ├── agent/
-│   ├── ToolModels.kt          // 8 个 Tool 数据类 + @JsonClassDescription 注解
+│   ├── ToolModels.kt          // 13 个 Tool 数据类（8 个内置 + 5 个计划）+ @JsonClassDescription 注解
 │   ├── ToolInput.kt           // 工具输入参数类
 │   ├── ToolRegistry.kt        // 工具注册中心
 │   ├── ToolExecutor.kt        // 工具执行分发器（when 路由）
@@ -35,7 +35,7 @@ com.aiassistant/
 │   ├── MessageBus.kt          // 事件总线
 │   ├── SelectionListener.kt   // 编辑器选中监听
 │   ├── OpenChatAction.kt      // 快捷键 Action
-│   ├── page/                  // 7 个 Page
+│   ├── page/                  // 8 个 Page 文件（含 PlaceholderPage 占位，运行时仅 7 个页面可见）
 │   │   ├── WelcomePage.kt
 │   │   ├── ChatPage.kt
 │   │   ├── SessionsPage.kt
@@ -76,11 +76,13 @@ AgentLoop
 ├── isRunning: Boolean
 ├── currentState: AgentState            // 从 AgentSession 读取
 ├── compactIfNeeded(system: String, messages: List, tools: String, modelLimit): Boolean
-│                         // 估算实际总 token = system + messages + tools。超过 compactThreshold × modelLimit 则压缩
-├── compactThreshold: Double = 0.8      // 触发压缩的上下文使用率阈值（基于实际总 token，对齐 Claude Code）
+│                         // 估算实际总 token = system + messages + tools。超过 compactThreshold × modelLimit 则压缩。
+│                         // compact 后 Skill 正文从磁盘重新注入，@file 文件内容不重新注入（LLM 应通过 Read 重新读取）
+├── compactThreshold: Double = 0.7      // 触发压缩的上下文使用率阈值。选 0.7：token 估算误差 ±20%，最坏低估时 0.7/0.8=87.5% 仍在 1M 窗口内；若设 0.8 则最坏已达 100%
 ├── modelContextLimit: Int = 1_000_000  // 模型上下文窗口大小（DeepSeek V4 的 1M tokens，写死）
-├── maxAutoContinue: Int = 5            // max_tokens 自动续写最大次数，防止死循环
+├── maxAutoContinue: Int = 5            // max_tokens 自动续写最大次数（单轮内连续续写链长度），防止死循环
 ├── autoContinueMessage: String = "继续" // max_tokens 时自动发送的续写消息
+├── continueStreak: Int = 0              // 当前轮内续写链已执行次数，end_turn 后归零
 ├── turnWarningRatio: Double = 0.6      // ⏳ 规划中：轮次预警触发比例（turn >= maxTurns * ratio 时附加系统提示）
 └── turnWarningMessage: String          // ⏳ 规划中：轮次预警文本模板
 ```
@@ -90,7 +92,7 @@ AgentLoop
 - `run()` 在 `ApplicationManager.executeOnPooledThread()` 上执行（非 EDT）
 - 流式 token 通过 `Flow<AgentEvent>.collect()` 接收，在 collector 处 `invokeLater` 切到 EDT
 - `cancel()` 可在任意线程调用
-- WriteFile 内部通过 `invokeAndWait` 切到 EDT
+- Write 内部通过 `invokeAndWait` 切到 EDT
 
 **约束：**
 
@@ -105,17 +107,17 @@ AgentLoop
 fun annotateToolResult(toolName: String, result: ToolResult): String {
     val hints = mutableListOf<String>()
     when (toolName) {
-        "readFile" -> if (result.content.contains("不存在")) hints += "提示：文件不存在，请确认路径是否正确。不要假设文件内容。"
-        "searchContent" -> {
-            if (result.content.contains("未找到匹配")) hints += "提示：未找到匹配。不要假设代码存在，考虑用 listFiles 确认文件位置。"
+        "Read" -> if (result.content.contains("不存在")) hints += "提示：文件不存在，请确认路径是否正确。不要假设文件内容。"
+        "Grep" -> {
+            if (result.content.contains("未找到匹配")) hints += "提示：未找到匹配。不要假设代码存在，考虑用 Glob 确认文件位置。"
             if (result.content.contains("已截断")) hints += "提示：搜索结果已截断，可能有遗漏。如需修改代码，建议先用更精确的关键词确认范围。"
         }
-        "runShell" -> {
+        "Bash" -> {
             if (result.exitCode != 0) hints += "⚠️ 命令执行失败。请分析错误原因后决定下一步，不要忽略此错误继续执行。"
             if (!result.stderr.isNullOrEmpty()) hints += "⚠️ 命令有错误输出，请检查 stderr 内容。"
         }
         "readLints"   -> if (result.content.contains("错误:")) hints += "⚠️ 文件存在编译错误。请先解决这些错误再继续修改代码。"
-        "listFiles"   -> if (result.content.contains("已截断")) hints += "提示：目录列表已截断。如果你在找特定文件，建议用更精确的路径缩小范围。"
+        "Glob"   -> if (result.content.contains("已截断")) hints += "提示：目录列表已截断。可用 dirPath/maxDepth 缩小范围，或使用 offset 参数翻页获取更多条目。"
     }
     return if (hints.isNotEmpty()) result.content + "\n\n" + hints.joinToString("\n") else result.content
 }
@@ -136,7 +138,9 @@ AgentSession
 ├── state: AgentState
 ├── plan: Plan?                       // 关联的计划（最多一个）
 ├── runningProcesses: Set<ProcessHandle>  // 当前会话的 Shell 进程
-├── filesReadThisTurn: Set<String>        // ⏳ 规划中：当前 turn 中已读取的文件路径，用于 readFile 前置校验
+├── filesReadThisTurn: Set<String>        // ⏳ 规划中：当前 turn 中已读取的文件路径，用于 Read 前置校验
+├── compactSummary: String?               // compact 后的对话摘要，null 表示未执行过 compact
+├── compactCount: Int = 0                 // 已执行 compact 的次数
 │
 ├── addMessage(msg: Message)
 ├── setState(newState: AgentState)
@@ -146,7 +150,7 @@ AgentSession
 ├── rollbackTo(messageId: String)         // 回退：标记 messageId 之后的消息 deleted=true，保留之前历史
 └── totalTokens: TokenUsage                // 输入/输出 token 累计
 
-AgentState = IDLE | PROCESSING | AWAITING_APPROVAL | EXECUTING | PAUSED | CANCELLED | ERROR
+AgentState = IDLE | PROCESSING | AWAITING_APPROVAL | EXECUTING | CANCELLED | ERROR | PAUSED
 
 Message:
 ├── id: String
@@ -155,8 +159,6 @@ Message:
 ├── timestamp: Instant
 ├── toolCalls: List<ToolCallRecord>?   // ASSISTANT 消息可能含工具调用
 ├── tokenUsage: TokenDelta?            // ASSISTANT 消息的 token 消耗
-├── feedback: String?                  // 用户反馈 "positive" | "negative"，仅 ASSISTANT 消息
-├── planFreeChat: Boolean = false      // Plan 暂停期间的自由聊天消息标记，PlanExecutor 构建 step prompt 时跳过
 ├── feedback: String?                  // 用户反馈 "positive" | "negative"，仅 ASSISTANT 消息
 └── deleted: Boolean = false           // 回退标记，true 时持久化保留但 UI 不渲染。撤销回退时恢复为 false
 
@@ -184,17 +186,17 @@ ToolRegistry
 └── toToolDefinitions(): List<String>  // 转为工具名称列表
 
 ToolInfo (ToolRegistry 内部类):
-├── name: String                       // readFile, writeFile, ...
+├── name: String                       // Read, Write, ...
 ├── description: String                // LLM 看到的工具描述，**必须包含上限声明**
 └── usage: String                      // 使用示例
 
 工具数据类 (ToolModels.kt):
-  9 个 @JsonClassDescription 注解的 data class（含 createPlan ⏳ 规划中），通过 SDK toolFromClass() 生成 JSON Schema。
+  8 个内置工具 @JsonClassDescription 注解的 data class + 5 个计划任务管理工具（createPlan/listTasks/deleteTask/reorderTasks/markTaskDone），通过 SDK toolFromClass() 生成 JSON Schema。
   工具执行分发 → ToolExecutor.kt 通过 when(toolName) 路由。
 
 ToolInput.kt:
   存放每个工具的参数基类/接口（如 ToolInput 接口，定义 timeout 公共字段）。
-  8 个具体 ToolInput 数据类（ReadFileInput / WriteFileInput / ...），各带 @JsonClassDescription。
+  8 个具体 ToolInput 数据类（ReadInput / WriteInput / ...），各带 @JsonClassDescription。
   Anthropic SDK 通过 toolFromClass() 将 ToolInput 类转为 JSON Schema。
   与 ToolModels.kt 的关系：ToolModels.kt 存放工具元数据（名称/描述/上限），ToolInput.kt 存放参数定义。
 ```
@@ -204,58 +206,66 @@ ToolInput.kt:
 每个工具的 `description` 字段必须包含返回值上限，让 LLM **事前知道**限制，而非仅靠事后截断标注。各工具
 description 应包含的上限声明：
 
-| 工具              | description 中应包含的上限声明                                                                                        |
-|-----------------|--------------------------------------------------------------------------------------------------------------|
-| `readFile`      | `单次最多返回 500 行。如果文件行数超过此限制，返回内容会被截断，请使用 startLine 参数分页读取剩余内容。`                                                |
-| `searchContent` | `最多返回 50 条匹配。如果匹配数超过此限制，结果会被截断，请使用更精确的搜索词缩小范围。`                                                              |
-| `listFiles`     | `最多返回 200 个条目（文件+目录）。如果超出此限制，结果会被截断，请使用 dirPath 和 maxDepth 缩小范围。`                                            |
-| `runShell`      | `最多返回 200 行输出（stdout+stderr）。如果超出此限制，传给 LLM 的内容会被截断，完整输出保留在 IDE 工具卡片中。timeout 参数由 LLM 根据命令类型自行判断传入（秒），0=不限。` |
-| `readLints`     | `最多返回 50 条诊断，按 severity 排序（ERROR > WARNING > INFO）。如果超出此限制，低严重度诊断可能不显示。`                                     |
-| `editFile`      | `newString 最多 3000 行。超过此限制的操作会被拒绝。`                                                                          |
-| `writeFile`     | `内容最多 3000 行。超过此限制的操作会被拒绝。`                                                                                  |
-| `spawnAgent`    | `子 Agent 结果摘要最多 2000 tokens。完整执行过程保存为独立 Session。`                                                            |
+| 工具             | description 中应包含的上限声明                                                                                        |
+|----------------|--------------------------------------------------------------------------------------------------------------|
+| `Read`         | `单次最多返回 500 行。如果文件行数超过此限制，返回内容会被截断，请使用 startLine 参数分页读取剩余内容。`                                                |
+| `Grep`         | `最多返回 50 条匹配。如果匹配数超过此限制，结果会被截断，请使用更精确的搜索词缩小范围。`                                                              |
+| `Glob`         | `最多返回 50 个条目（文件+目录）。如果超出此限制，结果会被截断并在返回值中标注。请用 dirPath/maxDepth 缩小范围，或用 offset 参数翻页获取更多条目。`                   |
+| `Bash`         | `最多返回 200 行输出（stdout+stderr）。如果超出此限制，传给 LLM 的内容会被截断，完整输出保留在 IDE 工具卡片中。timeout 参数由 LLM 根据命令类型自行判断传入（秒），0=不限。` |
+| `readLints`    | `最多返回 50 条诊断，按 severity 排序（ERROR > WARNING > INFO）。如果超出此限制，低严重度诊断可能不显示。`                                     |
+| `Edit`         | `newString 最多 3000 行。超过此限制的操作会被拒绝。`                                                                          |
+| `Write`        | `内容最多 3000 行。超过此限制的操作会被拒绝。`                                                                                  |
+| `Task`         | `子 Agent 结果摘要最多 2000 tokens。完整执行过程保存为独立 Session。`                                                            |
+| `createPlan`   | `创建执行计划，最多 20 步。计划创建后自动开始执行，LLM 可用 listTasks/deleteTask/reorderTasks 管理。`                                    |
+| `listTasks`    | `查看当前计划的所有步骤及状态，无参数。`                                                                                        |
+| `deleteTask`   | `删除指定步骤（仅 PENDING/ERROR 状态可删）。`                                                                              |
+| `reorderTasks` | `重排剩余 PENDING 步骤的执行顺序，传入新的 stepId 序列。`                                                                       |
+| `markTaskDone` | `将指定步骤标记为 DONE（PENDING/EXECUTING/ERROR 状态均可标记）。LLM 确认步骤已通过其他方式完成时调用。`                                        |
 
 > **双重告知原则：** 上限同时存在于工具描述（事前，LLM 调用前就知道）和返回值截断标注（事后，LLM
 > 拿到结果后确认）。两者不可互相替代——事前告知防止误判，事后标注确保发现遗漏。
 
 **执行分发（每个 AgentTool 内部）：**
 
-- ReadFile / ListFiles / SearchContent / ReadLints → Background Thread
-- WriteFile / EditFile → `invokeAndWait { WriteCommandAction }`
-- RunShell → Background Thread（`ProcessHandler` + 实时 `onOutput` 回调）
-- SpawnAgent → `MultiAgentManager.spawn()`
+- Read / Glob / Grep / ReadLints → Background Thread
+- Write / Edit → `invokeAndWait { WriteCommandAction }`
+- Bash → Background Thread（`ProcessHandler` + 实时 `onOutput` 回调）
+- Task → `MultiAgentManager.spawn()`
+- CreatePlan / ListTasks / DeleteTask / ReorderTasks / MarkTaskDone → `PlanExecutor`（计划任务管理）
 
 **超时机制：** 每个工具都包含必填的 `timeout` 参数（秒），由 LLM 在 tool call 时传入。
-0=不限。RunShell 超时时强制 `destroyForcibly()` 终止进程。其他 I/O 工具的 timeout
+0=不限。Bash 超时时强制 `destroyForcibly()` 终止进程。其他 I/O 工具的 timeout
 由 ToolExecutor 统一读取，目前作为安全兜底（操作通常很快完成）。
 
 **文件操作前置校验（⏳ 规划中）：**
 
 `ToolExecutor` 在执行文件操作工具前做前置校验，防止 LLM 幻觉导致非法操作：
 
-| 校验项 | 适用工具 | 规则 |
-|--------|---------|------|
-| 文件存在性 | `readFile`、`editFile`（非新建） | VFS 中不存在 → 拒绝执行，返回错误 |
-| readFile 前置 | `editFile`、`writeFile`（覆盖模式） | 当前 turn 中该文件未被 `readFile` 过 → 拒绝执行，返回 `"请先用 readFile 读取 {filePath} 后再修改"` |
-| modificationStamp | `editFile`、`writeFile`（覆盖模式） | 文件 stamp 与上次 `readFile` 时不一致 → 拒绝执行，返回 `"文件已被外部修改"` |
+| 校验项               | 适用工具                 | 规则                                                                |
+|-------------------|----------------------|-------------------------------------------------------------------|
+| 文件存在性             | `Read`、`Edit`（非新建）   | VFS 中不存在 → 拒绝执行，返回错误                                              |
+| Read 前置           | `Edit`、`Write`（覆盖模式） | 当前 turn 中该文件未被 `Read` 过 → 拒绝执行，返回 `"请先用 Read 读取 {filePath} 后再修改"` |
+| modificationStamp | `Edit`、`Write`（覆盖模式） | 文件 stamp 与上次 `Read` 时不一致 → 拒绝执行，返回 `"文件已被外部修改"`                   |
 
 **校验失败恢复规则：** 每种拒绝返回的错误消息中自带恢复指引，Agent Loop 不自动重试。LLM
 需根据错误消息中的指引自行决定下一步：
 
-| 校验失败类型      | 错误消息中的指引                            | LLM 的恢复动作                                    |
-|-------------|-------------------------------------|----------------------------------------------|
-| 文件不存在       | `"提示：使用 listFiles 查看目录结构"`          | 用 `listFiles` 确认路径后重新调用                      |
-| readFile 前置 | `"请先用 readFile 读取 {filePath} 后再修改"` | 调用 `readFile` 读取文件后重新 `editFile`/`writeFile` |
-| stamp 不匹配   | `"请使用 readFile 重新读取文件后再试"`          | 调用 `readFile` 获取最新内容和 stamp 后重新修改            |
+| 校验失败类型    | 错误消息中的指引                        | LLM 的恢复动作                        |
+|-----------|---------------------------------|----------------------------------|
+| 文件不存在     | `"提示：使用 Glob 查看目录结构"`           | 用 `Glob` 确认路径后重新调用               |
+| Read 前置   | `"请先用 Read 读取 {filePath} 后再修改"` | 调用 `Read` 读取文件后重新 `Edit`/`Write` |
+| stamp 不匹配 | `"请使用 Read 重新读取文件后再试"`          | 调用 `Read` 获取最新内容和 stamp 后重新修改    |
 
 **约束：**
 - 文件存在性校验在 `ToolExecutor` 分发前执行（统一入口）
-- `readFile` 前置校验依赖 `AgentSession` 维护的 `filesReadThisTurn: Set<String>`，每次 `readFile` 成功时追加，每个 turn 开始时清空
-- `modificationStamp` 校验已有实现，此处补充 `readFile` 前置校验
+- `Read` 前置校验依赖 `AgentSession` 维护的 `filesReadThisTurn: Set<String>`，每次 `Read` 成功时追加，每个
+  turn 开始时清空
+- `modificationStamp` 校验已有实现，此处补充 `Read` 前置校验
 
 **修改后自动 `readLints`（⏳ 规划中）：**
 
-`editFile` 或 `writeFile` 成功执行后，`ToolExecutor` 自动对被修改文件静默运行 `readLints`，将诊断结果追加到 tool result 中：
+`Edit` 或 `Write` 成功执行后，`ToolExecutor` 自动对被修改文件静默运行 `readLints`，将诊断结果追加到
+tool result 中：
 
 | 结果 | 行为 |
 |------|------|
@@ -270,7 +280,7 @@ description 应包含的上限声明：
 
 **回归测试智能提示（⏳ 规划中）：**
 
-`editFile`/`writeFile` 成功后，根据文件路径附加测试建议：
+`Edit`/`Write` 成功后，根据文件路径附加测试建议：
 
 | 修改文件路径模式 | 附加提示 |
 |-----------------|---------|
@@ -280,7 +290,8 @@ description 应包含的上限声明：
 
 **改动影响范围分析（⏳ 规划中）：**
 
-`editFile`/`writeFile` 成功后，若修改涉及方法名/类名变更（通过简单正则匹配 `fun/class/val/var` 后的标识符变更），自动 `searchContent` 搜索该标识符在项目中的引用，结果追加提示：
+`Edit`/`Write` 成功后，若修改涉及方法名/类名变更（通过简单正则匹配 `fun/class/val/var` 后的标识符变更），自动
+`Grep` 搜索该标识符在项目中的引用，结果追加提示：
 
 ```
 {oldSymbol} 在 N 个文件中仍有引用: file1.kt:30, file2.kt:55...
@@ -291,26 +302,26 @@ description 应包含的上限声明：
 
 对以下高影响操作，`ToolExecutor` 在执行前将 Agent 状态切换为 `AWAITING_APPROVAL`，弹出确认对话框：
 
-| 操作类型 | 触发条件 | 确认提示 |
-|---------|---------|---------|
-| 公共 API 变更 | `editFile`/`writeFile` 修改了方法签名（检测 `fun ` 行变更）且文件被 ≥3 个其他文件引用 | `将修改公共方法 {methodName}。searchContent 发现 N 处引用。确认执行？` |
-| 新增依赖 | `editFile`/`writeFile` 在 `build.gradle.kts` 中新增 `implementation(...)` 行 | `将在构建配置中新增依赖。确认？` |
-| 大范围修改 | 同一 turn 中累计修改 ≥5 个文件 | `本 turn 已修改 M 个文件。是否继续？建议考虑用 /plan 拆分。` |
-| 删除文件 | `runShell` 命令中包含 `rm ` 且目标在项目目录内 | `将删除文件 {path}。确认？`（已有危险命令确认，此处补充文件路径识别） |
+| 操作类型      | 触发条件                                                            | 确认提示                                       |
+|-----------|-----------------------------------------------------------------|--------------------------------------------|
+| 公共 API 变更 | `Edit`/`Write` 修改了方法签名（检测 `fun ` 行变更）且文件被 ≥3 个其他文件引用            | `将修改公共方法 {methodName}。Grep 发现 N 处引用。确认执行？` |
+| 新增依赖      | `Edit`/`Write` 在 `build.gradle.kts` 中新增 `implementation(...)` 行 | `将在构建配置中新增依赖。确认？`                          |
+| 大范围修改     | 同一 turn 中累计修改 ≥5 个文件                                            | `本 turn 已修改 M 个文件。是否继续？建议考虑用 /plan 拆分。`    |
+| 删除文件      | `Bash` 命令中包含 `rm ` 且目标在项目目录内                                    | `将删除文件 {path}。确认？`（已有危险命令确认，此处补充文件路径识别）    |
 
 **约束：** 关键操作确认复用现有审批 UI（`CountDownLatch` + Dialog），与 Shell 危险命令确认共用同一机制。确认无超时，等待用户手动处理。
 
 **同类代码自动参考（⏳ 规划中）：**
 
-`readFile` 成功返回后，Agent Loop 自动分析文件特征并附加风格参考：
+`Read` 成功返回后，Agent Loop 自动分析文件特征并附加风格参考：
 
 ```
-readFile 工具执行成功后
+Read 工具执行成功后
   → 分析文件特征（缩进风格、命名模式、检测到的框架/工具类）
   → 用 FilenameIndex 找同目录下同扩展名的其他文件（取 Top-3）
   → tool result 底部追加:
      "📋 风格参考: 该文件使用 {indent} 缩进，方法名 {naming}。
-      同目录类似文件: {sibling1}, {sibling2}, {sibling3}（可用 readFile 查看）"
+      同目录类似文件: {sibling1}, {sibling2}, {sibling3}（可用 Read 查看）"
 ```
 
 LLM 在修改这个文件前就有了明确的风格参照，减少风格不一致的方案错误。
@@ -431,42 +442,39 @@ ToolCallCard
 ├── setRejected()                          // 用户拒绝审批
 ├── setCancelled()                         // 用户取消
 ├── isExpanded: Boolean                    // 折叠/展开
-├── renderDiff(oldText: String, newText: String)  // ⏳ 规划中：editFile 成功后渲染可视化 Diff
+├── renderDiff(oldText: String, newText: String)  // ⏳ 规划中：Edit 成功后渲染可视化 Diff
 │                                               //   用 SimpleDiff（LCS 算法），ADD 绿色/DEL 红色/CTX 灰色
 └── 渲染: JPanel (带状态图标 + 参数折叠 + 结果滚动区 + 可视化 Diff + 底部耗时)
 
 PlanCard
 ├── 构造: PlanCard(plan: Plan)
 ├── setStepState(stepId: String, state: StepState)   // 更新单步状态
-├── onResumeRequested: (() -> Unit)?                 // [▶] 回调
-├── onRetryRequested: ((stepId: String) -> Unit)?     // [↻] 回调
-├── onSkipRequested: ((stepId: String) -> Unit)?     // [⏭] 回调
-├── onAbortRequested: (() -> Unit)?                  // [✕] 回调
 ├── setCurrentStepIndex(index: Int)                  // 高亮当前步骤
-└── 渲染: JPanel (计划摘要 + 步骤列表 + 操作按钮)
-// createPlan 逻辑在 PlanExecutor.createPlanFromTool()，PlanCard 仅负责 UI 渲染和按钮回调
+├── onTaskDeleted: ((stepId: String) -> Unit)?       // 用户删除单步回调 → PlanExecutor.deleteTask()
+└── 渲染: JPanel (计划摘要 + 步骤列表，单步行末 [✕] 仅 PENDING 和 ERROR 状态可见)
+// PlanCard 仅负责 UI 展示和单步删除入口。不提供继续/重试/跳过/取消等全局按钮。
+// 计划任务管理由 LLM 通过 listTasks/deleteTask/reorderTasks 工具自主完成。
 ```
 
 ---
 
 ### 2.7 PlanExecutor
 
-**职责：** 计划执行器——生成计划、管理步骤执行、持久化。操作通过 PlanCard 内联按钮触发。
+**职责：** 计划执行器——生成计划、自动执行步骤、持久化。所有步骤自动连续执行，无需用户手动推进。
 
-**生命周期：** 计划与 Agent 同步——Agent end_turn 时计划自动暂停，Agent 继续时计划自动恢复。
+**生命周期：** 创建计划后自动开始，逐步执行直到全部完成或全部步骤被删除。
 
-**双重入口：** Plan 可通过两种方式创建——用户手动 `/plan` 命令，或 LLM 通过 `createPlan` 工具主动创建（⏳ 规划中）。两者触发 `generatePlan()` 流程一致，区别仅在于 LLM 主动创建时已通过 readFile 了解项目现状，计划更准确。详见 [`docs/agent.md` 第五节 > LLM 自动判断并创建计划](../docs/agent.md#llm-自动判断并创建计划规划中)。
+**入口：** 用户 `/plan` 命令 或 LLM 通过 `createPlan` 工具主动创建。两者触发 `generatePlan()` 流程一致。
 
 ```
 PlanExecutor
 ├── 构造: PlanExecutor(session: AgentSession, agentLoop: AgentLoop)
-├── generatePlan(task: String): Plan       // /plan 或 createPlan 工具 → LLM 输出 → 4 层解析 → Plan
-├── createPlanFromTool(task: String, steps: List<PlanStepInput>): Plan  // ⏳ 规划中：LLM 通过 createPlan 工具主动创建
-├── deletePlan()                           // [✕ 删除] 仅未开始（全 PENDING）时可调用
-├── resumeNextStep(): StepResult           // [▶ 继续] 或 Agent 恢复时自动触发
-├── retryStep(stepId: String): StepResult  // [↻ 重试]
-├── skipStep(stepId: String)               // [⏭ 跳过]
-├── abortPlan()                            // [✕ 取消计划]
+├── generatePlan(task: String): Plan       // /plan 或 createPlan → LLM 输出 → 4 层解析 → Plan
+├── createPlanFromTool(task: String, steps: List<PlanStepInput>): Plan  // LLM 通过 createPlan 工具主动创建
+├── executeNextStep(): StepResult          // 自动执行下一步，完成后自动继续
+├── deleteTask(stepId: String)             // 用户或 LLM 删除单步（仅 PENDING/ERROR），剩余步骤自动继续
+├── reorderTasks(stepIds: List<String>)    // LLM 重排剩余 PENDING 步骤顺序
+├── listTasks(): List<PlanStep>            // LLM 查看当前计划状态
 ├── currentPlan: Plan?                     // 当前计划
 │
 └── Plan 解析流程 (4 层):
@@ -477,7 +485,7 @@ PlanExecutor
 
 Plan:
 ├── id: String
-├── status: PAUSED | EXECUTING | COMPLETED | CANCELLED
+├── status: EXECUTING | COMPLETED | CANCELLED
 ├── summary: String                        // 一句话描述
 ├── steps: List<PlanStep>
 ├── currentStepIndex: Int                  // 当前执行到第几步 (0-based)
@@ -487,16 +495,16 @@ Plan:
 PlanStep:
 ├── id: String
 ├── description: String                    // 步骤描述
-├── tool: String                           // 建议工具名。LLM 应优先使用但不强制，可调用其他工具并在 step result 中说明原因
+├── tool: String                           // 建议工具名。LLM 应优先使用但不强制
 ├── files: List<String>                    // 涉及文件（含行号 "UserService.kt:40-60"）
-├── status: PENDING | EXECUTING | DONE | ERROR | SKIPPED | CANCELLED
+├── status: PENDING | EXECUTING | DONE | ERROR | DELETED
 ├── result: String?                        // 执行结果
-├── fileStamps: Map<String, Long>          // 执行前各文件的 modificationStamp
-└── retryCount: Int
+├── retryCount: Int
+└── deletedBy: USER | LLM?                 // 谁删的，null 表示未删除
 
 StepResult:
 ├── stepId: String
-├── status: DONE | ERROR | CANCELLED
+├── status: DONE | ERROR
 ├── output: String                         // LLM 输出
 └── toolCalls: List<ToolCallRecord>        // 该步骤使用的工具调用记录
 ```
@@ -534,6 +542,7 @@ SessionIndex:
 ├── totalTokens: Long
 // totalTokens = inputTokens + outputTokens 累加值，从 API usage 返回值获取
 ├── toolCallCount: Int
+├── parentId: String?                  // 子会话关联父会话 ID，null 表示顶级会话
 └── hasActivePlan: Boolean
 
 TokenAggregation:
@@ -553,7 +562,7 @@ TokenPeriod:
 
 ```
 SkillManager
-├── loadSkills(basePath: Path): List<Skill>    // 扫描 .code-assistant/skills/
+├── loadSkills(basePath: Path): List<Skill>    // 扫描 .code-assistant/skills/、.claude/skills/、~/.claude/skills/、.codex/skills/、~/.codex/skills/。同名 Skill 按 Code-Assistant > Claude > Codex 优先级，同平台项目级优先于用户级，先扫到的覆盖后扫到的。安装 Skill 统一写入 .code-assistant/skills/
 ├── getEnabledSkills(): List<Skill>
 ├── enableSkill(name: String)
 ├── disableSkill(name: String)
@@ -643,7 +652,7 @@ PageId: WELCOME | CHAT | SESSIONS | TOKEN_USAGE | MCP | SKILLS | SETTINGS
 TabBar
 ├── 构造: TabBar(pages: List<PageId>, onSelect: (PageId) -> Unit)
 ├── setSelected(pageId: PageId)
-├── setBadge(pageId: PageId, text: String?)    // 页面标签上的角标（如计划暂停数）
+├── setBadge(pageId: PageId, text: String?)    // 页面标签上的角标（如计划执行中数）
 ├── setEnabled(pageId: PageId, enabled: Boolean)  // Welcome 页面控制导航禁用
 ├── getSelected(): PageId
 └── 渲染: JPanel (FlowLayout, 等宽按钮)
@@ -735,7 +744,7 @@ ApprovalDialog
 │       ├── [允许此会话] — 仅首次审批场景，会话内后续不弹
 │       ├── [拒绝] — 不执行，ToolCallCard → REJECTED
 │       └── 危险命令无"允许此会话"按钮
-├── 超时: 无超时（CountDownLatch 永久等待）
+├── 超时: 无超时（CountDownLatch 永久等待。非 bug：Agent Loop 运行在后台线程池，阻塞不占 EDT；审批弹窗是模态 Dialog，用户离开前必须处理。加超时反而引入竞态——超时后 Agent 继续执行但用户可能刚好回来点了批准）
 │   └── Agent 状态保持 AWAITING_APPROVAL，Agent Loop 阻塞在 latch.await()
 └── 生命周期: dispose() 时必须 countDown() 释放 latch，防止 EDT 死锁
 ```
@@ -746,9 +755,9 @@ ApprovalDialog
 |------------|-----------------------------------------------------|----------------|
 | 首次工具使用     | 每个会话每种工具首次调用                                        | 首次审批（可"允许此会话"） |
 | Shell 危险命令 | `rm -rf /`, `git push --force`, `sudo`, `chmod 777` | 危险命令确认（不可跳过）   |
-| 公共 API 变更  | editFile/writeFile 修改 `public`/`open` 方法签名          | 关键操作确认（⏳ 规划中）  |
+| 公共 API 变更  | Edit/Write 修改 `public`/`open` 方法签名                  | 关键操作确认（⏳ 规划中）  |
 | 大范围修改      | 同一 turn 修改 ≥5 个文件                                   | 关键操作确认（⏳ 规划中）  |
-| 文件删除       | runShell 含 `rm ` 且目标在项目内                            | 关键操作确认（⏳ 规划中）  |
+| 文件删除       | Bash 含 `rm ` 且目标在项目内                                | 关键操作确认（⏳ 规划中）  |
 
 ---
 
@@ -781,9 +790,9 @@ ApprovalDialog
 │ ApplicationManager.executeOnPooledThread()                │
 │  ├─ AgentLoop.run()                                      │
 │  ├─ ToolRegistry 非 EDT 工具执行                         │
-│  │   ├─ ReadFile / ListFiles / SearchContent / ReadLints │
-│  │   ├─ RunShell (ProcessHandler, listener 在 bg thread) │
-│  │   └─ SpawnAgent → 新 AgentLoop                        │
+│  │   ├─ Read / Glob / Grep / ReadLints │
+│  │   ├─ Bash (ProcessHandler, listener 在 bg thread) │
+│  │   └─ Task → 新 AgentLoop                        │
 │  ├─ SessionStore.save() (JSON 写入)                      │
 │  └─ McpManager 连接/握手                                  │
 ├─────────────────────────────────────────────────────────┤
@@ -791,7 +800,7 @@ ApprovalDialog
 │  └─ ChatBubbleRenderer 30ms batch flush                  │
 ├─────────────────────────────────────────────────────────┤
 │ ProcessHandler listener                                  │
-│  └─ RunShell onTextAvailable → batch buffer → Timer(100ms)│
+│  └─ Bash onTextAvailable → batch buffer → Timer(100ms)│
 │                                                    → EDT │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -800,8 +809,9 @@ ApprovalDialog
 
 - Background → UI：`ApplicationManager.invokeLater { ... }` 或 `SwingUtilities.invokeLater { ... }`
 - UI → Background：`ApplicationManager.executeOnPooledThread { ... }`
-- UI 等待 Background：`invokeAndWait` 用于 WriteFile/EditFile
-- Background 等待 UI：`CountDownLatch` 用于审批弹窗（无超时，等待用户操作）
+- UI 等待 Background：`invokeAndWait` 用于 Write/Edit
+- Background 等待 UI：`CountDownLatch` 用于审批弹窗（无超时——Agent Loop 在后台线程，不阻塞
+  EDT；审批弹窗模态，用户必响应；加超时反而引入竞态风险）
 - 流式批量 flush：Swing Timer 在 EDT 上合并连续 token
 
 ---
@@ -818,11 +828,12 @@ ChatInputArea.enterPressed()
     → AgentSession.setState(PROCESSING)
     → AgentLoop.run(userContent)
         → while (turn < maxTurns && !cancelled):
+            → turn++  // 所有 API 调用统一计数（含续写），在循环顶部执行
             → 构建 params：
                 system = SystemPromptBuilder.build(toolRegistry, skillManager)
                 messages = session.messages       // 每轮从 session.messages 重建
                 tools = toolRegistry.toToolDefinitions()
-            → compactIfNeeded(system, messages, tools, modelContextLimit)  // 估算实际总 token（system + messages + tools），超 80% 阈值则压缩 messages
+            → compactIfNeeded(system, messages, tools, modelContextLimit)  // 估算实际总 token（system + messages + tools），超 70% 阈值则压缩 messages
                 → 如触发压缩：独立 API 调用（不带 tools, max_tokens=1024）生成摘要
                 → session.messages = [摘要消息, ...近期原文(≥2轮)]
                 → 重建 params.messages = session.messages
@@ -837,8 +848,13 @@ ChatInputArea.enterPressed()
                   MessageStop →
                     when (stopReason):
                       "end_turn"       → emit(TurnCompleted(usage)) → 退出 while
-                      "max_tokens"     → params.messages += UserMessage("继续") → continue while
-                                         （不持久化"继续"，不计入 turn 计数，最多连续 5 次）
+                      "max_tokens"     → continueStreak++
+                                         if (continueStreak > maxAutoContinue):
+                                           emit Error + 退出 while
+                                         else:
+                                           params.messages += UserMessage("继续") → continue while
+                                         （续写计入 turn：turn++ 在 while 顶部统一执行，对所有请求一视同仁。
+                                         "继续"不持久化，仅当前会话生命周期内有效，重启 IDE 后不自动续写）
                       "stop_sequence"  → emit(TurnCompleted(usage)) → 退出 while（尾部标注）
               }
             → for each toolUse:
@@ -853,7 +869,6 @@ ChatInputArea.enterPressed()
                   ToolCallCard.setState(DONE/ERROR)
                   emit(ToolCallCompleted(name, result))
                   params = params.add(toolCallResult)
-            → turn++
 
     → 流式中断处理：
         主动停止（Escape）:
@@ -878,18 +893,21 @@ ChatViewModel.sendMessage("/plan 重构 UserService", ...)
     → AgentLoop.run("plan-request:" + task)  // 生成计划
     → parsePlan(llmOutput)  // 4 层解析
     → PlanCard 渲染
-    → Plan 状态 = PAUSED
+    → 自动开始执行
 
-用户点击 PlanCard [▶ 继续]
-  → PlanExecutor.resumeNextStep()
-    → 获取 nextStep (currentStepIndex 对应的 PENDING step)
-    → 构建 stepPrompt: "执行步骤: {step.description}。文件: {step.files}。工具: {step.tool}"
-    → stepPrompt 上下文仅含：上一步 toolResult + 当前 step 定义 + Plan summary
-    → 跳过所有 planFreeChat=true 的消息
-    → AgentLoop.run(stepPrompt)
-    → 更新 step.status + step.result + step.fileStamps
-    → currentStepIndex++
-    → 自动 PAUSED → 等待用户操作
+PlanExecutor.executeNextStep() 自动循环:
+  → 获取 nextStep (currentStepIndex 对应的 PENDING step)
+  → 构建 stepPrompt: "执行步骤: {step.description}。文件: {step.files}。工具: {step.tool}"
+  → AgentLoop.run(stepPrompt)
+  → 更新 step.status + step.result
+  → currentStepIndex++
+  → 自动继续执行下一步（无暂停）
+  → 全部完成 → PlanCard 消失
+
+LLM 通过工具管理计划:
+  listTasks()    → 查看步骤状态
+  deleteTask(id) → 删除 PENDING/ERROR 步骤，执行时自动跳过
+  reorderTasks([id...]) → 重排 PENDING 步骤顺序
 ```
 
 ---
@@ -901,6 +919,7 @@ ChatViewModel.sendMessage("/plan 重构 UserService", ...)
 ```json
 {
   "id": "uuid",
+  "parentId": null,
   "title": "重构 UserService",
   "createdAt": "2026-06-24T14:30:00Z",
   "updatedAt": "2026-06-24T14:45:00Z",
@@ -920,7 +939,7 @@ ChatViewModel.sendMessage("/plan 重构 UserService", ...)
       "toolCalls": [
         {
           "id": "tooluse-1",
-          "name": "readFile",
+          "name": "Read",
           "parameters": {
             "filePath": "UserService.kt",
             "startLine": null,
@@ -939,33 +958,32 @@ ChatViewModel.sendMessage("/plan 重构 UserService", ...)
   ],
   "plan": {
     "id": "plan-1",
-    "status": "PAUSED",
+    "status": "EXECUTING",
     "summary": "重构 UserService.findById 为 suspend 函数",
     "currentStepIndex": 1,
     "steps": [
       {
         "id": "step-1",
         "description": "读取 UserService.kt",
-        "tool": "readFile",
+        "tool": "Read",
         "files": [
           "UserService.kt:40-60"
         ],
         "status": "DONE",
         "result": "成功读取 156 行",
-        "fileStamps": {
-          "UserService.kt": 123456
-        },
-        "retryCount": 0
+        "retryCount": 0,
+        "deletedBy": null
       },
       {
         "id": "step-2",
         "description": "修改方法签名为 suspend fun",
-        "tool": "editFile",
+        "tool": "Edit",
         "files": [
           "UserService.kt"
         ],
         "status": "PENDING",
-        "retryCount": 0
+        "retryCount": 0,
+        "deletedBy": null
       }
     ],
     "createdAt": "2026-06-24T14:30:00Z",
@@ -992,7 +1010,8 @@ ChatViewModel.sendMessage("/plan 重构 UserService", ...)
     "messageCount": 12,
     "totalTokens": 8200,
     "toolCallCount": 5,
-    "hasActivePlan": true
+    "hasActivePlan": true,
+    "parentId": null
   }
 ]
 ```
@@ -1034,7 +1053,7 @@ AppSettingsService（SettingsConfigurable 读写）
 ├── model: String = "deepseek-v4-pro"            // 下拉选择（V4 Flash / V4 Pro）
 ├── completionEnabled: Boolean = true             // 代码补全开关
 ├── commitPrompt: String                          // Commit 消息模板（{diff} 占位）
-├── maxAgentTurns: Int                      // 最大轮次，默认 15。0 时内部转为 Int.MAX_VALUE（不限轮次）
+├── maxAgentTurns: Int                      // 最大轮次，默认 20。每轮 = 一次 API 调用（含续写）。0 时内部转为 Int.MAX_VALUE（不限轮次）
 └── maxConcurrentAgents: Int (default 3)          // 多 Agent 并发上限
 ```
 
@@ -1042,7 +1061,8 @@ AppSettingsService（SettingsConfigurable 读写）
 
 ## 八、System Prompt
 
-以下为 `AgentLoop` 构建 `MessageCreateParams` 时使用的 system prompt。**原文直接使用，不可改写。**
+以下为 AgentLoop 构建 MessageCreateParams 时使用的 system prompt 完整目标态。标注 ⏳
+规划中的段落暂不注入，其余段落原文直接使用，不可改写。
 
 > **语言选择说明：** System Prompt 使用中文，因为 DeepSeek V4 对中英文混合 prompt 支持良好，
 > 且目标用户为中文开发者。如后续支持其他语言用户，可抽取为 i18n 模板（`AiAssistantBundle` 已预留国际化机制）。
@@ -1068,9 +1088,9 @@ AppSettingsService（SettingsConfigurable 读写）
 
 ## 工具使用原则
 
-1. 先用 readFile 或 listFiles 获取足够信息，再使用 writeFile/editFile 修改代码。
+1. 先用 Read 或 Glob 获取足够信息，再使用 Write/Edit 修改代码。
 2. 修改代码前，先读取目标文件的完整内容或足够上下文。
-3. editFile 的 oldString 必须在文件中唯一且精确匹配。如果不确定 oldString，先用 readFile 读取目标区域。
+3. Edit 的 oldString 必须在文件中唯一且精确匹配。如果不确定 oldString，先用 Read 读取目标区域。
 4. Shell 命令的工作目录默认为项目根目录。长时间运行的命令（如 gradle build）是正常的，不需要手动终止。
 5. 所有文件路径使用项目内相对路径。
 
@@ -1094,9 +1114,9 @@ AppSettingsService（SettingsConfigurable 读写）
 
 ## 防止幻觉
 
-1. 绝不编造不存在的 API、类名、方法名。引用任何 API 前必须通过 readFile 或 searchContent 确认其真实存在。
-2. 不确定文件是否存在时，先用 listFiles 或 readFile 确认，不要假设路径。
-3. 修改代码前必须用 readFile 读取目标区域的真实内容，不要凭记忆或猜测。
+1. 绝不编造不存在的 API、类名、方法名。引用任何 API 前必须通过 Read 或 Grep 确认其真实存在。
+2. 不确定文件是否存在时，先用 Glob 或 Read 确认，不要假设路径。
+3. 修改代码前必须用 Read 读取目标区域的真实内容，不要凭记忆或猜测。
 4. Shell 命令执行后，先检查退出码和 stderr，再根据实际结果（而非预期结果）决定下一步。
 5. 如果信息不足，主动说明"我需要先读取 X 文件来确认"，而不是猜测。
 
@@ -1107,13 +1127,13 @@ AppSettingsService（SettingsConfigurable 读写）
 1. 如果修改的是 Kotlin/Java 等编译型语言文件，用 readLints 检查是否有新引入的错误。
 2. 如果 lints 无错误，考虑运行编译或相关测试（如 ./gradlew build 或对应模块的 test）。
 3. 如果测试失败，分析失败原因并修复，不要跳过失败的测试。
-4. 如果项目没有现成测试或编译耗时过长，至少用 readFile 重新读取修改区域确认改动符合预期。
+4. 如果项目没有现成测试或编译耗时过长，至少用 Read 重新读取修改区域确认改动符合预期。
 
 ## 方案设计原则（⏳ 规划中）
 
 在动手修改代码前，先理解项目现状：
 
-1. 如果任务是修改/扩展已有功能，先用 searchContent 搜索项目中类似实现（如"项目中其他 Service 类长什么样"），以现有模式为模板。
+1. 如果任务是修改/扩展已有功能，先用 Grep 搜索项目中类似实现（如"项目中其他 Service 类长什么样"），以现有模式为模板。
 2. 如果任务是新增功能，先在项目中找一个最相似的文件通读，保持风格一致（命名、结构、错误处理方式）。
 3. 优先复用项目已有的工具类、基类、扩展函数，不要自己从头写。
 4. 选择方案时遵循项目已有的复杂度水平——如果项目里其他 Service 都是单文件 200 行，你就不该引入多层抽象。
@@ -1140,7 +1160,7 @@ systemContent = [
   "## 可用工具\n" + ToolRegistry.generateToolDescriptions(),
   // 每个工具的 name + JSON Schema（由 Anthropic SDK 的 @JsonClassDescription 自动生成）。
   // 工具描述中必须包含上限声明，示例格式:
-  // "- readFile(filePath: string, startLine?: int, endLine?: int, timeout: int): 读取项目内指定文件的内容。单次最多返回 500 行，超出请用 startLine 分页。"
+  // "- Read(filePath: string, startLine?: int, endLine?: int, timeout: int): 读取项目内指定文件的内容。单次最多返回 500 行，超出请用 startLine 分页。"
   // 上限声明规则见 2.3 ToolRegistry > 工具描述中的上限声明。
 
   SkillManager.getSystemPromptExtension(),
@@ -1197,6 +1217,14 @@ fun buildContext(
 **去重规则：** 同一文件既被 @file 引用（完整文件）又被选中（部分行）→ attachments 列表中去掉选中引用，只保留完整文件引用，但在
 header 中附加行号提示 `[File: UserService.kt — 用户关注行 40-60]`。
 
+**@file glob 上限：** 单次 @file glob 匹配上限 **50 个文件**。超出部分不注入，Glob 工具在返回值中告知
+LLM 截断情况（共 N 个文件、当前返回范围、翻页 offset 参数），LLM 自行判断是否需要翻页获取更多文件。
+
+**生命周期（对齐 Claude Code）：** `@file` 内容注入当前轮 USER 消息，持久化到 Session JSON。compact
+时与普通消息一同压缩为摘要——文件内容快照**不会**在 compact 后重新注入。LLM 如需再次查看文件，必须通过
+`Read` 工具从磁盘重新读取，不应依赖旧消息中的过期内容。详见 [
+`agent.md` §八 > compact 后上下文重建](../docs/agent.md#压缩策略)。
+
 ### 8.4 System Prompt 版本兼容
 
 System Prompt 会随版本迭代修改。旧 Session 中消息是用旧 prompt 生成的，加载后与新 prompt 混合可能产生行为偏差。
@@ -1221,7 +1249,7 @@ prompt 版本不同，不重新生成摘要（太昂贵），直接用。
 
 以下为 `ToolResult.content` 的**精确格式契约**。LLM 收到的就是这些字符串。格式不一致会导致 LLM 行为不可预测。
 
-### readFile
+### Read
 
 ```
 成功:
@@ -1237,10 +1265,10 @@ prompt 版本不同，不重新生成摘要（太昂贵），直接用。
 
 文件不存在:
 错误: 文件 "{filePath}" 不存在。请检查路径是否正确。
-提示: 使用 listFiles 工具查看目录结构。
+提示: 使用 Glob 工具查看目录结构。
 ```
 
-### writeFile
+### Write
 
 ```
 成功:
@@ -1254,7 +1282,7 @@ prompt 版本不同，不重新生成摘要（太昂贵），直接用。
 错误: 写入 "{filePath}" 失败: {exceptionMessage}
 ```
 
-### editFile
+### Edit
 
 ```
 成功:
@@ -1266,7 +1294,7 @@ prompt 版本不同，不重新生成摘要（太昂贵），直接用。
 
 oldString 未找到:
 错误: 在 "{filePath}" 中未找到 oldString。
-提示: 请使用 readFile 读取目标区域，确认 oldString 精确匹配文件内容（包括空白字符）。
+提示: 请使用 Read 读取目标区域，确认 oldString 精确匹配文件内容（包括空白字符）。
 附近内容({nearbyLineStart}-{nearbyLineEnd}行):
 {nearbyContent}
 
@@ -1279,21 +1307,22 @@ oldString 匹配到 {count} 处:
 
 文件被外部修改:
 错误: "{filePath}" 已被外部修改（上次读取 stamp={oldStamp}，当前 stamp={newStamp}）。
-请使用 readFile 重新读取文件后再试。
+请使用 Read 重新读取文件后再试。
 
 空 oldString + 文件不存在:
 ✅ 文件已创建: {filePath} ({lineCount} 行, {byteCount} 字节)
 
-自动 readLints 结果（⏳ 规划中，editFile/writeFile 成功后自动追加）:
+自动 readLints 结果（⏳ 规划中，Edit/Write 成功后自动追加）:
 ⚠️ 该文件修改后存在 2 个编译错误:
   45:12: Unresolved reference: findById [ERROR]
   78:5: Type mismatch: inferred type is String but Unit was expected [ERROR]
 ```
 （无新诊断时不追加）
 
-**UI 展示（⏳ 规划中）：** `editFile` 成功后，ToolCallCard 内联展示 `SimpleDiff` 生成的可视化 diff（ADD 绿色/DEL 红色/CTX 灰色），替换当前的前后 3 行文本对比。
+**UI 展示（⏳ 规划中）：** `Edit` 成功后，ToolCallCard 内联展示 `SimpleDiff` 生成的可视化 diff（ADD 绿色/DEL
+红色/CTX 灰色），替换当前的前后 3 行文本对比。
 
-### runShell
+### Bash
 
 **返回值格式（⏳ 强化版，错误优先）：**
 
@@ -1335,7 +1364,7 @@ STDOUT:
 - 失败时 stderr 排在 stdout 前面（错误信息优先）
 - 成功但 stderr 非空的情况单独处理（如 gradle 的 warning 输出在 stderr），不误报为失败
 
-### listFiles
+### Glob
 
 ```
 成功:
@@ -1352,13 +1381,13 @@ STDOUT:
 截断:
 {dirPath}/
 ├── ...
-... (共 {totalFiles} 个文件, {totalDirs} 个目录，已截断到 {maxEntries} 条目。使用 dirPath 和 maxDepth 缩小范围)
+... (共 {totalFiles} 个文件, {totalDirs} 个目录，已截断到 {maxEntries} 条目，当前第 {start}-{end} 个。用 dirPath/maxDepth 缩小范围，或用 offset={nextOffset} 翻页获取更多)
 
 目录不存在:
 错误: 目录 "{dirPath}" 不存在。请检查路径。
 ```
 
-### searchContent
+### Grep
 
 ```
 找到 {matchCount} 条匹配:
@@ -1408,7 +1437,7 @@ STDOUT:
 {partialDiagnostics}
 ```
 
-### spawnAgent
+### Task
 
 ```
 子任务: {taskSummary}
@@ -1418,7 +1447,7 @@ STDOUT:
 详情: sub-session #{sessionId}
 ```
 
-### createPlan（⏳ 规划中）
+### createPlan
 
 ```
 ✅ 已创建执行计划: {taskSummary}
@@ -1427,7 +1456,57 @@ STDOUT:
 1. {step1.description} — 工具: {step1.tool}, 文件: {step1.files}
 2. {step2.description} — 工具: {step2.tool}, 文件: {step2.files}
 ...
-计划已持久化，按步骤逐步执行，每步完成后暂停确认。
+计划已持久化，自动开始执行。
+```
+
+### listTasks
+
+```
+当前计划: {summary}
+进度: {doneCount}/{totalCount} 已完成
+
+步骤列表:
+1. ✅ {step1.description} — DONE
+2. 🔄 {step2.description} — EXECUTING
+3. ⬜ {step3.description} — PENDING
+4. ❌ {step4.description} — ERROR
+5. 🗑 {step5.description} — DELETED (by: {deletedBy})
+```
+
+### deleteTask
+
+```
+✅ 已删除步骤: {stepId} — "{description}"
+剩余步骤: {remainingCount} 步，继续自动执行。
+
+拒绝（步骤非 PENDING/ERROR 状态）:
+❌ 无法删除步骤 {stepId}：当前状态为 {status}，仅 PENDING/ERROR 状态的步骤可删除。
+```
+
+### reorderTasks
+
+```
+✅ 已重排剩余步骤:
+新顺序:
+1. {step2.description} (原 step-2)
+2. {step3.description} (原 step-3)
+3. {step1.description} (原 step-1)
+继续自动执行。
+
+参数无效（stepId 不完整或不匹配）:
+❌ 重排失败：提供的 stepId 列表与当前 PENDING 步骤不匹配。
+当前 PENDING 步骤: step-1, step-3, step-5
+提供的: step-1, step-5
+```
+
+### markTaskDone
+
+```
+✅ 已将步骤 {stepId} — "{description}" 标记为 DONE。
+剩余步骤: {remainingCount} 步，继续自动执行。
+
+拒绝（步骤当前为 DONE/DELETED 状态）:
+❌ 无法标记步骤 {stepId}：当前状态为 {status}。DONE/DELETED 状态的步骤已是终态，无法再标记为完成。
 ```
 
 **通用约束：**
@@ -1463,7 +1542,7 @@ fun estimateTokens(text: String): Int {
 
 | 场景                        | 上限                     | 方法                         |
 |---------------------------|------------------------|----------------------------|
-| Auto-Compact 触发判定         | 1M × 0.8 = 800K tokens | `estimateTokens()` 估算      |
+| Auto-Compact 触发判定         | 1M × 0.7 = 700K tokens | `estimateTokens()` 估算      |
 | 输入框实时 token 预览            | 无上限（仅展示）               | `estimateTokens()` 估算      |
 | `session.totalTokens` 持久化 | 精确值                    | API `usage` 字段，fallback 估算 |
 | 子 Agent 结果摘要截断            | 2000 tokens            | `estimateTokens()` 估算截断点   |

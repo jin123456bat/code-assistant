@@ -64,14 +64,14 @@ Plugin 2.2.1。
 
 ### 各层关键组件
 
-| 层          | 核心文件                                                                                                              | 要点                                                                                                |
-|------------|-------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------|
-| Agent      | `AgentLoop`, `AgentSession`, `ToolRegistry`, `ToolExecutor`, `ToolModels`, `PlanExecutor`, `MultiAgentManager`    | 8 个工具（readFile/writeFile/editFile/runShell/listFiles/searchContent/readLints/spawnAgent），while 循环 |
-| Completion | `CompletionProvider`, `DeepSeekFimClient`, `CompletionContextCollector`, `CompletionCache`, `CompletionStats`     | FIM 补全 + PSI 增强上下文                                                                                |
-| Session    | `SessionManager`, `SessionStore`                                                                                  | JSON 持久化：.tmp → ATOMIC_MOVE + FileLock                                                            |
-| Skills     | `SkillManager`                                                                                                    | SKILL.md 扫描/解析/交叉验证工具声明                                                                           |
-| MCP        | `McpManager`                                                                                                      | MCP Server 生命周期（启动/握手/心跳/崩溃重启）                                                                    |
-| UI         | `AppColors`, `ChatToolWindow`, `TabBar`, `MessageBus`, `SelectionListener`, `OpenChatAction` + 7 page + 5 chat 组件 | 统一颜色令牌，亮/暗主题                                                                                      |
+| 层          | 核心文件                                                                                                              | 要点                                                            |
+|------------|-------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------|
+| Agent      | `AgentLoop`, `AgentSession`, `ToolRegistry`, `ToolExecutor`, `ToolModels`, `PlanExecutor`, `MultiAgentManager`    | 8 个工具（Read/Write/Edit/Bash/Glob/Grep/readLints/Task），while 循环 |
+| Completion | `CompletionProvider`, `DeepSeekFimClient`, `CompletionContextCollector`, `CompletionCache`, `CompletionStats`     | FIM 补全 + PSI 增强上下文                                            |
+| Session    | `SessionManager`, `SessionStore`                                                                                  | JSON 持久化：.tmp → ATOMIC_MOVE + FileLock                        |
+| Skills     | `SkillManager`                                                                                                    | SKILL.md 扫描/解析/交叉验证工具声明                                       |
+| MCP        | `McpManager`                                                                                                      | MCP Server 生命周期（启动/握手/心跳/崩溃重启）                                |
+| UI         | `AppColors`, `ChatToolWindow`, `TabBar`, `MessageBus`, `SelectionListener`, `OpenChatAction` + 7 page + 5 chat 组件 | 统一颜色令牌，亮/暗主题                                                  |
 
 ## Skill routing
 

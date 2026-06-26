@@ -276,9 +276,9 @@ class AgentLoop(
 
 ## 工具使用原则
 
-1. 先用 readFile 或 listFiles 获取足够信息，再使用 writeFile/editFile 修改代码。
+1. 先用 Read 或 Glob 获取足够信息，再使用 Write/Edit 修改代码。
 2. 修改代码前，先读取目标文件的完整内容或足够上下文。
-3. editFile 的 oldString 必须在文件中唯一且精确匹配。如果不确定 oldString，先用 readFile 读取目标区域。
+3. Edit 的 oldString 必须在文件中唯一且精确匹配。如果不确定 oldString，先用 Read 读取目标区域。
 4. Shell 命令的工作目录默认为项目根目录。长时间运行的命令（如 gradle build）是正常的，不需要手动终止。
 5. 所有文件路径使用项目内相对路径。
 

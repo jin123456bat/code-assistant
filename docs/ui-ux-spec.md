@@ -237,8 +237,8 @@ Danger Button（终止计划、删除会话）:
 
 纯图标模式，无文字标签。按钮根据 API Key 状态动态显隐：
 
-- **无 API Key**：仅显示 Welcome（🏠），其余 6 个 Tab 通过 `display:none` 隐藏
-- **有 API Key**：隐藏 Welcome，显示 Chat / Sessions / Usage / MCP / Skills / Settings
+- **无 API Key**：仅显示 Welcome（🏠），其余 6 个 Tab 隐藏
+- **有 API Key**：隐藏 Welcome，显示 Chat / Sessions / Token Usage / MCP / Skills / Settings
 
 ```
 ┌──────────┬─────────────────────────────────┐
@@ -259,7 +259,7 @@ Danger Button（终止计划、删除会话）:
 │ Badge    │ 右上角角标                       │
 │          │ bg=#EF4444, fg=#FFFFFF, 圆形 8px  │
 │          │ 数字 > 99 → "99+"               │
-│          │ 仅 Sessions 页面有               │
+│          │ v1 仅 Sessions 页面有角标（未读会话数）。后续可按需扩展到其他页面。               │
 └──────────┴─────────────────────────────────┘
 ```
 
@@ -316,7 +316,7 @@ Agent 气泡:
 ```
 8 个状态:
 ┌───────────────┬──────────┬──────────────────┐
-│ PENDING       │ ⏳ 灰色   │ 等待执行         │
+│ PENDING       │ ⏳ Gray 500 │ 等待执行，fg=#6B7280         │
 │               │ icon=Step_0│                  │
 ├───────────────┼──────────┼──────────────────┤
 │ AWAITING_APPR │ 🔒 黄色   │ 等待用户审批     │
@@ -346,7 +346,7 @@ Agent 气泡:
 
 卡片结构:
 ┌──────────────────────────────────────────┐
-│ 🔧 runShell                        ⏳   │ ← 头部(图标+名称+状态), 可点击折叠
+│ 🔧 Bash                        ⏳   │ ← 头部(图标+名称+状态), 可点击折叠
 ├──────────────────────────────────────────┤
 │ 参数: command="./gradlew build"          │ ← 灰色 monospaced 12px
 │       workDir="./"                       │    (折叠时隐藏，显示摘要)
@@ -368,19 +368,22 @@ Agent 气泡:
 │ 涉及: {fileCount}个文件 {toolList}        │
 ├──────────────────────────────────────────┤
 │ Step N:                                  │ ← 每步独立行
-│ ⬜/⏳/✅/❌/⏭  {description}              │ ← 状态图标 + 描述
+│ ⬜/🔄/✅/❌/🗑  {description}              │ ← 状态图标 + 描述
 │    工具: {tool}  文件: {fileList}        │ ← Caption
-│    [▶] <- 仅下一个PENDING步骤可点击       │
+│                           [✕]  ← PENDING │ ← 用户可删除待执行步
 ├──────────────────────────────────────────┤
-│ [⏸ 暂停执行] [✕ 终止计划]               │ ← 底部操作栏
+│ 进度: 3/5 已完成                          │ ← 底部状态行
 └──────────────────────────────────────────┘
 
 Step 状态样式:
-⬜ PENDING:   fg=#6B7280, bg=transparent
-⏳ EXECUTING: fg=#3B82F6, bg=#EFF6FF, 左侧蓝色竖线 2px
+⬜ PENDING:   fg=#6B7280, bg=transparent, 行末 [✕] 可见
+🔄 EXECUTING: fg=#3B82F6, bg=#EFF6FF, 左侧蓝色竖线 2px
 ✅ DONE:      fg=#22C55E, bg=transparent
-❌ ERROR:     fg=#EF4444, bg=#FEE2E2
-⏭ SKIPPED:   fg=#9CA3AF, bg=transparent, 删除线
+❌ ERROR:     fg=#EF4444, bg=#FEE2E2, 行末 [✕] 可见
+🗑 DELETED:   fg=#9CA3AF, bg=transparent, 删除线
+
+// 所有步骤自动连续执行，无全局暂停/继续/取消按钮。
+// LLM 通过 listTasks/deleteTask/reorderTasks 工具自主管理任务列表。
 ```
 
 ### 2.7 Tag（文件引用 / 图片缩略图）
@@ -452,7 +455,7 @@ Toast（右下角弹出，3s 自动消失）:
 │ 选择下一步操作：                         │ ← 标题 (Body, #374151)
 │                                         │    bg=#F9FAFB (亮) / #111827 (暗)
 ├─────────────────────────────────────────┤
-│ ● A  直接用 editFile 修改               │ ← 选项行（每行可点击）
+│ ● A  直接用 Edit 修改               │ ← 选项行（每行可点击）
 │       修改 UserService.kt 和相关调用处    │    hover: bg=#EFF6FF (亮) / #1E3A5F (暗)
 ├─────────────────────────────────────────┤
 │ ○ B  生成 Plan 确认后再执行              │ ← 未选中态
@@ -570,10 +573,10 @@ Chat 页面内流转（统一模式，无需切换）:
   │                                                      │
   │  Chat（默认，允许工具调用）                              │
   │     │                                                │
-  │     ├─ /plan 命令/Skill → 生成计划 → PlanCard         │
-  │     │               ├─ 暂停 → 等待用户输入              │
-  │     │               ├─ "继续" → 执行下一步              │
-  │     │               └─ "取消计划" → 终止               │
+  │     ├─ /plan 命令/createPlan → PlanCard + 自动执行    │
+  │     │               ├─ 逐步自动执行                     │
+  │     │               ├─ LLM 通过 listTasks 查看进度      │
+  │     │               └─ LLM 通过 deleteTask/reorderTasks 调整 │
   │     │                                                │
   │     ├─ 工具调用（随对话自然触发）                        │
   │     │   ├─ ToolCallCard (PENDING)                    │
@@ -594,19 +597,16 @@ Chat 页面内流转（统一模式，无需切换）:
 
 PlanCard 交互规则:
   
-  计划生命周期与 Agent 一致:
-    ├─ Agent 结束 (end_turn) → 正在执行的计划自动暂停
-    ├─ Agent 继续 (发送下一条消息) → 计划自动恢复执行
-    └─ 两者同步，无需手动控制暂停/恢复
-
-  未开始执行时:
-    └─ 支持删除整个计划 (PlanCard ✕ 按钮)
-
-  Step 执行完暂停后:
-    ├─ ▶ 继续 → 执行下一步
-    ├─ ↻ 重试 → 重新执行当前 step
-    ├─ ⏭ 跳过 → 标记 SKIPPED，执行下一步
-    └─ ✕ 取消 → 所有剩余步骤标记 CANCELLED
+  所有步骤自动连续执行:
+    └─ 创建后自动开始 → 逐步执行 → 全部完成后卡片消失
+  
+  用户干预:
+    └─ 仅可删除 PENDING/ERROR 状态的单步（行末 [✕]），LLM 收到通知后跳过该步
+  
+  LLM 自主管理:
+    ├─ listTasks — 查看所有步骤状态
+    ├─ deleteTask — 删除不需要的步骤
+    └─ reorderTasks — 调整执行顺序
 ```
 
 ---

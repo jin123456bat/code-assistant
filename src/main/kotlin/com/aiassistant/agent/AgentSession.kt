@@ -22,7 +22,7 @@ class AgentSession(
     val runningProcesses = mutableSetOf<Process>()
     var plan: com.aiassistant.agent.PlanExecutor.Plan? = null
 
-    /** 记录每个文件上次读取时的 modificationStamp，用于 editFile 冲突检测 */
+    /** 记录每个文件上次读取时的 modificationStamp，用于 Edit 冲突检测 */
     val fileStamps: MutableMap<String, Long> = mutableMapOf()
 
     fun addMessage(msg: Message) {

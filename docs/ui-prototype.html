@@ -355,7 +355,7 @@
                     <p>好的，让我先读取 <code class="inline">UserService.kt</code> 看看当前的实现。
                     </p>
                     <div class="tool-card" style="margin-top:8px">
-                        <div class="tool-card-header"><span>🔧</span> readFile <span
+                        <div class="tool-card-header"><span>🔧</span> Read <span
                                 class="state state-done">✅ 15ms</span></div>
                         <div class="tool-card-body">
                             <div class="tool-card-params">filePath: UserService.kt | startLine: 40 |
@@ -385,7 +385,7 @@
                 <div class="opt-header">选择下一步操作：</div>
                 <div class="opt-item" onclick="selectOption(this,'opt1')">
                     <span class="opt-letter">A</span>
-                    <div class="opt-text">直接用 editFile 修改<span class="opt-desc">修改 UserService.kt + UserController.kt，不生成计划</span>
+                    <div class="opt-text">直接用 Edit 修改<span class="opt-desc">修改 UserService.kt + UserController.kt，不生成计划</span>
                     </div>
                 </div>
                 <div class="opt-item" onclick="selectOption(this,'opt1')">
@@ -417,29 +417,29 @@
                 <div class="plan-meta">任务: 重构 findById | 5 个文件 | ~3K tokens</div>
                 <div class="plan-step step-done"><span class="status">✅</span>
                     <div class="info">读取 UserService.kt
-                        <div class="files">工具: readFile | UserService.kt:40-60</div>
+                        <div class="files">工具: Read | UserService.kt:40-60</div>
                     </div>
                 </div>
                 <div class="plan-step step-done"><span class="status">✅</span>
                     <div class="info">修改方法签名
-                        <div class="files">工具: editFile | UserService.kt:42</div>
+                        <div class="files">工具: Edit | UserService.kt:42</div>
                     </div>
                 </div>
                 <div class="plan-step step-paused"><span class="status">⏸</span>
                     <div class="info">修改调用处
-                        <div class="files">工具: editFile | UserController.kt:55,
+                        <div class="files">工具: Edit | UserController.kt:55,
                             AuthService.kt:102
                         </div>
                     </div>
                 </div>
                 <div class="plan-step step-pending"><span class="status">⬜</span>
                     <div class="info">编译检查
-                        <div class="files">工具: runShell | ./gradlew compileKotlin</div>
+                        <div class="files">工具: Bash | ./gradlew compileKotlin</div>
                     </div>
                 </div>
                 <div class="plan-step step-pending"><span class="status">⬜</span>
                     <div class="info">运行测试
-                        <div class="files">工具: runShell | ./gradlew test</div>
+                        <div class="files">工具: Bash | ./gradlew test</div>
                     </div>
                 </div>
                 <div class="plan-actions">
@@ -470,7 +470,7 @@
 
             <!-- AWAITING_APPROVAL -->
             <div class="tool-card">
-                <div class="tool-card-header"><span>🔧</span> runShell <span
+                <div class="tool-card-header"><span>🔧</span> Bash <span
                         class="state state-awaiting">🔒 等待授权</span></div>
                 <div class="tool-card-body">
                     <div class="tool-card-params">command: ./gradlew compileKotlin | workDir: ./
@@ -490,7 +490,7 @@
 
             <!-- EXECUTING -->
             <div class="tool-card">
-                <div class="tool-card-header"><span>🔄</span> editFile <span
+                <div class="tool-card-header"><span>🔄</span> Edit <span
                         class="state state-executing">⏳ 执行中...</span></div>
                 <div class="tool-card-body">
                     <div class="tool-card-params">filePath: UserController.kt | oldString:
@@ -503,7 +503,7 @@
 
             <!-- TIMEOUT 工具卡片 -->
             <div class="tool-card">
-                <div class="tool-card-header"><span>⏰</span> runShell <span class="state"
+                <div class="tool-card-header"><span>⏰</span> Bash <span class="state"
                                                                             style="color:#F59E0B">⏰ 超时</span>
                 </div>
                 <div class="tool-card-body">
@@ -517,7 +517,7 @@
 
             <!-- REJECTED 工具卡片 -->
             <div class="tool-card" style="opacity:.8">
-                <div class="tool-card-header"><span>🚫</span> runShell <span class="state"
+                <div class="tool-card-header"><span>🚫</span> Bash <span class="state"
                                                                             style="color:var(--g5)">🚫 已拒绝</span>
                 </div>
                 <div class="tool-card-body">
@@ -531,7 +531,7 @@
 
             <!-- CANCELLED 工具卡片 -->
             <div class="tool-card" style="opacity:.8">
-                <div class="tool-card-header"><span>⛔</span> editFile <span class="state"
+                <div class="tool-card-header"><span>⛔</span> Edit <span class="state"
                                                                             style="color:var(--g5)">⛔ 已取消</span>
                 </div>
                 <div class="tool-card-body">
@@ -886,7 +886,7 @@
                                                                             placeholder="my-skill">
                 </div>
                 <div class="form-group"><label>依赖工具（逗号分隔）</label><input class="form-input"
-                                                                                placeholder="readFile, runShell">
+                                                                                placeholder="Read, Bash">
                 </div>
                 <div class="form-group"><label>正文（Markdown）</label><textarea class="form-input"
                                                                                style="height:80px;resize:vertical"
@@ -911,7 +911,7 @@
                     <span style="font-size:12px;color:var(--g5)">调用: /review 或 /code-review</span>
                 </div>
                 <div style="font-size:12px;color:var(--g5);padding:0 0 8px">审查代码质量，查找 bug
-                    和安全问题 · 工具: readFile, runShell
+                    和安全问题 · 工具: Read, Bash
                 </div>
             </div>
             <div class="card" style="margin-bottom:8px">
@@ -921,7 +921,7 @@
                         <strong>refactor</strong></div>
                     <span style="font-size:12px;color:var(--g5)">调用: /refactor</span></div>
                 <div style="font-size:12px;color:var(--g5);padding:0 0 8px">重构代码结构，改进可读性
-                    · 工具: readFile, editFile, writeFile
+                    · 工具: Read, Edit, Write
                 </div>
             </div>
             <div class="card" style="margin-bottom:8px">
@@ -942,7 +942,7 @@
                     <span style="font-size:12px;color:var(--g5)">调用: /test 或 /generate-test</span>
                 </div>
                 <div style="font-size:12px;color:var(--g5);padding:0 0 8px">根据源代码自动生成单元测试
-                    · 工具: readFile, writeFile
+                    · 工具: Read, Write
                 </div>
             </div>
             <div style="font-size:11px;color:var(--g5);margin-top:8px">目录: .code-assistant/skills/

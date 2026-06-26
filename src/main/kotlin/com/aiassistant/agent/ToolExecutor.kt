@@ -28,14 +28,14 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
             onToolStateChanged?.invoke(toolUseId, ToolCallState.EXECUTING, null, null)
             val start = System.currentTimeMillis()
             val result = when (toolName) {
-                "readFile" -> readFile(toolUse)
-                "writeFile" -> writeFile(toolUse)
-                "editFile" -> editFile(toolUse)
-                "runShell" -> runShell(toolUse, timeoutSec)
-                "listFiles" -> listFiles(toolUse)
-                "searchContent" -> searchContent(toolUse)
+                "Read" -> read(toolUse)
+                "Write" -> write(toolUse)
+                "Edit" -> edit(toolUse)
+                "Bash" -> runShell(toolUse, timeoutSec)
+                "Glob" -> glob(toolUse)
+                "Grep" -> grep(toolUse)
                 "readLints" -> readLints(toolUse)
-                "spawnAgent" -> spawnAgent(toolUse)
+                "Task" -> task(toolUse)
                 else -> "未知工具: $toolName"
             }
             val elapsed = System.currentTimeMillis() - start
@@ -89,8 +89,8 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
             Messages.getWarningIcon()
         ) == Messages.YES
 
-    // ── readFile ──
-    private fun readFile(toolUse: BetaToolUseBlock): String {
+    // ── Read ──
+    private fun read(toolUse: BetaToolUseBlock): String {
         val input = toolUse._input()
         val path = ToolInput.string(input, "filePath") ?: return "错误: 缺少 filePath 参数"
         val startLine = ToolInput.int(input, "startLine")
@@ -104,7 +104,7 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
         val from = (startLine?.minus(1))?.coerceAtLeast(0) ?: 0
         val to = (endLine?.coerceAtMost(lines.size)) ?: lines.size
 
-        // 记录 modificationStamp 供 editFile 冲突检测
+        // 记录 modificationStamp 供 Edit 冲突检测
         session.fileStamps[path] = file.lastModified()
 
         val content = lines.subList(from, to).joinToString("\n")
@@ -120,8 +120,8 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
         }
     }
 
-    // ── writeFile ──
-    private fun writeFile(toolUse: BetaToolUseBlock): String {
+    // ── Write ──
+    private fun write(toolUse: BetaToolUseBlock): String {
         val input = toolUse._input()
         val path = ToolInput.string(input, "filePath") ?: return "错误: 缺少 filePath 参数"
         val content = ToolInput.string(input, "content") ?: return "错误: 缺少 content 参数"
@@ -147,8 +147,8 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
         return "✅ 文件已写入: $path ($lineCount 行, ${content.length} 字节)\n操作类型: ${if (isNew) "新建" else "覆盖"}"
     }
 
-    // ── editFile (含 modificationStamp 校验) ──
-    private fun editFile(toolUse: BetaToolUseBlock): String {
+    // ── Edit (含 modificationStamp 校验) ──
+    private fun edit(toolUse: BetaToolUseBlock): String {
         val input = toolUse._input()
         val path = ToolInput.string(input, "filePath") ?: return "错误: 缺少 filePath 参数"
         val oldString = ToolInput.string(input, "oldString") ?: return "错误: 缺少 oldString 参数"
@@ -170,7 +170,7 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
         val lastReadStamp = session.fileStamps[path]
         val currentStamp = file.lastModified()
         if (lastReadStamp != null && lastReadStamp != currentStamp) {
-            return "错误: \"$path\" 已被外部修改（上次读取 stamp=$lastReadStamp，当前 stamp=$currentStamp）。\n请使用 readFile 重新读取文件后再试。"
+            return "错误: \"$path\" 已被外部修改（上次读取 stamp=$lastReadStamp，当前 stamp=$currentStamp）。\n请使用 Read 重新读取文件后再试。"
         }
 
         val currentContent = file.readText()
@@ -178,7 +178,7 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
 
         if (count == 0) {
             val lines = currentContent.lines()
-            return "错误: 在 \"$path\" 中未找到 oldString。\n提示: 请使用 readFile 确认文件内容。\n文件共 ${lines.size} 行。"
+            return "错误: 在 \"$path\" 中未找到 oldString。\n提示: 请使用 Read 确认文件内容。\n文件共 ${lines.size} 行。"
         }
         if (count > 1) {
             return "错误: oldString 在 \"$path\" 中匹配到 $count 处，必须唯一。\n请使用更长的 oldString 使其唯一。"
@@ -200,7 +200,7 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
         return "✅ 已修改: $path\n替换了 $replacedLines 行 → $newLines 行"
     }
 
-    // ── runShell ──
+    // ── Bash ──
     private fun runShell(toolUse: BetaToolUseBlock, timeoutSec: Int): String {
         val input = toolUse._input()
         val command = ToolInput.string(input, "command") ?: return "错误: 缺少 command 参数"
@@ -251,8 +251,8 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
         }
     }
 
-    // ── listFiles ──
-    private fun listFiles(toolUse: BetaToolUseBlock): String {
+    // ── Glob ──
+    private fun glob(toolUse: BetaToolUseBlock): String {
         val input = toolUse._input()
         val dirPath = ToolInput.string(input, "dirPath") ?: "."
         val maxDepth = ToolInput.int(input, "maxDepth") ?: 2
@@ -286,14 +286,21 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
         }
     }
 
-    // ── searchContent ──
-    private fun searchContent(toolUse: BetaToolUseBlock): String {
+    // ── Grep ──
+    private fun grep(toolUse: BetaToolUseBlock): String {
         val input = toolUse._input()
         val query = ToolInput.string(input, "query") ?: return "错误: 缺少 query 参数"
         val basePath = project.basePath ?: return "错误: 项目路径不可用"
         val results = mutableListOf<String>()
         val sourceExtensions =
             setOf("kt", "java", "kts", "xml", "json", "md", "gradle", "properties", "yml", "yaml")
+
+        // ponytail: 正则优先，非法正则回退到字面子串匹配
+        val regex = try {
+            Regex(query, setOf(RegexOption.IGNORE_CASE))
+        } catch (_: Exception) {
+            Regex(Regex.escape(query), setOf(RegexOption.IGNORE_CASE))
+        }
 
         File(basePath).walkTopDown()
             .filter {
@@ -304,7 +311,7 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
             .take(800)
             .forEach { file ->
                 file.readLines().forEachIndexed { idx, line ->
-                    if (line.contains(query, ignoreCase = true) && results.size < 50) {
+                    if (regex.containsMatchIn(line) && results.size < 50) {
                         results.add(
                             "${file.relativeTo(File(basePath))}:${idx + 1}: ${
                                 line.trim().take(120)
@@ -332,10 +339,10 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
         return "文件: $path\n0 个错误, 0 个警告, 0 个提示\n(IDE inspection 集成将在后续 Phase 实现)"
     }
 
-    // ── spawnAgent ──
+    // ── Task ──
     private val multiAgent = MultiAgentManager(project)
 
-    private fun spawnAgent(toolUse: BetaToolUseBlock): String {
+    private fun task(toolUse: BetaToolUseBlock): String {
         val input = toolUse._input()
         val task = ToolInput.string(input, "task") ?: return "错误: 缺少 task 参数"
         return multiAgent.spawnAgent(task, session)

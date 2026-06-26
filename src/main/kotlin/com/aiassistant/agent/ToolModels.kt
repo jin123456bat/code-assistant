@@ -4,9 +4,10 @@ import com.fasterxml.jackson.annotation.JsonClassDescription
 import com.fasterxml.jackson.annotation.JsonPropertyDescription
 
 // ponytail: 8 Tool 类，Anthropic SDK 自动从类注解生成 JSON Schema。每个工具都包含 timeout（秒，0=不限）
+// 工具名对齐 Claude Code：Read / Write / Edit / Bash / Glob / Grep / ReadLints / Task
 
 @JsonClassDescription("读取项目内指定文件的内容")
-class ReadFile {
+class Read {
     @JsonPropertyDescription("项目内相对路径，如 src/main/kotlin/UserService.kt")
     var filePath: String = ""
 
@@ -21,7 +22,7 @@ class ReadFile {
 }
 
 @JsonClassDescription("覆盖写入整个文件。用于创建新文件或大范围修改")
-class WriteFile {
+class Write {
     @JsonPropertyDescription("项目内相对路径")
     var filePath: String = ""
 
@@ -33,7 +34,7 @@ class WriteFile {
 }
 
 @JsonClassDescription("精确替换文件中的部分内容。oldString 必须在文件中唯一且精确匹配")
-class EditFile {
+class Edit {
     @JsonPropertyDescription("项目内相对路径")
     var filePath: String = ""
 
@@ -48,7 +49,7 @@ class EditFile {
 }
 
 @JsonClassDescription("执行 Shell 命令。工作目录默认为项目根目录")
-class RunShell {
+class Bash {
     @JsonPropertyDescription("要执行的 Shell 命令")
     var command: String = ""
 
@@ -60,7 +61,7 @@ class RunShell {
 }
 
 @JsonClassDescription("列出项目目录结构")
-class ListFiles {
+class Glob {
     @JsonPropertyDescription("目录相对路径，可选，默认项目根目录")
     var dirPath: String? = null
 
@@ -71,8 +72,8 @@ class ListFiles {
     var timeout: Int = 0
 }
 
-@JsonClassDescription("在项目中搜索文本内容。使用单词边界匹配")
-class SearchContent {
+@JsonClassDescription("在项目中搜索文本内容。支持正则表达式，不区分大小写。非法正则自动回退为字面子串匹配")
+class Grep {
     @JsonPropertyDescription("搜索关键词")
     var query: String = ""
 
@@ -90,7 +91,7 @@ class ReadLints {
 }
 
 @JsonClassDescription("启动子代理处理子任务，子代理完成后返回结果摘要")
-class SpawnAgent {
+class Task {
     @JsonPropertyDescription("子代理的任务描述")
     var task: String = ""
 

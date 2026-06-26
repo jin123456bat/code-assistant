@@ -27,7 +27,7 @@ class SessionStoreTest {
                 toolCalls = listOf(
                     ToolCallRecord(
                         id = "tool-1",
-                        name = "readFile",
+                        name = "Read",
                         parameters = mapOf("filePath" to "README.md"),
                         state = ToolCallState.DONE,
                         result = "ok",
@@ -42,7 +42,7 @@ class SessionStoreTest {
 
         val restored = assertNotNull(store.load(session.id))
         val restoredToolCall = assertNotNull(restored.messages.single().toolCalls).single()
-        assertEquals("readFile", restoredToolCall.name)
+        assertEquals("Read", restoredToolCall.name)
         assertEquals("README.md", restoredToolCall.parameters["filePath"])
         assertEquals(ToolCallState.DONE, restoredToolCall.state)
         assertEquals("ok", restoredToolCall.result)

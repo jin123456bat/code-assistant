@@ -54,55 +54,55 @@ object ToolRegistry {
     // Register all built-in tools
     fun registerBuiltins() {
         register(
-            "readFile",
-            ReadFile::class.java,
+            "Read",
+            Read::class.java,
             ToolInfo(
-                "readFile",
+                "Read",
                 "读取项目内指定文件的内容",
                 "先确认路径存在。大文件用 startLine/endLine 分页读取。"
             )
         )
         register(
-            "writeFile",
-            WriteFile::class.java,
+            "Write",
+            Write::class.java,
             ToolInfo(
-                "writeFile",
+                "Write",
                 "覆盖写入整个文件",
-                "仅用于创建新文件或需要大范围修改时。小修改请用 editFile。"
+                "仅用于创建新文件或需要大范围修改时。小修改请用 Edit。"
             )
         )
         register(
-            "editFile",
-            EditFile::class.java,
+            "Edit",
+            Edit::class.java,
             ToolInfo(
-                "editFile",
+                "Edit",
                 "精确替换文件中的部分内容",
-                "小范围修改的首选，比 writeFile 更安全。oldString 必须唯一且精确匹配。"
+                "小范围修改的首选，比 Write 更安全。oldString 必须唯一且精确匹配。"
             )
         )
         register(
-            "runShell",
-            RunShell::class.java,
+            "Bash",
+            Bash::class.java,
             ToolInfo(
-                "runShell",
+                "Bash",
                 "执行 Shell 命令",
                 "工作目录默认是项目根目录。构建、测试等长时间命令是正常的。"
             )
         )
         register(
-            "listFiles",
-            ListFiles::class.java,
+            "Glob",
+            Glob::class.java,
             ToolInfo(
-                "listFiles",
+                "Glob",
                 "列出项目目录结构",
                 "用 maxDepth 控制深度，默认 2 层。"
             )
         )
         register(
-            "searchContent",
-            SearchContent::class.java,
+            "Grep",
+            Grep::class.java,
             ToolInfo(
-                "searchContent",
+                "Grep",
                 "在项目中搜索文本内容",
                 "结果上限 50 条。关键词太泛会被截断，用更精确的搜索词。"
             )
@@ -117,10 +117,10 @@ object ToolRegistry {
             )
         )
         register(
-            "spawnAgent",
-            SpawnAgent::class.java,
+            "Task",
+            Task::class.java,
             ToolInfo(
-                "spawnAgent",
+                "Task",
                 "启动子代理处理独立子任务",
                 "子代理有独立上下文窗口，不会污染当前上下文。用于并行处理独立任务。"
             )

@@ -127,8 +127,8 @@ Platform Plugin 2.2.1
 - MCP `resources/list` 和 `prompts/list` 暂不支持
 - 多 Agent 嵌套上限 1 层（子 Agent 不可再 spawn）
 - Sessions 全文搜索暂未实现（v1 仅 title 过滤）
-- `searchContent` 当前仅支持单词边界匹配
-- `@file` glob 匹配上限 50 个文件
+- `Grep` 支持正则表达式匹配，不区分大小写。非法正则自动回退字面子串
+- `@file` glob 匹配上限 50 个文件，超出部分由 Glob 工具告知 LLM 截断情况，LLM 自行决定是否翻页
 
 ## 反馈
 

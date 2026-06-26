@@ -9,31 +9,31 @@ class ToolApprovalPolicyTest {
 
     @Test
     fun `requires approval for mutating and shell tools`() {
-        assertTrue(ToolApprovalPolicy.requiresApproval("writeFile"))
-        assertTrue(ToolApprovalPolicy.requiresApproval("editFile"))
-        assertTrue(ToolApprovalPolicy.requiresApproval("runShell"))
-        assertTrue(ToolApprovalPolicy.requiresApproval("spawnAgent"))
+        assertTrue(ToolApprovalPolicy.requiresApproval("Write"))
+        assertTrue(ToolApprovalPolicy.requiresApproval("Edit"))
+        assertTrue(ToolApprovalPolicy.requiresApproval("Bash"))
+        assertTrue(ToolApprovalPolicy.requiresApproval("Task"))
     }
 
     @Test
     fun `does not require approval for read-only tools`() {
-        assertFalse(ToolApprovalPolicy.requiresApproval("readFile"))
-        assertFalse(ToolApprovalPolicy.requiresApproval("listFiles"))
-        assertFalse(ToolApprovalPolicy.requiresApproval("searchContent"))
+        assertFalse(ToolApprovalPolicy.requiresApproval("Read"))
+        assertFalse(ToolApprovalPolicy.requiresApproval("Glob"))
+        assertFalse(ToolApprovalPolicy.requiresApproval("Grep"))
         assertFalse(ToolApprovalPolicy.requiresApproval("readLints"))
     }
 
     @Test
     fun `describes command and file targets for approval dialog`() {
         val shellText = ToolApprovalPolicy.describe(
-            "runShell",
+            "Bash",
             mapOf("command" to "./gradlew test", "workDir" to "/tmp/project")
         )
         assertContains(shellText, "./gradlew test")
         assertContains(shellText, "/tmp/project")
 
         val writeText = ToolApprovalPolicy.describe(
-            "writeFile",
+            "Write",
             mapOf("filePath" to "src/App.kt")
         )
         assertContains(writeText, "src/App.kt")

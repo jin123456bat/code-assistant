@@ -15,10 +15,10 @@ class ChatBubbleRendererTest {
         val component = ChatBubbleRenderer.render(
             ChatMessage(
                 type = ChatMessage.Type.TOOL_CALL,
-                content = "readFile",
+                content = "Read",
                 toolCall = ToolCallUIData(
                     toolUseId = "tool-1",
-                    toolName = "readFile",
+                    toolName = "Read",
                     state = "DONE",
                     result = "ok",
                     durationMs = 12
@@ -37,7 +37,7 @@ class ChatBubbleRendererTest {
                 content = "command=./gradlew test",
                 toolCall = ToolCallUIData(
                     toolUseId = "tool-2",
-                    toolName = "runShell",
+                    toolName = "Bash",
                     state = "AWAITING_APPROVAL"
                 )
             )
@@ -55,9 +55,9 @@ class ChatBubbleRendererTest {
                 content = "command=./gradlew test",
                 toolCall = ToolCallUIData(
                     toolUseId = "tool-3",
-                    toolName = "runShell",
+                    toolName = "Bash",
                     state = "REJECTED",
-                    result = "用户拒绝执行工具: runShell"
+                    result = "用户拒绝执行工具: Bash"
                 )
             )
         ) as ToolCallCard

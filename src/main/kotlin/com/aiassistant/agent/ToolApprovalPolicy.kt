@@ -2,7 +2,7 @@ package com.aiassistant.agent
 
 object ToolApprovalPolicy {
 
-    private val approvalRequiredTools = setOf("writeFile", "editFile", "runShell", "spawnAgent")
+    private val approvalRequiredTools = setOf("Write", "Edit", "Bash", "Task")
 
     fun requiresApproval(toolName: String): Boolean = toolName in approvalRequiredTools
 
@@ -10,16 +10,16 @@ object ToolApprovalPolicy {
         val lines = mutableListOf<String>()
         lines.add("工具: $toolName")
         when (toolName) {
-            "runShell" -> {
+            "Bash" -> {
                 ToolInput.string(input, "command")?.let { lines.add("命令: $it") }
                 ToolInput.string(input, "workDir")?.let { lines.add("目录: $it") }
             }
 
-            "writeFile", "editFile" -> {
+            "Write", "Edit" -> {
                 ToolInput.string(input, "filePath")?.let { lines.add("文件: $it") }
             }
 
-            "spawnAgent" -> {
+            "Task" -> {
                 ToolInput.string(input, "task")?.let { lines.add("任务: $it") }
             }
         }

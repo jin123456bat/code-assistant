@@ -47,15 +47,15 @@ class PlanExecutor(private val session: AgentSession) {
             if (match != null) {
                 val desc = match.groupValues[1].trim()
                 val tool = when {
-                    desc.contains("读取") || desc.contains("read", ignoreCase = true) -> "readFile"
+                    desc.contains("读取") || desc.contains("read", ignoreCase = true) -> "Read"
                     desc.contains("修改") || desc.contains("替换") || desc.contains(
                         "edit",
                         ignoreCase = true
-                    ) -> "editFile"
+                    ) -> "Edit"
 
-                    desc.contains("编译") || desc.contains("测试") || desc.contains("运行") -> "runShell"
-                    desc.contains("搜索") || desc.contains("找到") -> "searchContent"
-                    else -> "readFile"
+                    desc.contains("编译") || desc.contains("测试") || desc.contains("运行") -> "Bash"
+                    desc.contains("搜索") || desc.contains("找到") -> "Grep"
+                    else -> "Read"
                 }
                 steps.add(PlanStep(description = desc, tool = tool, files = emptyList()))
             }
@@ -94,7 +94,7 @@ class PlanExecutor(private val session: AgentSession) {
             list.map { s ->
                 PlanStep(
                     description = s.description,
-                    tool = s.tool ?: "readFile",
+                    tool = s.tool ?: "Read",
                     files = s.files ?: emptyList()
                 )
             }.takeIf { it.isNotEmpty() }
