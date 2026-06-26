@@ -9,7 +9,7 @@
 ```
 com.aiassistant/
 ├── agent/
-│   ├── ToolModels.kt          // 13 个 Tool 数据类（8 个内置 + 5 个计划）+ @JsonClassDescription 注解
+│   ├── ToolModels.kt          // 14 个 Tool 数据类（9 个内置 + 5 个计划）+ @JsonClassDescription 注解
 │   ├── ToolInput.kt           // 工具输入参数类
 │   ├── ToolRegistry.kt        // 工具注册中心
 │   ├── ToolExecutor.kt        // 工具执行分发器（when 路由）
@@ -872,8 +872,12 @@ ChatInputArea.enterPressed()
                   params = params.add(toolCallResult)
 
     → 流式中断处理：
-        主动停止:
-          → cancelled=true + client.close() + destroyForcibly()
+        主动停止（三件事同时做）:
+          → cancelled=true （退出 Agent while 循环）
+          → client.close() （取消当前 HTTP 请求）
+          → destroyForcibly()：遍历当前 AgentSession 的 runningProcesses 销毁子进程
+            - 杀其他 Agent 的进程
+            - 杀 MCP Server 进程
           → 已累积的 BetaMessageAccumulator 内容持久化到 session.messages
           → 当前 streamingBuf 中未 flush 的内容丢弃
           → 已解析但未执行的 tool call → CANCELLED，不持久化
@@ -1291,6 +1295,14 @@ oldString 匹配到 {count} 处:
 
 空 oldString + 文件不存在:
 ✅ 文件已创建: {filePath} ({lineCount} 行, {byteCount} 字节)
+
+文件不存在（非新建模式，前置校验拒绝）:
+错误: 文件 "{filePath}" 不存在，拒绝执行 Edit。
+提示：使用 Glob 查看目录结构。
+
+文件未 Read（前置校验拒绝）:
+错误: 请先用 Read 读取 {filePath} 后再修改。
+提示: 当前 turn 中该文件未被 Read，拒绝执行 Edit。先用 Read 读取文件内容和 modification stamp 后再试。
 
 自动 readLints 结果（⏳ 规划中，Edit/Write 成功后自动追加）:
 ⚠️ 该文件修改后存在 2 个编译错误:
