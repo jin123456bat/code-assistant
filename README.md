@@ -98,6 +98,7 @@ Platform Plugin 2.2.1
 | 文档                                           | 说明                                                            |
 |----------------------------------------------|---------------------------------------------------------------|
 | [`docs/agent.md`](docs/agent.md)             | Agent 对话 — 架构、Agent Loop、工具系统、Plan Mode、多 Agent、MCP、Skills、UI |
+| [`docs/correctness.md`](docs/correctness.md) | Agent 正确性验证体系 — 防幻觉、代码验证、方案验证                                 |
 | [`docs/completion.md`](docs/completion.md)   | 代码自动补全 — FIM 流程、PSI 上下文增强、缓存、后处理、统计                           |
 | [`docs/git-message.md`](docs/git-message.md) | Git Message — diff 构建、Prompt 模板、流式生成、按钮交互                     |
 | [`docs/tech-spec.md`](docs/tech-spec.md)     | Agent 技术契约 — 接口定义、线程模型、JSON Schema、System Prompt              |

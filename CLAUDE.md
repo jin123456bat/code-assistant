@@ -6,61 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **本项目所有输出必须使用简体中文**，包括但不限于：代码注释、文档、Git commit message、PR 描述、Issue 回复、对话回复。禁止输出英文内容。
 
-## 项目概述
+> 项目概述、常用命令、架构概览见 [`README.md`](README.md)。
 
-面向 IntelliJ IDEA 及所有 JetBrains IDE 的免费 AI 编程助手插件（IntelliJ Platform Plugin, type `IC`
-）。通过 DeepSeek API 提供 Agent 对话、代码补全和 Git commit message 自动生成。用户自带 DeepSeek API
-Key。
-
-## 常用命令
-
-```bash
-./gradlew buildPlugin      # 构建插件 zip（产物在 build/distributions/）
-./gradlew runIde           # 启动 sandbox IntelliJ IDEA（autoReloadPlugins=true：改代码后重新编译即热加载，无需重启）
-./gradlew test             # 运行全部 JUnit 测试
-```
-
-环境：JVM 21、Kotlin 2.0.21、IntelliJ Platform 2024.3（IntelliJ IDEA Community）、Gradle IntelliJ Platform
-Plugin 2.2.1。
-
-## 架构（概览）
-
-项目文档按功能拆分，主文档见 [`README.md`](README.md)，各功能子文档如下：
-
-| 功能          | 文档                                                                                     |
-|-------------|----------------------------------------------------------------------------------------|
-| Agent 对话    | [`docs/agent.md`](docs/agent.md)（设计概览）+ [`docs/tech-spec.md`](docs/tech-spec.md)（技术契约） |
-| 代码自动补全      | [`docs/completion.md`](docs/completion.md)                                             |
-| Git Message | [`docs/git-message.md`](docs/git-message.md)                                           |
-| UI/UX 设计    | [`docs/ui-ux-spec.md`](docs/ui-ux-spec.md)                                             |
-
-```
-┌──────────────────────────────────────────────────────┐
-│  UI Layer (ui/ 包)                                    │
-│  TabBar → CardLayout 切换 7 个页面                      │
-│  ├─ ui/page/: WelcomePage, ChatPage, SessionsPage,   │
-│  │            TokenUsagePage, McpPage, SkillsPage,   │
-│  │            SettingsPage                           │
-│  └─ ui/chat/: ChatBubbleRenderer, ChatViewModel,     │
-│              ChatInputArea, ToolCallCard, PlanCard    │
-├──────────────────────────────────────────────────────┤
-│  Agent Layer (agent/ 包)                              │
-│  AgentLoop → stream → parse → executeTool → feedback │
-│  AgentSession (状态机) + PlanExecutor (计划执行)       │
-│  ToolRegistry + ToolExecutor (工具注册/分发)           │
-│  MultiAgentManager (多 Agent 调度)                     │
-├──────────────────────────────────────────────────────┤
-│  Session Layer (session/ 包)                          │
-│  SessionManager + SessionStore (JSON 持久化)           │
-├──────────────────────────────────────────────────────┤
-│  Skills & MCP (skills/ + mcp/ 包)                     │
-│  SkillManager (SKILL.md 扫描/注册)                    │
-│  McpManager (MCP Server 生命周期)                      │
-├──────────────────────────────────────────────────────┤
-│  Provider: AnthropicOkHttpClient → DeepSeek           │
-│  Completion: CompletionProvider → DeepSeekFimClient   │
-└──────────────────────────────────────────────────────┘
-```
+## 架构速查
 
 ### 各层关键组件
 
