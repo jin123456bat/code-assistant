@@ -1,6 +1,7 @@
 package com.aiassistant.ui.chat
 
 import com.aiassistant.ui.AppColors
+import com.aiassistant.skills.SkillManager
 import java.awt.*
 import java.awt.datatransfer.DataFlavor
 import java.awt.event.*
@@ -24,6 +25,7 @@ class ChatInputArea(
     private val popup = JPopupMenu()
     private val tagsPanel = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0))
     private val tags = mutableListOf<String>()
+    private val sendButton = JButton("发送").apply { addActionListener { doSend() } }
 
     private var projectRef: com.intellij.openapi.project.Project? = null
 
@@ -47,8 +49,6 @@ class ChatInputArea(
             verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED
             border = BorderFactory.createEmptyBorder()
         }
-        val sendButton = JButton("发送").apply { addActionListener { doSend() } }
-
         textArea.addKeyListener(object : KeyAdapter() {
             override fun keyPressed(e: KeyEvent) {
                 // Popup navigation (handled before Enter/Escape for popup mode)
@@ -113,20 +113,28 @@ class ChatInputArea(
         // @file trigger
         val fileMatch = Regex("""(?:^|\s)@(\S*)$""").find(before)
         if (fileMatch != null) {
-            showPopup(fileMatch.groupValues[1], getProjectFiles(fileMatch.groupValues[1]))
+            showPopup(
+                fileMatch.groupValues[1],
+                getProjectFiles(fileMatch.groupValues[1]).map { "@$it" }
+            )
             return
         }
         // /command trigger
         val cmdMatch = Regex("""(?:^|\s)/(\S*)$""").find(before)
         if (cmdMatch != null) {
-            // ponytail: add dynamic skill commands via SkillManager when project ref available
             showPopup(
                 cmdMatch.groupValues[1],
-                listOf("/plan", "/clear", "/review", "/refactor", "/test", "/retry")
+                commandSuggestions()
             )
             return
         }
         popup.isVisible = false
+    }
+
+    private fun commandSuggestions(): List<String> {
+        val builtIns = listOf("/plan", "/clear")
+        val project = projectRef ?: return builtIns
+        return (builtIns + SkillManager(project).enabledSlashCommands()).distinct()
     }
 
     private fun showPopup(filter: String, items: List<String>) {
@@ -256,5 +264,6 @@ class ChatInputArea(
 
     fun setInputEnabled(enabled: Boolean) {
         textArea.isEnabled = enabled
+        sendButton.isEnabled = enabled
     }
 }

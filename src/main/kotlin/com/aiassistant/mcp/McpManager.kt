@@ -44,6 +44,16 @@ class McpManager(private val project: Project) {
         persist()
     }
 
+    fun updateServer(id: String, update: (McpServerConfig) -> McpServerConfig): Boolean {
+        val server = servers[id] ?: return false
+        val updatedConfig = update(server.config)
+        disconnect(id)
+        servers.remove(id)
+        servers[updatedConfig.id] = McpServer(updatedConfig)
+        persist()
+        return true
+    }
+
     fun removeServer(id: String) {
         disconnect(id)
         servers.remove(id)

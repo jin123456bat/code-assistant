@@ -10,9 +10,12 @@ import java.awt.BorderLayout
 import java.awt.FlowLayout
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
+import java.io.File
+import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import javax.swing.*
+import javax.swing.filechooser.FileNameExtensionFilter
 
 class SessionsPage(
     project: Project,
@@ -56,7 +59,9 @@ class SessionsPage(
                 refreshList()
             }
         })
-        bottomBar.add(JButton("导出 JSON").apply { /* ponytail: export later */ })
+        bottomBar.add(JButton("导出 JSON").apply {
+            addActionListener { exportSessions() }
+        })
         add(bottomBar, BorderLayout.SOUTH)
 
         // debounce search
@@ -144,4 +149,60 @@ class SessionsPage(
         )
         return p
     }
+
+    private fun exportSessions() {
+        val ids = checkboxes.filterValues { it.isSelected }.keys.toList()
+        if (ids.isEmpty()) {
+            JOptionPane.showMessageDialog(
+                this,
+                "请选择要导出的会话",
+                "导出 JSON",
+                JOptionPane.INFORMATION_MESSAGE
+            )
+            return
+        }
+
+        val timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))
+        val chooser = JFileChooser().apply {
+            dialogTitle = "导出会话 JSON"
+            fileFilter = FileNameExtensionFilter("JSON 文件", "json")
+            selectedFile = File("code-assistant-sessions-$timestamp.json")
+        }
+        if (chooser.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) return
+
+        val target = ensureJsonExtension(chooser.selectedFile)
+        if (target.exists()) {
+            val answer = JOptionPane.showConfirmDialog(
+                this,
+                "文件已存在，是否覆盖？",
+                "导出 JSON",
+                JOptionPane.YES_NO_OPTION
+            )
+            if (answer != JOptionPane.YES_OPTION) return
+        }
+
+        runCatching {
+            target.writeText(store.exportJson(ids))
+        }.onSuccess {
+            JOptionPane.showMessageDialog(
+                this,
+                "已导出 ${ids.size} 个会话",
+                "导出 JSON",
+                JOptionPane.INFORMATION_MESSAGE
+            )
+        }.onFailure { error ->
+            JOptionPane.showMessageDialog(
+                this,
+                "导出失败: ${error.message}",
+                "导出 JSON",
+                JOptionPane.ERROR_MESSAGE
+            )
+        }
+    }
+
+    private fun ensureJsonExtension(file: File): File =
+        if (file.name.endsWith(".json", ignoreCase = true)) file else File(
+            file.parentFile,
+            "${file.name}.json"
+        )
 }

@@ -3,6 +3,8 @@ package com.aiassistant.session
 import com.aiassistant.agent.AgentSession
 import com.aiassistant.agent.Message
 import com.aiassistant.agent.Role
+import com.aiassistant.agent.ToolCallRecord
+import com.aiassistant.agent.ToolCallState
 import com.aiassistant.agent.TokenDelta
 import com.google.gson.Gson
 import com.google.gson.GsonBuilder
@@ -28,6 +30,18 @@ internal object SessionJson {
             Instant::class.java,
             JsonDeserializer { json, _, _ -> Instant.parse(json.asString) }
         )
+        .create()
+
+    val prettyGson: Gson = GsonBuilder()
+        .registerTypeAdapter(
+            Instant::class.java,
+            JsonSerializer<Instant> { src, _, _ -> JsonPrimitive(src.toString()) }
+        )
+        .registerTypeAdapter(
+            Instant::class.java,
+            JsonDeserializer { json, _, _ -> Instant.parse(json.asString) }
+        )
+        .setPrettyPrinting()
         .create()
 }
 
@@ -71,7 +85,9 @@ class SessionStore(private val project: Project) {
                     timestamp = msg.timestamp,
                     toolCalls = msg.toolCalls?.map { tc ->
                         ToolCallDTO(
-                            id = tc.id, name = tc.name, state = tc.state.name,
+                            id = tc.id, name = tc.name,
+                            parameters = tc.parameters,
+                            state = tc.state.name,
                             result = tc.result, durationMs = tc.durationMs
                         )
                     },
@@ -128,6 +144,16 @@ class SessionStore(private val project: Project) {
                         role = Role.valueOf(msg.role),
                         content = msg.content,
                         timestamp = msg.timestamp,
+                        toolCalls = msg.toolCalls?.map { tc ->
+                            ToolCallRecord(
+                                id = tc.id,
+                                name = tc.name,
+                                parameters = tc.parameters,
+                                state = ToolCallState.valueOf(tc.state),
+                                result = tc.result,
+                                durationMs = tc.durationMs
+                            )
+                        },
                         tokenUsage = if (msg.inputTokens != null || msg.outputTokens != null)
                             TokenDelta(msg.inputTokens ?: 0, msg.outputTokens ?: 0) else null
                     )
@@ -164,6 +190,25 @@ class SessionStore(private val project: Project) {
         } catch (e: Exception) {
             emptyList()
         }
+    }
+
+    fun exportJson(ids: Collection<String>): String {
+        val selectedIds = ids.toSet()
+        val sessions = readIndex()
+            .filter { it.id in selectedIds }
+            .mapNotNull { entry ->
+                val file = File(dir, "${entry.id}.json")
+                if (!file.exists()) return@mapNotNull null
+                runCatching { gson.fromJson(file.readText(), SessionDTO::class.java) }.getOrNull()
+            }
+
+        return SessionJson.prettyGson.toJson(
+            SessionExportDTO(
+                exportedAt = Instant.now(),
+                sessionCount = sessions.size,
+                sessions = sessions
+            )
+        )
     }
 
     private fun updateIndex(dto: SessionDTO) {
@@ -210,6 +255,12 @@ data class SessionDTO(
     val plan: PlanDTO? = null
 )
 
+data class SessionExportDTO(
+    val exportedAt: Instant,
+    val sessionCount: Int,
+    val sessions: List<SessionDTO>
+)
+
 data class PlanDTO(
     val summary: String, val status: String, val currentStep: Int,
     val steps: List<PlanStepDTO>
@@ -228,7 +279,9 @@ data class MessageDTO(
 )
 
 data class ToolCallDTO(
-    val id: String, val name: String, val state: String,
+    val id: String, val name: String,
+    val parameters: Map<String, Any?> = emptyMap(),
+    val state: String,
     val result: String? = null, val durationMs: Long? = null
 )
 

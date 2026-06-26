@@ -5,6 +5,8 @@ import com.aiassistant.ui.RoundedBorder
 import com.aiassistant.ui.toHtmlColor
 import java.awt.BorderLayout
 import java.awt.Font
+import java.awt.Toolkit
+import java.awt.datatransfer.StringSelection
 import javax.swing.*
 
 // 聊天气泡渲染 — 支持 Markdown + 亮/暗主题
@@ -21,11 +23,11 @@ object ChatBubbleRenderer {
         }
     }
 
-    fun render(msg: ChatMessage): JComponent {
+    fun render(msg: ChatMessage, onRetry: (() -> Unit)? = null): JComponent {
         return when (msg.type) {
             ChatMessage.Type.USER_TEXT -> renderUserBubble(msg)
             ChatMessage.Type.AGENT_TEXT -> renderAgentBubble(msg)
-            ChatMessage.Type.ERROR -> renderErrorBubble(msg)
+            ChatMessage.Type.ERROR -> renderErrorBubble(msg, onRetry)
             ChatMessage.Type.SYSTEM -> renderSystemMsg(msg)
             ChatMessage.Type.TOOL_CALL -> renderToolCallPlaceholder(msg)
         }
@@ -133,10 +135,20 @@ object ChatBubbleRenderer {
         return wrapper
     }
 
-    private fun renderErrorBubble(msg: ChatMessage): JPanel {
+    private fun renderErrorBubble(msg: ChatMessage, onRetry: (() -> Unit)?): JPanel {
         val wrapper = JPanel(BorderLayout())
-        val retry = JButton("🔄 重试");
-        val copy = JButton("📋 复制")
+        val retry = JButton("🔄 重试").apply {
+            isEnabled = onRetry != null
+            if (onRetry != null) addActionListener { onRetry() }
+        }
+        val copy = JButton("📋 复制").apply {
+            addActionListener {
+                runCatching {
+                    Toolkit.getDefaultToolkit().systemClipboard
+                        .setContents(StringSelection(msg.content), null)
+                }
+            }
+        }
         val btns = JPanel().apply { add(retry); add(copy) }
         wrapper.add(JLabel("<html><body style='width:100%;max-width:480px'>❌ ${escapeHtml(msg.content)}</body></html>").apply {
             isOpaque = true; background = AppColors.errorBg
@@ -158,11 +170,16 @@ object ChatBubbleRenderer {
     }
 
     private fun renderToolCallPlaceholder(msg: ChatMessage): JPanel {
-        return JPanel().apply {
-            isOpaque = true
-            add(JLabel("<html><i>🔧 ${msg.toolCall?.toolName ?: "tool"} — ${msg.toolCall?.state ?: ""}</i></html>"))
-            background = AppColors.toolPlaceholderBg
-            border = BorderFactory.createEmptyBorder(8, 12, 8, 12)
+        val toolCall = msg.toolCall
+        val state = runCatching {
+            ToolCallCard.ToolCallState.valueOf(toolCall?.state ?: "PENDING")
+        }.getOrDefault(ToolCallCard.ToolCallState.PENDING)
+        return ToolCallCard(
+            toolName = toolCall?.toolName ?: msg.content.ifBlank { "tool" },
+            params = msg.content,
+            initialState = state
+        ).apply {
+            setState(state, toolCall?.result, toolCall?.durationMs)
         }
     }
 

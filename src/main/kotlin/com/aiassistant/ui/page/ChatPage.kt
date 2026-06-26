@@ -19,6 +19,7 @@ class ChatPage(
         background = AppColors.pageBg
     }
     private var autoScroll = true
+    private val toolCards = mutableMapOf<String, ToolCallCard>()
     private val scrollPane = JScrollPane(messageContainer).apply {
         verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED
         border = BorderFactory.createEmptyBorder(); background = AppColors.pageBg
@@ -63,15 +64,38 @@ class ChatPage(
                 viewModel.sendMessage(text); streamingBuf.clear(); streamingBubble = null
             },
             onStop = { viewModel.cancel() },
-            onNewSession = { viewModel.newSession() }
+            onNewSession = {
+                viewModel.newSession()
+                messageContainer.removeAll()
+                toolCards.clear()
+                addTimestampMarker()
+                messageContainer.revalidate()
+                messageContainer.repaint()
+            }
         ).apply { setProject(project) }
         add(inputArea, BorderLayout.SOUTH)
 
         viewModel.onMessageAdded = { msg ->
             streamingBubble?.let { messageContainer.remove(it); streamingBubble = null }
-            messageContainer.add(ChatBubbleRenderer.render(msg))
+            messageContainer.add(renderMessage(msg))
             messageContainer.add(Box.createVerticalStrut(8))
             messageContainer.revalidate(); scrollToBottom()
+        }
+        viewModel.onToolCallStarted = { toolUseId, toolName, params ->
+            streamingBubble?.let { messageContainer.remove(it); streamingBubble = null }
+            val paramsText = params.entries.joinToString(", ") { "${it.key}=${it.value}" }
+            val card = ToolCallCard(toolName, paramsText, ToolCallCard.ToolCallState.PENDING)
+            toolCards[toolUseId] = card
+            messageContainer.add(card)
+            messageContainer.add(Box.createVerticalStrut(8))
+            messageContainer.revalidate(); scrollToBottom()
+        }
+        viewModel.onToolCallStateChanged = { toolUseId, state, result, durationMs ->
+            val uiState = runCatching { ToolCallCard.ToolCallState.valueOf(state.name) }
+                .getOrDefault(ToolCallCard.ToolCallState.ERROR)
+            toolCards[toolUseId]?.setState(uiState, result, durationMs)
+            messageContainer.revalidate()
+            messageContainer.repaint()
         }
         viewModel.onStreamingToken = { token ->
             streamingBuf.append(token)
@@ -98,11 +122,22 @@ class ChatPage(
             }
         }
 
-        // Welcome timestamp
+        if (viewModel.messages.isEmpty()) {
+            addTimestampMarker()
+        } else {
+            viewModel.messages.forEach { msg ->
+                messageContainer.add(renderMessage(msg))
+                messageContainer.add(Box.createVerticalStrut(8))
+            }
+            messageContainer.revalidate()
+        }
+    }
+
+    private fun addTimestampMarker() {
         val now = java.time.LocalDateTime.now()
             .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
         messageContainer.add(
-            ChatBubbleRenderer.render(
+            renderMessage(
                 ChatMessage(
                     type = ChatMessage.Type.SYSTEM,
                     content = "── $now ──"
@@ -111,6 +146,12 @@ class ChatPage(
         )
         messageContainer.add(Box.createVerticalStrut(8)); messageContainer.revalidate()
     }
+
+    private fun renderMessage(msg: ChatMessage): JComponent =
+        ChatBubbleRenderer.render(
+            msg,
+            onRetry = if (viewModel.canRetry) ({ viewModel.retryLastTurn() }) else null
+        )
 
     private fun scrollToBottom() {
         if (!autoScroll) return

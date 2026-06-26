@@ -13,13 +13,21 @@ class McpPage(project: Project) : JPanel(BorderLayout()) {
     private val manager = McpManager(project)
     private val listContainer = JPanel().apply { layout = BoxLayout(this, BoxLayout.Y_AXIS) }
     private val addForm = JPanel().apply { layout = BoxLayout(this, BoxLayout.Y_AXIS) }
+    private val nameField = JTextField(15)
+    private val cmdField = JTextField(25)
+    private var editingServerId: String? = null
 
     init {
         // Header with add button
         val header = JPanel(FlowLayout(FlowLayout.LEFT))
         header.add(JLabel("<html><b style='font-size:16px'>🔌 MCP Servers</b></html>"))
         header.add(JButton("➕ 添加").apply {
-            addActionListener { addForm.isVisible = !addForm.isVisible }
+            addActionListener {
+                editingServerId = null
+                nameField.text = ""
+                cmdField.text = ""
+                addForm.isVisible = !addForm.isVisible
+            }
         })
 
         // Add form
@@ -28,18 +36,29 @@ class McpPage(project: Project) : JPanel(BorderLayout()) {
             BorderFactory.createEmptyBorder(8, 12, 8, 12)
         )
         addForm.isVisible = false
-        val nameField = JTextField(15)
-        val cmdField = JTextField(25)
         addForm.add(JLabel("名称")); addForm.add(nameField)
         addForm.add(JLabel("命令")); addForm.add(cmdField)
         val saveBtn = JButton("保存").apply {
             addActionListener {
-                val config = McpManager.McpServerConfig(
-                    id = nameField.text.ifBlank { "server-${System.currentTimeMillis()}" },
-                    command = cmdField.text
-                )
                 if (cmdField.text.isNotBlank()) {
-                    manager.addServer(config)
+                    val id = nameField.text.ifBlank { "server-${System.currentTimeMillis()}" }
+                    val editingId = editingServerId
+                    if (editingId != null) {
+                        manager.updateServer(editingId) {
+                            it.copy(
+                                id = id,
+                                command = cmdField.text
+                            )
+                        }
+                    } else {
+                        manager.addServer(
+                            McpManager.McpServerConfig(
+                                id = id,
+                                command = cmdField.text
+                            )
+                        )
+                    }
+                    editingServerId = null
                     nameField.text = ""; cmdField.text = ""
                     addForm.isVisible = false
                     refreshList()
@@ -118,13 +137,48 @@ class McpPage(project: Project) : JPanel(BorderLayout()) {
 
         // 操作按钮
         val actions = JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0)).apply { isOpaque = false }
-        actions.add(JButton("🔄 重连").apply {
+        actions.add(JButton("▶ 测试连接").apply {
             font = font.deriveFont(11f)
-            addActionListener { /* ponytail: reconnect later */ }
+            addActionListener {
+                val message = manager.testConnection(server.config.id)
+                JOptionPane.showMessageDialog(
+                    this@McpPage,
+                    message,
+                    "MCP 测试连接",
+                    if (message.startsWith("🟢")) JOptionPane.INFORMATION_MESSAGE else JOptionPane.WARNING_MESSAGE
+                )
+            }
+        })
+        actions.add(JButton(server.primaryActionLabel()).apply {
+            font = font.deriveFont(11f)
+            addActionListener {
+                val ok = if (server.state == McpManager.State.RUNNING) {
+                    manager.disconnect(server.config.id)
+                    true
+                } else {
+                    manager.disconnect(server.config.id)
+                    manager.connect(server.config.id)
+                }
+                refreshList()
+                if (!ok) {
+                    JOptionPane.showMessageDialog(
+                        this@McpPage,
+                        "连接失败",
+                        "MCP",
+                        JOptionPane.ERROR_MESSAGE
+                    )
+                }
+            }
         })
         actions.add(JButton("✏ 编辑").apply {
             font = font.deriveFont(11f)
-            addActionListener { /* ponytail: edit later */ }
+            addActionListener {
+                editingServerId = server.config.id
+                nameField.text = server.config.id
+                cmdField.text = server.config.command
+                addForm.isVisible = true
+                nameField.requestFocusInWindow()
+            }
         })
         actions.add(JButton("🗑 删除").apply {
             font = font.deriveFont(11f)
@@ -141,4 +195,11 @@ class McpPage(project: Project) : JPanel(BorderLayout()) {
             add(JLabel("<html><div style='text-align:center;padding:40px;color:$dimHex'>还没有 MCP Server<br><span style='font-size:11px'>添加 MCP Server 连接外部工具</span></div></html>"))
         }
     }
+
+    private fun McpManager.McpServer.primaryActionLabel(): String =
+        when (state) {
+            McpManager.State.RUNNING, McpManager.State.INITIALIZING -> "⏹ 停止"
+            McpManager.State.ERROR, McpManager.State.CRASHED -> "🔄 重连"
+            else -> "▶ 启动"
+        }
 }

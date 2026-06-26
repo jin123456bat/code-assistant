@@ -4,7 +4,9 @@ import com.anthropic.models.beta.messages.BetaToolUseBlock
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.ui.Messages
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
 
 class ToolExecutor(private val project: Project, private val session: AgentSession) {
 
@@ -18,6 +20,11 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
         return try {
             val input = toolUse._input()
             val timeoutSec = ToolInput.int(input, "timeout") ?: 0
+            if (ToolApprovalPolicy.requiresApproval(toolName) && !requestApproval(toolUse)) {
+                val result = "用户拒绝执行工具: $toolName"
+                onToolStateChanged?.invoke(toolUseId, ToolCallState.REJECTED, result, null)
+                return result
+            }
             onToolStateChanged?.invoke(toolUseId, ToolCallState.EXECUTING, null, null)
             val start = System.currentTimeMillis()
             val result = when (toolName) {
@@ -51,6 +58,36 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
             "错误: ${e.javaClass.simpleName}: ${e.message}"
         }
     }
+
+    private fun requestApproval(toolUse: BetaToolUseBlock): Boolean {
+        val toolUseId = toolUse.id()
+        val toolName = toolUse.name()
+        session.requireApproval()
+        onToolStateChanged?.invoke(toolUseId, ToolCallState.AWAITING_APPROVAL, null, null)
+        val input = toolUse._input()
+        val message = ToolApprovalPolicy.describe(toolName, input)
+        val app = ApplicationManager.getApplication()
+        if (app.isDispatchThread) return finishApproval(showApprovalDialog(message))
+
+        val approved = AtomicBoolean(false)
+        app.invokeAndWait { approved.set(showApprovalDialog(message)) }
+        return finishApproval(approved.get())
+    }
+
+    private fun finishApproval(approved: Boolean): Boolean {
+        if (approved) session.approvalGranted() else session.approvalRejected()
+        return approved
+    }
+
+    private fun showApprovalDialog(message: String): Boolean =
+        Messages.showYesNoDialog(
+            project,
+            message,
+            "确认工具执行",
+            "允许",
+            "拒绝",
+            Messages.getWarningIcon()
+        ) == Messages.YES
 
     // ── readFile ──
     private fun readFile(toolUse: BetaToolUseBlock): String {

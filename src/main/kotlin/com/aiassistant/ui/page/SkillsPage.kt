@@ -48,7 +48,10 @@ class SkillsPage(project: Project) : JPanel(BorderLayout()) {
         }
         val toggle = JCheckBox().apply {
             isSelected = skill.enabled
-            addActionListener { skill.enabled = isSelected; refreshList() }
+            addActionListener {
+                manager.setEnabled(skill.command, isSelected)
+                refreshList()
+            }
         }
         card.add(toggle, BorderLayout.WEST)
 

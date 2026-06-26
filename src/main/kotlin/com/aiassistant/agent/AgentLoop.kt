@@ -4,7 +4,7 @@ import com.anthropic.client.AnthropicClient
 import com.anthropic.client.okhttp.AnthropicOkHttpClient
 import com.anthropic.helpers.BetaMessageAccumulator
 import com.anthropic.models.beta.messages.*
-import com.intellij.openapi.components.service
+import com.aiassistant.AppSettingsService
 import com.intellij.openapi.project.Project
 import java.io.File
 import java.net.SocketTimeoutException
@@ -13,16 +13,23 @@ class AgentLoop(
     private val project: Project,
     private val session: AgentSession
 ) {
-    private val settings = project.service<com.aiassistant.AppSettingsService>()
-    private val apiKey =
-        settings.getApiKey() ?: throw IllegalStateException("API Key not configured")
+    private val settings = AppSettingsService.getInstance()
+    private var client: AnthropicClient? = null
+    private var clientApiKey: String? = null
 
-    private var client: AnthropicClient = buildClient()
-
-    private fun buildClient() = AnthropicOkHttpClient.builder()
-        .baseUrl("https://api.deepseek.com/anthropic")
-        .apiKey(apiKey)
-        .build()
+    private fun getClient(): AnthropicClient {
+        val apiKey = settings.getApiKey() ?: throw IllegalStateException("API Key not configured")
+        val existing = client
+        if (existing != null && clientApiKey == apiKey) return existing
+        return AnthropicOkHttpClient.builder()
+            .baseUrl("https://api.deepseek.com/anthropic")
+            .apiKey(apiKey)
+            .build()
+            .also {
+                client = it
+                clientApiKey = apiKey
+            }
+    }
 
     private val model = "deepseek-v4-pro"
     private val toolExecutor = ToolExecutor(project, session)
@@ -49,8 +56,18 @@ class AgentLoop(
     enum class AgentMode { CHAT, AGENT, PLAN }
 
     fun run(userMessage: String, mode: AgentMode = AgentMode.AGENT): Result {
-        if (session.state != AgentSession.State.IDLE) {
+        if (session.state in setOf(
+                AgentSession.State.PROCESSING,
+                AgentSession.State.EXECUTING,
+                AgentSession.State.AWAITING_APPROVAL
+            )
+        ) {
             return Result.Error("Agent is already running")
+        }
+        val client = try {
+            getClient()
+        } catch (e: IllegalStateException) {
+            return Result.Error("请先配置 DeepSeek API Key")
         }
 
         val builder = MessageCreateParams.builder()

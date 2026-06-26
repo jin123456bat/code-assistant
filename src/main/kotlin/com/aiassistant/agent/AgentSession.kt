@@ -50,7 +50,7 @@ class AgentSession(
     }
 
     fun approvalRejected() {
-        state = State.IDLE
+        state = State.PROCESSING
     }
 
     fun startExecuting() {
@@ -58,7 +58,9 @@ class AgentSession(
     }
 
     fun doneExecuting() {
-        state = State.PROCESSING  // 回到循环等待 LLM 下一轮
+        if (state == State.EXECUTING) {
+            state = State.PROCESSING  // 回到循环等待 LLM 下一轮
+        }
     }
 
     fun finishTurn() {

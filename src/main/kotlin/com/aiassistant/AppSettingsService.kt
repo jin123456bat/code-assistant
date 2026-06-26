@@ -56,11 +56,11 @@ class AppSettingsService {
             cachedApiKey = PasswordSafe.instance.get(credentialAttributes)
                 ?.getPasswordAsString(); apiKeyLoaded = true
         }
-        return cachedApiKey
+        return cachedApiKey?.takeIf { it.isNotBlank() }
     }
 
     fun setApiKey(key: String) {
-        cachedApiKey = key; apiKeyLoaded = true
+        cachedApiKey = key.takeIf { it.isNotBlank() }; apiKeyLoaded = true
         PasswordSafe.instance.set(credentialAttributes, Credentials(null, key))
     }
 

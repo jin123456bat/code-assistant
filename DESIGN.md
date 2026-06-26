@@ -58,7 +58,7 @@ Agent、Skill 系统、MCP 外部工具。
   → forEach chunk:
       ContentBlockDelta.text → 流式渲染到气泡
       ContentBlockStart.toolUse → executeTool() → 结果追加到 params
-  → while 循环直到 stop_reason="end_turn"
+  → while 循环直到 stop_reason="end_turn"（max_tokens 时自动续写"继续"）
   → SessionStore.save()
 ```
 
@@ -338,6 +338,18 @@ Agent)。250-350px: 气泡 maxWidth=90%(用户)/95%(Agent)。<250px: 气泡 maxW
 `docs/ui-ux-spec.md`](docs/ui-ux-spec.md) 第五节。
 
 **自动恢复：** 打开面板时自动恢复上次活跃会话（含暂停的计划）。
+
+**会话标题生成：** 对齐 Claude Code——新会话的第一条用户消息发送后，异步调用 LLM（不带 tools，
+`max_tokens=64`）生成简短标题（≤ 20 字）。标题生成不阻塞主流程。Prompt 模板：
+
+```
+根据以下消息生成一个简短的会话标题（≤ 20 字）：
+"{用户第一条消息内容}"
+仅返回标题文本，不要加引号。
+```
+
+生成后持久化到 `SessionIndex.title` 和 Session JSON 的 `title` 字段，通过 `SessionChanged` 事件通知
+Sessions 页面更新。
 
 **审批超时 UI：** 无超时限制，用户未操作则一直等待。
 
@@ -872,6 +884,145 @@ Session JSON:
 **Welcome 乐观导航：** 保存 Key 后立即跳转 Chat（不等待验证）。后端异步验证 → VALID 静默通过，INVALID →
 toast "API Key 无效"，UNKNOWN（网络超时）→ toast "网络不可用，Key 暂未验证"。都不强制切回 Welcome。
 
+### 6.4 上下文自动压缩（Auto-Compact）
+
+对齐 Claude Code：当会话消息历史接近模型上下文上限时，自动将旧消息压缩为摘要，避免消息被粗暴截断导致
+LLM 丢失关键上下文。
+
+**触发时机：** 每次 `AgentLoop.run()` 构建 `params` 后、发送 API 请求前，估算当前 `messages` + system
+prompt + tools 的总 token 数。当估算值超过模型上下文窗口的 **80%** 时触发压缩。模型上下文窗口写死为 *
+*1,000,000 tokens**（DeepSeek V4 的 1M 上下文上限）。token 估算使用统一策略（见 6.5 节），不做精确
+tokenize。
+
+**压缩策略（保留窗口 + 摘要）：**
+
+1. 保留最近 N 条消息原文，N = `max(4, messages.size / 3)`，确保至少保留最后 2 轮完整对话
+2. 将更早的消息标记为"需压缩段"
+3. 构建一条特殊的 system-style 消息插入消息列表头部，内容为：
+   ```
+   <conversation_history_summary>
+   以下是之前对话的摘要。请基于摘要和以下最新消息继续对话，无需重复已完成的工作。
+
+   ## 用户核心任务
+   {任务描述}
+
+   ## 已完成工作
+   {已完成的步骤和关键决策}
+
+   ## 当前状态
+   {进行中的工作、已知的文件路径、技术约束}
+
+   ## 重要上下文
+   {关键文件路径、错误信息、技术决策等}
+   </conversation_history_summary>
+   ```
+4. 从 `session.messages` 中移除被压缩的旧消息原文（保留摘要消息在头部）
+5. 后续 API 请求的 `messages` 参数变为 `[摘要消息, ...近期原文, 新用户消息]`
+
+**摘要生成（独立轻量 API 调用）：**
+
+- 在一次额外的、轻量的 API 调用中完成（不带 tools，`max_tokens=1024`），不阻塞主流程
+- Prompt 模板：
+  ```
+  请将以下对话压缩为简洁摘要。保留：
+  - 用户的核心任务和目标
+  - 已完成的步骤和关键决策
+  - 当前进行中的工作和上下文
+  - 重要的文件路径、错误信息、技术约束
+
+  省略：思考过程、工具调用详情（具体参数/返回值）、中间探索性操作。
+
+  对话内容：
+  {需压缩的消息内容}
+  ```
+- 摘要结果持久化到 Session JSON（`compactSummary` + `compactCount` 字段）
+- 多次压缩时，之前的摘要作为"需压缩段"的一部分参与新一轮压缩（幂等）
+
+**与 Plan 的交互：** Plan 暂停时仍可压缩。压缩 prompt 中额外注入 plan 摘要（`plan.summary` +
+`steps[*].description` + `steps[*].status`），确保 LLM 在压缩后的上下文中仍然知道计划的存在和进展。
+
+**与 Claude Code 的对应关系：** Claude Code 由运行时（harness）管理压缩，在消息到达模型前透明完成。本插件在
+AgentLoop 层实现，压缩后的消息列表直接更新 `session.messages`，对 LLM 完全透明。两者核心策略一致：摘要 +
+保留近期原文。
+
+### 6.5 Token 估算策略
+
+整个项目使用统一的 Token 估算方法，避免各处用法不一致：
+
+**启发式公式：** 英文/代码 `字节数 / 4`，中文 `字符数 * 1.5`，混合文本取两种估算的较大值。
+
+**伪代码：**
+
+```
+fun estimateTokens(text: String): Int {
+    if (text.isEmpty()) return 0
+    val asciiOnly  = text.filter { it.code <= 127 }.length
+    val nonAscii   = text.length - asciiOnly
+    return max(text.encodeToByteArray().size / 4, asciiOnly / 4 + (nonAscii * 3) / 2)
+}
+```
+
+**适用场景：**
+
+- Auto-Compact 阈值判定（1M × 0.8 = 800K tokens 触发）
+- 输入框实时 token 估算显示
+- `session.totalTokens` 持久化（API 返回精确值优先，fallback 估算）
+- 子 Agent 结果摘要截断（≤ 2000 tokens）
+
+### 6.6 `stop_reason="max_tokens"` 自动续写
+
+当 LLM 在输出中途达到 `max_tokens` 限制时，Agent 自动发送一条 `role=USER, content="继续"` 消息，让 LLM
+从中断处继续输出：
+
+```
+while (turn < maxTurns && !cancelled):
+  ...
+  收到 MessageStop(stop_reason):
+    ├─ "end_turn"    → 正常结束，退出 while
+    ├─ "max_tokens"  → 自动追加 user message "继续" → continue while（不增加 turn 计数）
+    └─ "stop_sequence" → 正常结束，消息尾部标注
+```
+
+**约束：**
+
+- "继续"消息不持久化到 `session.messages`（避免污染会话历史），仅在当前 `params.messages` 中临时追加
+- 自动续写不增加 `turn` 计数，不计入 `maxAgentTurns` 限制
+- 最多连续续写 5 次，防止 LLM 陷入无限输出循环
+
+### 6.7 `/clear` 和 `/new` 指令
+
+`/clear` 和 `/new` 行为完全一致——重置当前会话。对齐 Claude Code 的 `/clear` 语义。
+
+**行为：**
+
+- 清空 `session.messages = []`
+- 清空 `session.compactSummary = null`，`session.compactCount = 0`
+- 清空 `session.plan = null`（如有活跃 Plan 一并丢弃）
+- 清空 `session.totalTokens` 归零
+- `session.id` 保持不变（不创建新文件，复用当前 session）
+- 不保存旧消息（等价于"当前会话重新开始"）
+
+**为什么复用 session 而不是新建：** 用户通常只是想让上下文干净一点，频繁新建 session
+文件会堆积。如需保存当前会话内容，用户应在 `/clear` 前手动从 Sessions 页面导出。
+
+### 6.8 流式输出中断后的消息处理
+
+对齐 Claude Code：中断时保留已渲染内容，丢弃未完成的 tool call，不持久化半成品。
+
+**用户点 Stop（主动中断）：**
+
+- 已流式渲染的文本：保留在 UI + 持久化到 `session.messages`（`MessageAccumulator` 已累积的完整内容）
+- 当前正在流式的 token（`streamingBuffer` 中未 flush 的部分）：丢弃
+- 已解析但未执行的 tool call：标记 CANCELLED，不持久化
+- 正在执行的工具：`destroyForcibly()` 终止，结果丢失，tool call 标记 CANCELLED
+- Agent 状态 → IDLE，输入框立即可用
+
+**网络断连（被动中断）：**
+
+- 已完成的流式内容：保留 + 持久化
+- 未完成的流式内容：保留 + 持久化（存已收到的部分），尾部标注 `[连接中断]`
+- 用户点击 [重试]：发送相同的 `params` 重新开始当前 turn，LLM 从中断处继续
+
 **Plan Card [▶] 按钮：** 只有紧接暂停点的**下一个待执行 Step** 可点击 [▶]，点击执行下一步。点击非连续
 Step 的 [▶] 被禁止（灰色），避免跳过中间步骤。
 
@@ -1018,21 +1169,28 @@ sparkline 趋势图（Custom JComponent paintComponent）。
 
 ## 十一、所有决策
 
-| 决策            | 决议                                          | 理由                                     |
-|---------------|---------------------------------------------|----------------------------------------|
-| LLM 交互        | Anthropic Java SDK + 手写 Agent Loop          | SDK 封装 HTTP/SSE/重试/Tool Schema，循环控制权在手 |
-| Agent Loop 风格 | 手写 while 循环                                 | IDE 特定逻辑（EDT/审批/中断）框架反而限制可控性           |
-| Markdown 渲染   | v1 用 bundled plugin，block-level 代码块         | **已验证**：13 个核心 PSI 类型可用，含表格            |
-| Shell 超时      | LLM 在 tool call 时传入（必填），0=不限                | LLM 根据命令类型自行判断合理超时                     |
-| 多 Agent 并发    | 3 个上限 + 文件写锁 + modificationStamp，阶段 5 详细设计  | 单 Agent 先跑通                            |
-| Plan          | 每步暂停，计划详细到文件+工具，通过 PlanCard 按钮控制            | 不自动连续执行，用户可在暂停点调整/跳过/终止                |
-| 工具审批          | 首次授权后同会话信任，危险命令始终二次确认                       | 对齐 Claude Code                         |
-| 页面架构          | 顶部 TabBar + CardLayout，首屏懒加载                | 7 页全部预创建内存压力大                          |
-| Skill 系统      | `.code-assistant/skills/` + SKILL.md，正文按需注入 | 避免 context window 浪费                   |
-| MCP           | JSON-RPC 手写 + JSON 配置，崩溃自动重启 1 次            | 进程不稳定是最大风险                             |
-| @file 引用      | `@文件名` + FilenameIndex + debounce 200ms     | < 50ms 索引查询，性能可控                       |
-| 会话持久化         | Jackson → .tmp → ATOMIC_MOVE + FileLock     | 防写入中断数据丢失 + 多实例竞态                      |
-| 分发            | `./gradlew buildPlugin` → Marketplace 手动上传  | 无 CI/CD 依赖                             |
+| 决策            | 决议                                                     | 理由                                     |
+|---------------|--------------------------------------------------------|----------------------------------------|
+| LLM 交互        | Anthropic Java SDK + 手写 Agent Loop                     | SDK 封装 HTTP/SSE/重试/Tool Schema，循环控制权在手 |
+| Agent Loop 风格 | 手写 while 循环                                            | IDE 特定逻辑（EDT/审批/中断）框架反而限制可控性           |
+| Markdown 渲染   | v1 用 bundled plugin，block-level 代码块                    | **已验证**：13 个核心 PSI 类型可用，含表格            |
+| Shell 超时      | LLM 在 tool call 时传入（必填），0=不限                           | LLM 根据命令类型自行判断合理超时                     |
+| 多 Agent 并发    | 3 个上限 + 文件写锁 + modificationStamp，阶段 5 详细设计             | 单 Agent 先跑通                            |
+| Plan          | 每步暂停，计划详细到文件+工具，通过 PlanCard 按钮控制                       | 不自动连续执行，用户可在暂停点调整/跳过/终止                |
+| 工具审批          | 首次授权后同会话信任，危险命令始终二次确认                                  | 对齐 Claude Code                         |
+| 页面架构          | 顶部 TabBar + CardLayout，首屏懒加载                           | 7 页全部预创建内存压力大                          |
+| Skill 系统      | `.code-assistant/skills/` + SKILL.md，正文按需注入            | 避免 context window 浪费                   |
+| MCP           | JSON-RPC 手写 + JSON 配置，崩溃自动重启 1 次                       | 进程不稳定是最大风险                             |
+| @file 引用      | `@文件名` + FilenameIndex + debounce 200ms                | < 50ms 索引查询，性能可控                       |
+| 会话持久化         | Jackson → .tmp → ATOMIC_MOVE + FileLock                | 防写入中断数据丢失 + 多实例竞态                      |
+| 上下文超限处理       | 自动压缩（Auto-Compact）：摘要 + 保留近期原文                         | 对齐 Claude Code，避免粗暴截断丢失关键上下文           |
+| 上下文窗口大小       | 写死 1M tokens（DeepSeek V4 上限）                           | 不需要动态检测，compact 阈值 800K                |
+| max_tokens 续写 | 自动发送"继续"，不持久化，≤5 次                                     | 对齐 Claude Code，高频场景自动处理                |
+| /clear & /new | 清空当前会话（messages + plan + compactSummary），复用 session.id | 对齐 Claude Code，避免 session 文件堆积         |
+| 会话标题          | LLM 异步生成（≤20 字，max_tokens=64）                          | 对齐 Claude Code，Sessions 列表可读性          |
+| Token 估算      | 统一启发式：英文 字节/4，中文 字符×3/2，取 max                          | 多处依赖，统一策略避免偏差                          |
+| 流式中断处理        | 主动停止保留已渲染内容，被动断连尾部标注 [连接中断]                            | 对齐 Claude Code，数据不丢失                   |
+| 分发            | `./gradlew buildPlugin` → Marketplace 手动上传             | 无 CI/CD 依赖                             |
 
 ## 十二、实现要点
 

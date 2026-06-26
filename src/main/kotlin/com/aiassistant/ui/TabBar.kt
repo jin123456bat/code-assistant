@@ -75,6 +75,15 @@ class TabBar(
     fun setEnabled(page: Page, enabled: Boolean) { /* ponytail: disable tabs later */
     }
 
+    fun setApiKeyConfigured(configured: Boolean) {
+        labels.forEachIndexed { i, label ->
+            label.isVisible =
+                if (configured) tabs[i].page != Page.WELCOME else tabs[i].page == Page.WELCOME
+        }
+        revalidate()
+        repaint()
+    }
+
     private fun updateSelection() {
         labels.forEachIndexed { i, lbl ->
             if (tabs[i].page == selected) {

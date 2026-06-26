@@ -27,9 +27,11 @@
     <depends>org.intellij.plugins.markdown</depends>
 
     <extensions defaultExtensionNs="com.intellij">
+        <applicationConfigurable parentId="tools" instance="com.aiassistant.SettingsConfigurable"
+                id="com.aiassistant.settings" displayName="Code Assistant" />
+
         <toolWindow id="Code Assistant" anchor="right" icon="/icons/icon.svg"
                 factoryClass="com.aiassistant.ui.ChatToolWindowFactory" />
-        <!-- Settings managed inside the Chat panel; IDE Configurable removed per design -->
 
         <inline.completion.provider
             id="ai-assistant"

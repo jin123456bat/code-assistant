@@ -1,11 +1,15 @@
 package com.aiassistant.skills
 
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
 import com.intellij.openapi.project.Project
 import java.io.File
 
 // ponytail: skill system — scans .code-assistant/skills/ and .claude/skills/ for SKILL.md
 
 class SkillManager(private val project: Project) {
+    private val gson = Gson()
+    private val stateFile: File get() = File(project.basePath, ".code-assistant/skills-state.json")
 
     data class Skill(
         val name: String,
@@ -18,6 +22,7 @@ class SkillManager(private val project: Project) {
 
     fun loadSkills(): List<Skill> {
         val skills = mutableListOf<Skill>()
+        val disabledCommands = readDisabledCommands()
         val dirs = listOf(
             File(project.basePath, ".code-assistant/skills"),
             File(project.basePath, ".claude/skills"),
@@ -28,12 +33,28 @@ class SkillManager(private val project: Project) {
                 val md = File(skillDir, "SKILL.md")
                 if (md.exists()) {
                     val parsed = parseSkill(md)
-                    if (parsed != null) skills.add(parsed)
+                    if (parsed != null) skills.add(
+                        parsed.copy(enabled = parsed.command !in disabledCommands)
+                    )
                 }
             }
         }
         return skills
     }
+
+    fun setEnabled(command: String, enabled: Boolean) {
+        val disabledCommands = readDisabledCommands().toMutableSet()
+        if (enabled) disabledCommands.remove(command) else disabledCommands.add(command)
+        stateFile.parentFile?.mkdirs()
+        stateFile.writeText(gson.toJson(SkillStateDTO(disabledCommands.sorted())))
+    }
+
+    fun enabledSlashCommands(): List<String> =
+        loadSkills()
+            .filter { it.enabled }
+            .map { "/${it.command}" }
+            .distinct()
+            .sorted()
 
     private fun parseSkill(file: File): Skill? {
         try {
@@ -66,4 +87,16 @@ class SkillManager(private val project: Project) {
         if (skills.isEmpty()) return ""
         return "\n## 可用 Skills\n" + skills.joinToString("\n") { "- ${it.command}: ${it.description}" }
     }
+
+    private fun readDisabledCommands(): Set<String> {
+        if (!stateFile.exists()) return emptySet()
+        return try {
+            val type = object : TypeToken<SkillStateDTO>() {}.type
+            gson.fromJson<SkillStateDTO>(stateFile.readText(), type).disabledCommands.toSet()
+        } catch (_: Exception) {
+            emptySet()
+        }
+    }
+
+    private data class SkillStateDTO(val disabledCommands: List<String> = emptyList())
 }

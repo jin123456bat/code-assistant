@@ -58,7 +58,10 @@ class ChatToolWindow(private val project: Project) : JPanel(BorderLayout()) {
             val store = SessionStore(project)
             val last = store.listAll().maxByOrNull { it.updatedAt }
             if (last != null) {
-                navigateTo(Page.CHAT) // ponytail: restore session content in later phase
+                pages.remove(chatPage)
+                chatPage = ChatPage(project, last.id)
+                pages.add(chatPage, Page.CHAT.id)
+                navigateTo(Page.CHAT)
             } else {
                 navigateTo(Page.CHAT)
             }
@@ -68,7 +71,14 @@ class ChatToolWindow(private val project: Project) : JPanel(BorderLayout()) {
     }
 
     fun navigateTo(page: Page) {
-        (pages.layout as CardLayout).show(pages, page.id)
-        tabBar.setSelected(page)
+        val hasApiKey = settings.getApiKey() != null
+        tabBar.setApiKeyConfigured(hasApiKey)
+        val target = when {
+            !hasApiKey -> Page.WELCOME
+            page == Page.WELCOME -> Page.CHAT
+            else -> page
+        }
+        (pages.layout as CardLayout).show(pages, target.id)
+        tabBar.setSelected(target)
     }
 }

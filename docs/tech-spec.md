@@ -71,7 +71,12 @@ AgentLoop
 │   AgentEvent = TextDelta | ToolCallStarted | ToolCallCompleted | TurnCompleted | Error
 ├── cancel()
 ├── isRunning: Boolean
-└── currentState: AgentState  // 从 AgentSession 读取
+├── currentState: AgentState            // 从 AgentSession 读取
+├── compactIfNeeded(messages, modelLimit): Boolean  // 估算 token 数，超过 80% 阈值则压缩旧消息为摘要
+├── compactThreshold: Double = 0.8      // 触发压缩的上下文使用率阈值（对齐 Claude Code）
+├── modelContextLimit: Int = 1_000_000  // 模型上下文窗口大小（DeepSeek V4 的 1M tokens，写死）
+├── maxAutoContinue: Int = 5            // max_tokens 自动续写最大次数，防止死循环
+└── autoContinueMessage: String = "继续" // max_tokens 时自动发送的续写消息
 ```
 
 **线程模型：**
@@ -180,6 +185,13 @@ ChatViewModel
 ├── clearSelectionRef()                    // 取消选中时清除
 ├── addImage(image: ImageRef)              // 粘贴图片
 ├── removeImage(imageId: String)
+│
+├── clearSession()                          // 清空当前会话（/clear 和 /new 行为一致）
+│   → session.messages.clear()
+│   → session.compactSummary = null, session.compactCount = 0
+│   → session.plan = null
+│   → session.totalTokens 归零
+│   → 复用当前 session.id，不新建文件
 │
 └── InputState:
     ├── manualRefs: List<FileRef>          // @file 手动引用（可多个）
@@ -337,14 +349,15 @@ SessionStore
 └── releaseLock(sessionId)
 
 SessionManager
-├── createSession(title: String): AgentSession
+├── createSession(title: String): AgentSession  // title 初始为临时值（如"新会话"），第一条消息后异步生成
 ├── getSession(id: String): AgentSession?
 ├── getAllSessions(): List<SessionIndex>
 ├── deleteSession(id: String)
 ├── setCurrentSession(session: AgentSession)  // Chat 页面绑定
 ├── currentSession: AgentSession?
 ├── searchSessions(query: String): List<SessionIndex>  // title.contains()
-└── getTotalTokenUsage(range: DAY | MONTH | ALL): TokenAggregation
+├── getTotalTokenUsage(range: DAY | MONTH | ALL): TokenAggregation
+└── generateTitle(sessionId: String)           // 异步 LLM 调用生成标题（≤20字, max_tokens=64）
 
 SessionIndex:
 ├── id: String
@@ -603,6 +616,10 @@ ChatInputArea.enterPressed()
             system = SystemPromptBuilder.build(toolRegistry, skillManager)
             messages = session.messages + [userContent]
             tools = toolRegistry.toToolDefinitions()
+        → compactIfNeeded(messages, modelContextLimit)  // 估算 token 数，超过 80% 阈值 → 压缩旧消息为摘要
+            → 如触发压缩：独立 API 调用（不带 tools, max_tokens=1024）生成摘要
+            → session.messages = [摘要消息, ...近期原文(≥2轮)]
+            → SessionStore.save()
         → while (turn < maxTurns && !cancelled):
             → client.messages().createStreaming(params)
               .forEach { chunk →
@@ -612,7 +629,11 @@ ChatInputArea.enterPressed()
                   ContentBlockStart.toolUse →
                     emit(ToolCallStarted(name))  // → ToolCallCard(PENDING)
                   MessageStop →
-                    emit(TurnCompleted(usage))   // → 更新 token 统计
+                    when (stopReason):
+                      "end_turn"       → emit(TurnCompleted(usage)) → 退出 while
+                      "max_tokens"     → params.messages += UserMessage("继续") → continue while
+                                         （不持久化"继续"，不计入 turn 计数，最多连续 5 次）
+                      "stop_sequence"  → emit(TurnCompleted(usage)) → 退出 while（尾部标注）
               }
             → for each toolUse:
                 if (requiresApproval):
@@ -627,6 +648,17 @@ ChatInputArea.enterPressed()
                   emit(ToolCallCompleted(name, result))
                   params = params.add(toolCallResult)
             → turn++
+
+    → 流式中断处理：
+        主动停止（Escape）:
+          → cancelled=true + client.close() + destroyForcibly()
+          → 已累积的 MessageAccumulator 内容持久化到 session.messages
+          → 当前 streamingBuffer 中未 flush 的内容丢弃
+          → 已解析但未执行的 tool call → CANCELLED，不持久化
+          → Agent 状态 → IDLE
+        被动断连（SocketTimeoutException）:
+          → 已渲染内容保留 + 持久化（含尾部 [连接中断] 标注）
+          → 用户点击 [重试] → 发送相同 params 重新开始当前 turn
     → AgentSession.setState(IDLE)
     → SessionStore.save(session)
     → messageBus.publish(TokenUsageUpdated)
@@ -733,7 +765,9 @@ ChatViewModel.sendMessage("/plan 重构 UserService", ...)
   "totalTokens": {
     "inputTokens": 5200,
     "outputTokens": 3000
-  }
+  },
+  "compactSummary": "用户任务为重构 UserService.findById 为 suspend 函数。已完成：读取 UserService.kt 和 UserController.kt。当前正在修改方法签名...",
+  "compactCount": 2
 }
 ```
 
@@ -1090,7 +1124,39 @@ $ {command}
 
 ---
 
-## 十、Swing 布局规范
+## 十、Token 估算（统一策略）
+
+整个项目使用统一的 Token 估算方法，所有依赖 token 计数的场景均调用此方法。
+
+**公式（伪代码）：**
+
+```
+fun estimateTokens(text: String): Int {
+    if (text.isEmpty()) return 0
+    val bytes = text.encodeToByteArray().size
+    val asciiOnly = text.count { it.code <= 127 }
+    val nonAscii = text.length - asciiOnly
+    // 英文/代码 ~4 字节/token，中文 ~0.67 token/字符（即 1.5 字符/token）
+    return max(bytes / 4, asciiOnly / 4 + (nonAscii * 3) / 2)
+}
+```
+
+**精度说明：** 启发式估算，误差 ±20%。API 返回的 `usage` 字段为精确值，优先使用。估算仅用于"写入前"
+的场景（compact 阈值判定、输入框预览），持久化时使用 API 返回的精确值。
+
+**适用场景及上限：**
+
+| 场景                        | 上限                     | 方法                         |
+|---------------------------|------------------------|----------------------------|
+| Auto-Compact 触发判定         | 1M × 0.8 = 800K tokens | `estimateTokens()` 估算      |
+| 输入框实时 token 预览            | 无上限（仅展示）               | `estimateTokens()` 估算      |
+| `session.totalTokens` 持久化 | 精确值                    | API `usage` 字段，fallback 估算 |
+| 子 Agent 结果摘要截断            | 2000 tokens            | `estimateTokens()` 估算截断点   |
+| 工具返回值截断                   | 见工具截断表（按行）             | 不依赖 token 估算               |
+
+---
+
+## 十一、Swing 布局规范
 
 以下为关键 UI 组件的 LayoutManager 选择。**必须使用指定的 LayoutManager，不可替换。**
 
