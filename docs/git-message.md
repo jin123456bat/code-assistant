@@ -203,7 +203,7 @@ Content-Type: application/json
 
 ## 七、SimpleDiff 降级方案
 
-当 `git` 命令不可用时（如非 Git VCS、git 未安装），使用纯 Java 实现的 `SimpleDiff`：
+当 `git` 命令不可用时（如非 Git VCS、git 未安装），使用纯 Kotlin 实现的 `SimpleDiff`：
 
 - **算法**: Myers LCS（最长公共子序列）
 - **输出格式**: Unified diff（与 `git diff` 格式一致）
