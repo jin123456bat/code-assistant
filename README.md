@@ -16,7 +16,8 @@
 
 ### Agent 对话核心能力
 
-- 9 个内置工具（读文件/写文件/编辑文件/执行 Shell/列目录/搜索内容/读诊断/派生子 Agent/创建计划）
+- 9 个内置工具（读文件/写文件/编辑文件/执行 Shell/列目录/搜索内容/读诊断/调用 Skill/派生子 Agent）和 5
+  个计划任务管理工具（创建计划/查看步骤/删除步骤/重排步骤/标记完成）
 - Plan Mode：`/plan` 命令生成可审查的执行计划，逐步确认后执行
 - **LLM 自动规划（规划中）**：System Prompt 复杂度预判 + 轮次预警 + `createPlan` 工具让 LLM 主动拆分超长任务
 - MCP 支持：连接外部工具服务（数据库、文件系统、API）
@@ -74,9 +75,12 @@
 
 ```bash
 ./gradlew buildPlugin      # 构建插件 zip（产物在 build/distributions/）
-./gradlew runIde           # 启动 sandbox IntelliJ IDEA（autoReloadPlugins=true：改代码后重新编译即热加载）
+./gradlew runIde           # 启动 sandbox IntelliJ IDEA
 ./gradlew test             # 运行全部 JUnit 测试
 ```
+
+> **热加载提示：** 若需要热加载（改代码后重新编译即生效），请在 `build.gradle.kts` 中配置
+`autoReloadPlugins=true`。
 
 **环境：** JVM 21、Kotlin 2.0.21、IntelliJ Platform 2024.3（IntelliJ IDEA Community）、Gradle IntelliJ
 Platform Plugin 2.2.1
@@ -90,8 +94,9 @@ Platform Plugin 2.2.1
 | `↑` / `↓`          | `↑` / `↓`     | 补全候选切换         |
 | `Enter`            | `Enter`       | 发送消息           |
 | `Shift+Enter`      | `Shift+Enter` | 输入框换行          |
-| `Escape`           | `Escape`      | 停止生成 / 关闭弹窗    |
+| `Escape`           | `Escape`      | 关闭 Popup       |
 | `Ctrl+Shift+N`     | `Cmd+Shift+N` | 新建会话           |
+| `↑`（空输入框）          | `↑`（空输入框）     | 填充上一条消息        |
 
 ## 文档索引
 
@@ -101,6 +106,7 @@ Platform Plugin 2.2.1
 | [`docs/correctness.md`](docs/correctness.md) | Agent 正确性验证体系 — 防幻觉、代码验证、方案验证                                 |
 | [`docs/completion.md`](docs/completion.md)   | 代码自动补全 — FIM 流程、PSI 上下文增强、缓存、后处理、统计                           |
 | [`docs/git-message.md`](docs/git-message.md) | Git Message — diff 构建、Prompt 模板、流式生成、按钮交互                     |
+| [`DESIGN.md`](DESIGN.md)                     | Agent Mode 总体设计 — 目标、架构分层、数据流、功能设计、路由规划                       |
 | [`docs/tech-spec.md`](docs/tech-spec.md)     | Agent 技术契约 — 接口定义、线程模型、JSON Schema、System Prompt              |
 | [`docs/ui-ux-spec.md`](docs/ui-ux-spec.md)   | Agent UI/UX 设计规范 — 色板、字体、间距、组件状态、动效                           |
 
@@ -115,7 +121,7 @@ Platform Plugin 2.2.1
 | 代码补全          | 启用                | 开关                  |
 | 补全 max_tokens | 256               | 范围 1-1024           |
 | Commit Prompt | 默认模板              | 自定义模板，`{diff}` 占位   |
-| Agent 最大轮次    | 15（0=不限）          | 达到上限后自动终止           |
+| Agent 最大轮次    | 20（0=不限）          | 达到上限后自动终止           |
 | 多 Agent 并发上限  | 3                 | 父 + 子 Agent 总计      |
 
 ## 开发状态
@@ -127,7 +133,7 @@ Platform Plugin 2.2.1
 - 仅支持 DeepSeek API，不支持其他 LLM 提供商
 - MCP `resources/list` 和 `prompts/list` 暂不支持
 - 多 Agent 嵌套上限 1 层（子 Agent 不可再 spawn）
-- Sessions 全文搜索暂未实现（v1 仅 title 过滤）
+- Sessions 全文搜索暂未实现，当前仅支持按标题过滤
 - `Grep` 支持正则表达式匹配，不区分大小写。非法正则自动回退字面子串
 - `@file` glob 匹配上限 50 个文件，超出部分由 Glob 工具告知 LLM 截断情况，LLM 自行决定是否翻页
 
