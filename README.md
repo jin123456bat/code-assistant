@@ -100,15 +100,13 @@ Platform Plugin 2.2.1
 
 ## 文档索引
 
-| 文档                                           | 说明                                                            |
-|----------------------------------------------|---------------------------------------------------------------|
-| [`docs/agent.md`](docs/agent.md)             | Agent 对话 — 架构、Agent Loop、工具系统、Plan Mode、多 Agent、MCP、Skills、UI |
-| [`docs/correctness.md`](docs/correctness.md) | Agent 正确性验证体系 — 防幻觉、代码验证、方案验证                                 |
-| [`docs/completion.md`](docs/completion.md)   | 代码自动补全 — FIM 流程、PSI 上下文增强、缓存、后处理、统计                           |
-| [`docs/git-message.md`](docs/git-message.md) | Git Message — diff 构建、Prompt 模板、流式生成、按钮交互                     |
-| [`DESIGN.md`](DESIGN.md)                     | Agent Mode 总体设计 — 目标、架构分层、数据流、功能设计、路由规划                       |
-| [`docs/tech-spec.md`](docs/tech-spec.md)     | Agent 技术契约 — 接口定义、线程模型、JSON Schema、System Prompt              |
-| [`docs/ui-ux-spec.md`](docs/ui-ux-spec.md)   | Agent UI/UX 设计规范 — 色板、字体、间距、组件状态、动效                           |
+| 文档                                                       | 说明                                   |
+|----------------------------------------------------------|--------------------------------------|
+| [`docs/agent.md`](docs/agent.md)                         | Agent 智能对话 — 模块总览，引用所有 Agent 功能子文档   |
+| [`docs/ui.md`](docs/ui.md)                               | UI/UX 设计 — 模块总览，引用所有 UI 功能子文档        |
+| [`docs/completion.md`](docs/completion.md)               | 代码自动补全 — FIM 流程、PSI 上下文增强、缓存、后处理     |
+| [`docs/git-message.md`](docs/git-message.md)             | Git Message — diff 构建、Prompt 模板、流式生成 |
+| [`docs/agent/correctness.md`](docs/agent/correctness.md) | Agent 正确性验证体系 — 防幻觉、代码验证、方案验证        |
 
 ## 配置项
 

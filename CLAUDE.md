@@ -6,7 +6,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **本项目所有输出必须使用简体中文**，包括但不限于：代码注释、文档、Git commit message、PR 描述、Issue 回复、对话回复。禁止输出英文内容。
 
-> 项目概述、常用命令、架构概览见 [`README.md`](README.md)。
+> 项目概述、常用命令、架构概见 [`README.md`](README.md)。
+
+## 文档体系
+
+```
+docs/
+├── agent.md                    Agent 模块总览 → agent/ 子文档
+├── ui.md                       UI 模块总览 → ui/ 子文档
+├── completion.md               代码补全模块
+├── git-message.md              Commit Message 模块
+├── agent/                      Agent 功能子文档（loop/tools/plan/multi-agent/context/correctness/skills/mcp/session）
+├── ui/                         UI 功能子文档（pages/chat/design-system/components）
+└── specs/                      跨模块规范（thread-model/event-bus/data-flow/system-prompt/tool-return-formats/token-estimation/persistence/settings）
+```
 
 ## 架构速查
 
@@ -19,7 +32,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | Session    | `SessionManager`, `SessionStore`                                                                                  | JSON 持久化：.tmp → ATOMIC_MOVE + FileLock                                                                                                       |
 | Skills     | `SkillManager`                                                                                                    | SKILL.md 扫描/解析/交叉验证工具声明                                                                                                                      |
 | MCP        | `McpManager`                                                                                                      | MCP Server 生命周期（启动/握手/心跳/崩溃重启）                                                                                                               |
-| UI         | `AppColors`, `ChatToolWindow`, `TabBar`, `MessageBus`, `SelectionListener`, `OpenChatAction` + 7 page + 5 chat 组件 | 统一颜色令牌，亮/暗主题                                                                                                                                 |
+| UI         | `AppColors`, `ChatToolWindow`, `TabBar`, `MessageBus`, `SelectionListener`, `OpenChatAction` + 7 page + 5 chat 组件 | 统一颜色令牌，亮/暗主题；详细设计见 [`docs/ui.md`](docs/ui.md)                                                                                                |
 
 ## Skill routing
 
@@ -59,7 +72,7 @@ bug（[#1069](https://github.com/deepseek-ai/DeepSeek-V3/issues/1069)），`stri
 `closed-as-stale` / `closed as not planned`（不再计划修复）。当前 `/anthropic` 端点不受影响，
 继续使用该端点即可。如需切换到原生 `/beta` API，需自行验证该 bug 是否已在后续版本中修复。
 
-详细 Schema 生成流程见 [`docs/tech-spec.md`](docs/tech-spec.md)。
+详细 Schema 生成流程见 [`docs/specs/system-prompt.md`](docs/specs/system-prompt.md)。
 
 **参考文档：**
 

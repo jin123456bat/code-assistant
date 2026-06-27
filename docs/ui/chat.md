@@ -1,0 +1,521 @@
+# 聊天面板
+
+> 关联文档：[[pages]], [[design-system]], [[components]], [[../agent/loop]], [[../agent/tools]]
+
+## 一、面板布局
+
+```
+┌──────────────────────────────────────────────────────┐
+│ [🏠] [💬] [📁] [📊] [🔌] [🎯] [⚙] │ ← 顶部 TabBar
+├──────────────────────────────────────────────────────┤
+│  🤖 Code Assistant                          [🗑] [✕]│ ← 标题行
+├──────────────────────────────────────────────────────┤
+│  消息列表（JScrollPane）                              │
+│  ├ 用户气泡 (右对齐, 蓝底)                           │
+│  ├ Agent 文本 (左对齐, Markdown 渲染)                │
+│  ├ 工具调用卡片 (折叠, 8 状态)                       │
+│  ├ 错误气泡 (红底 + 重试)                           │
+│  └ 系统消息 (居中, 灰色)                            │
+├──────────────────────────────────────────────────────┤
+│ 📄 UserService.kt:40-60 [✕] 📄 Config.java [✕]        │ ← Tags 行
+│ 输入你的问题，@ 选择文件或 Ctrl+V 粘贴图片...             │ ← 文本区域
+│ [+]  @ 选择文件                              [→]       │ ← 底部栏
+└──────────────────────────────────────────────────────┘
+```
+
+### 颜色
+
+亮/暗双主题通过 `AppColors` 令牌统一管理：
+
+| 元素         | 亮色主题          | 暗色主题          |
+|------------|---------------|---------------|
+| 用户气泡       | `#E8F0FE`     | `#1E3A5F`     |
+| Agent 气泡   | `#FFFFFF`     | `#1F2937`     |
+| 错误气泡       | `#FEE2E2`     | `#7F1D1D`     |
+| 系统消息       | `#9CA3AF`     | `#6B7280`     |
+| 代码块背景      | `#F6F8FA`     | `#1E1E2E`     |
+| Agent 左侧蓝线 | `#3B82F6` 3px | `#60A5FA` 3px |
+
+## 二、消息气泡
+
+### 用户气泡
+
+```
+bg=#E8F0FE 圆角=12px
+右对齐，maxWidth=容器宽度×70%（默认 300-500px）
+padding=12px
+文字=Body (14px)
+底部: 时间戳 Caption fg=#9CA3AF 右对齐
+```
+
+### Agent 气泡（Markdown 流式渲染）
+
+```
+bg=#FFFFFF 圆角=12px
+左对齐，maxWidth=容器宽度×85%（默认 300-500px）
+border-left=3px #3B82F6
+padding=12px
+文字=Body (14px)
+底部: 时间戳 + token 消耗 Caption
+```
+
+**流式渲染策略：** token 到达 → 30ms Swing Timer 批量 flush → 增量更新最后一段。未闭合 Markdown
+块（如未配对的 ```）缓存等待，闭合后再渲染。`MessageAccumulator` 自动累积完整 Message 用于持久化。
+
+**代码块渲染：** 不真正 inline 嵌入。Markdown 文本拆分为"文本段 + 代码块 + 文本段"序列，每段独立组件，包裹在
+BoxLayout.Y_AXIS 的 BubblePanel 中。EditorTextField 设为 `viewer=true`（只读），语言前缀映射到
+`Language` 对象。
+
+```
+┌─────────────────────────────────────────┐
+│ 好的，先读取 UserService.kt...          │ ← 普通段落
+│                                         │
+│ ┌─────────────────────────────────┐     │
+│ │ fun findById(id: Long): User?  │     │ ← 代码块 (EditorTextField)
+│ │     return repo.findById(id)   │     │   语法高亮, 只读, block-level
+│ └─────────────────────────────────┘     │
+│                                         │
+│ 接下来：1. 加 suspend  2. 改调用...     │ ← 有序列表
+│                                         │
+│ 14:33  |  tokens: 1.2K+0.4K            │ ← 底部统计
+└─────────────────────────────────────────┘
+```
+
+### 流式气泡（生成中）
+
+- 与 Agent 气泡样式相同
+- 末尾闪烁光标 ▍ (`#3B82F6`, 500ms blink)
+- 30ms batch flush → 增量渲染最后一段
+- 未闭合代码块 → 缓存等待
+
+### 错误气泡
+
+```
+bg=#FEE2E2 圆角=12px
+border-left=3px #EF4444
+图标: AllIcons.RunConfigurations.TestFailed
+[重试] 按钮
+[复制错误信息] 按钮
+```
+
+### 系统消息
+
+```
+居中，fg=#9CA3AF Caption (11px)
+无背景，仅文字
+示例: "── 14:30 ──"
+```
+
+## 三、思考过程
+
+DeepSeek V4 在流式响应中会先输出 `reasoning_content`（思考过程），再输出正式回复。思考过程以折叠块形式展示，默认收起：
+
+```
+┌─────────────────────────────────────────┐
+│ ▶ 💭 思考过程                    1.2s   │ ← 点击展开/折叠
+├─────────────────────────────────────────┤
+│ 需要先读取 UserService.kt 了解当前实现， │ ← 展开后显示
+│ 然后修改方法签名和调用处。考虑到协程...  │   斜体, 浅橙背景 #FFF8F0
+└─────────────────────────────────────────┘
+```
+
+- 无 tool call 时：思考过程在前，回复文本在后
+- 有 tool call 时：思考过程在前，tool call 在后（思考决定调用哪个工具）
+- 默认折叠，用户可点击展开查看完整推理
+- 文字颜色：亮色 `#92400E`，暗色 `#FBBF24`；背景：亮色 `#FFF8F0`，暗色 `#422006`
+- 思考内容**不持久化**到 Session JSON（节省存储，仅回复文本+tool calls 持久化）
+
+## 四、工具调用卡片（8 状态）
+
+```
+展开态:
+┌──────────────────────────────────────────┐
+│ ▾ 🔧 Bash                         ⏳   │ ← 头部(箭头+工具名+状态), 可点击折叠
+│ ┌──────────────────────────────────────┐ │
+│ │ command: ./gradlew build            │ │ ← 参数
+│ └──────────────────────────────────────┘ │
+│ ┌──────────────────────────────────────┐ │
+│ │ BUILD SUCCESSFUL in 12s            │ │ ← 结果 (monospaced, 灰底, max-h=240px)
+│ └──────────────────────────────────────┘ │
+│ 耗时: 12.3s                              │
+└──────────────────────────────────────────┘
+
+折叠态:
+┌──────────────────────────────────────────┐
+│ ▶ 🔧 Bash                         ⏳   │ ← 仅显示头部
+└──────────────────────────────────────────┘
+```
+
+### 8 个状态
+
+| 状态                   | 图标         | 颜色       | 说明              |
+|----------------------|------------|----------|-----------------|
+| ⏳ PENDING            | Step_0     | Gray 500 | 等待执行            |
+| 🔒 AWAITING_APPROVAL | Warning    | 黄色       | 等待用户审批，始终展开不可折叠 |
+| 🔄 EXECUTING         | Step_4 旋转  | 蓝色       | 执行中，不可折叠，显示进度条  |
+| ✅ DONE               | TestPassed | 绿色       | 执行成功            |
+| ❌ ERROR              | TestFailed | 红色       | 执行失败，含 [重试] 按钮  |
+| ⏰ TIMEOUT            | Warning    | 橙色       | 超时              |
+| 🚫 REJECTED          | Suspend    | 灰色       | 用户拒绝，含 [重审] 按钮  |
+| ⛔ CANCELLED          | Suspend    | 灰色       | 用户终止            |
+
+### 折叠/展开规则
+
+- 所有状态默认折叠，用户点击头部展开
+- 箭头 ▾/▶ 切换
+- AWAITING_APPROVAL 始终展开不可折叠
+- EXECUTING 不可折叠
+- 结果区域 max-height=240px，超出滚动显示
+
+### Diff 可视化（⏳ 规划中）
+
+`Edit` 执行成功后，ToolCallCard 内联展示可视化 Diff（`SimpleDiff` 生成，ADD 绿色/DEL 红色/CTX
+灰色），替换纯文本的前后对比。
+
+## 五、Plan 卡片
+
+```
+┌──────────────────────────────────────────┐
+│ ▾ 📋 执行计划                   1/4 已完成│ ← 头部（可点击折叠/展开，进度在头部右侧）
+│ 任务: {summary}                          │ ← Body Small
+│ 涉及: {fileCount}个文件 {toolList}        │
+├──────────────────────────────────────────┤
+│ Step N:                                  │ ← 每步独立行
+│ ⬜/🔄/✅/❌/🗑  {description}              │ ← 状态图标 + 描述
+│    工具: {tool}  文件: {fileList}        │ ← Caption
+│                           [✕]  ← PENDING │ ← 用户可删除待执行步
+└──────────────────────────────────────────┘
+
+折叠态（仅显示头部 + 当前执行步骤）:
+┌──────────────────────────────────────────┐
+│ ▶ 📋 执行计划                   1/4 已完成│ ← 头部（点击展开）
+│ 任务: {summary}                          │
+│ 🔄 {当前 EXECUTING 步骤描述}              │ ← 仅显示执行中步骤
+│    工具: {tool}  文件: {fileList}        │
+└──────────────────────────────────────────┘
+```
+
+### 折叠行为
+
+- 默认折叠（仅显示头部标题+摘要+进度）
+- 点击头部任意位置切换折叠/展开
+- EXECUTING 状态下自动展开且不可折叠（确保用户看到当前执行步骤）
+- 全部步骤 DONE 或 DELETED 后 PlanCard 消失
+
+### Step 状态样式
+
+| 状态        | 图标 | 样式                                    |
+|-----------|----|---------------------------------------|
+| PENDING   | ⬜  | fg=#6B7280, bg=transparent, 行末 [✕] 可见 |
+| EXECUTING | 🔄 | fg=#3B82F6, bg=#EFF6FF, 左侧蓝色竖线 2px    |
+| DONE      | ✅  | fg=#22C55E, bg=transparent            |
+| DELETED   | 🗑 | fg=#9CA3AF, bg=transparent, 删除线       |
+
+## 六、多 Agent 调度卡片（MultiAgentBlock）
+
+```
+┌──────────────────────────────────────────┐
+│ ▶ 🤖 多 Agent 调度中           2/3 运行中│ ← 头部（可点击折叠）
+├──────────────────────────────────────────┤
+│ 🔵 子 Agent A: 重构 UserService   ✅ 完成│ ← 点击展开该子 Agent 详情
+│ ├─ 流式输出: 已读取文件，开始修改...       │ ← 展开后的子 Agent 流式文本
+│ ├─ 🔧 Read       ✅ DONE       ▶│ ← 嵌套 ToolCallCard（可折叠）
+│ └─ 耗时: 2.3s  详情: sub-session #42    │
+├──────────────────────────────────────────┤
+│ 🔵 子 Agent B: 更新 UserController🔄 执行 │
+│    流式生成中...▍                         │
+├──────────────────────────────────────────┤
+│ ⏸ 子 Agent C: 运行测试          ⏸ 排队  │ ← 未开始，不可展开
+├──────────────────────────────────────────┤
+│ 并发上限: 3 | 文件锁: UserService.kt (B) │ ← 底部状态行
+└──────────────────────────────────────────┘
+```
+
+- 头部可点击折叠/展开整个卡片（箭头 ▶/▾ 切换），默认折叠
+- 点击已完成/执行中的子 Agent 行 → 展开该子 Agent 的详情（流式输出 + 嵌套 ToolCallCard + 耗时）
+- 排队的子 Agent 不可展开
+- 卡片背景: `#F0F7FF`（亮）/ `#0F1D2F`（暗），border=`#BFDBFE`
+- 完成色: `#22C55E`，执行中色: `#3B82F6`，排队色: `#6B7280`
+
+## 七、输入区域
+
+```
+┌─────────────────────────────────────────┐
+│ 📄 UserService.kt:40-60 [✕]              │ ← Tags 行（输入框上方，FlowLayout，文件+图片混合排列）
+│ 📄 Config.java [✕]  🖼 screenshot.png    │
+├─────────────────────────────────────────┤
+│                                         │
+│ 输入你的问题，@ 选择文件或 Ctrl+V 粘贴图片  │ ← 文本区域（无边框，自适应 2-10 行）
+│                                         │
+├─────────────────────────────────────────┤
+│ [+]  @ 选择文件                    [→]   │ ← 底部栏
+└─────────────────────────────────────────┘
+
+交互:
+  ├─ 点击 [+] 或输入 @ → 弹出文件选择 Popup（按子目录分组，支持子目录文件）
+  ├─ 选中文件 → 自动添加 tag 到 Tags 行，tag 可点击 ✕ 移除
+  ├─ 输入 / → 弹出指令选择 Popup
+  └─ Enter → 发送消息
+```
+
+### @file 引用格式
+
+- `@file` 注入格式：`[File: UserService.kt (156 lines)]\n<content>\n[/File]`
+- 选中代码注入格式：`[Selection from UserService.kt:40-60]\n<selected code>\n[/Selection]`
+- 两者同时存在时：@file 内容在前，选中在后。同一文件既被 @file 引用又被选中 → 去重：@file
+  注入完整文件，选中内容不重复注入，但保留选中行号标记
+- 选中引用仅一个（新选中替换旧），@file 引用可多个
+- 输入框 tag 显示：手动 @file tag 可多个 `[📎 UserService.kt ✕]`，选中 tag 仅一个
+  `[📎 UserService.kt:40-60]`（不用 ✕，取消选中自动消失）
+- @file glob 匹配上限 50 个文件，超出部分不注入
+
+### IDE 代码选中即时引用
+
+用户在编辑器中选择代码 → 自动更新输入框中的引用 tag（无需右键菜单）：
+
+- 选中后立即生效——tag 自动替换为 `📄 UserService.kt:40-60 [✕]`
+- **仅允许一个**选中引用——新选中会替换旧的
+- 取消选中 → tag 自动移除
+- 选中内容作为上下文注入，附带文件名 + 精确行号
+
+### 剪贴板图片粘贴
+
+```
+剪贴板检测到图片 → Clipboard.getSystemClipboard().getData(DataFlavor.imageFlavor)
+  → BufferedImage → 缩放限制（长边 max 2048px，保持比例）
+  → PNG 编码 → Base64 → data:image/png;base64,...
+  → 注入到 LLM 消息的 content 数组中（image block 类型）
+  → 输入区域显示缩略图 tag [🖼 filename ✕]，可点击删除
+```
+
+- 支持格式：PNG、JPEG、GIF、WebP、BMP
+- 单张上限 5MB，单次粘贴最多 5 张
+- UI 展示：48×48 缩略图 tag，带文件名和大小
+- 图片不注入文本上下文——作为独立的 `image` content block 与文本 `text` block 并列在 API 请求的 user
+  message `content` 数组中
+
+## 八、/ 指令 & @ 文件引用 Popup
+
+输入 `/` 或 `@` 或点击 [+] 时从输入区域底部弹出选择列表，支持键盘导航和实时过滤：
+
+```
+输入 `/`:
+┌──────────────────────────────┐
+│ 内置指令                      │
+│ /plan    生成执行计划         │ ← ↑↓ 移动高亮
+│ /clear   清除会话上下文       │ ← Enter 确认
+│ Skills                       │ ← Esc 关闭
+│ /review  审查代码质量         │ ← 继续输入实时过滤
+│ /refactor 重构代码            │
+│ /test     生成单元测试         │
+└──────────────────────────────┘
+
+输入 `@` / 点击 [+]:
+┌──────────────────────────────┐
+│ 📁 src/main/kotlin/service/  │ ← 按子目录分组
+│   UserService.kt   service/  │
+│   AuthService.kt   service/  │
+│ 📁 src/main/kotlin/controller/│
+│   UserController   controller/│
+│ 📁 src/main/java/config/     │
+│   Config.java      config/   │
+│ 📁 项目根目录                 │
+│   build.gradle.kts ./        │
+└──────────────────────────────┘
+   最大 8 行可见 + 滚动条
+```
+
+**键盘导航：** ↑↓ 移动高亮（循环），Enter 确认选择，Esc 关闭，继续输入实时过滤匹配项。
+
+`/` 指令列表内容：内置指令（`/plan`, `/clear`）+ 已启用 Skills 的 command（如 `/review`, `/refactor`）。
+
+## 九、选项组件（OptionsBlock）
+
+当 Agent 需要用户做选择时（而非简单的审批），以选项列表形式呈现：
+
+```
+┌─────────────────────────────────────────┐
+│ 选择下一步操作：                         │ ← 提问标题
+├─────────────────────────────────────────┤
+│ ● A  直接用 Edit 修改               │ ← 选中态：蓝左边框 + 蓝圆圈
+│       修改 UserService.kt 和相关调用处    │
+├─────────────────────────────────────────┤
+│ ○ B  生成 Plan 确认后再执行              │ ← 默认态
+│       列出详细步骤，逐步执行，可随时调整   │
+├─────────────────────────────────────────┤
+│ ○ C  只改 UserService.kt                │
+│       其他调用处不动，快速验证方案        │
+├─────────────────────────────────────────┤
+│ [确认选择]          已选: B             │ ← 操作栏
+└─────────────────────────────────────────┘
+```
+
+选项状态：
+
+- Default: fg=#374151, bg=transparent, 左边框透明
+- Hover: bg=#F3F4F6（亮）/ #1F2937（暗）
+- Selected: bg=#EFF6FF（亮）/ #1E3A5F（暗），border-left: 3px solid #3B82F6，圆圈实心蓝
+- Disabled: fg=#9CA3AF, cursor=default
+
+## 十、用户反馈
+
+每条 assistant 消息右下角附加 👍/👎 按钮：
+
+- 点击后记录到 Session JSON 对应消息的 `feedback: "positive" | "negative"` 字段
+- 不影响当前对话流程，无额外 UI 弹窗
+- v1 仅收集，不做自动分析。后续可用于评估 Agent 输出质量
+
+## 十一、Toast & 横幅
+
+```
+Toast（右下角弹出，3s 自动消失）:
+┌────────────────────────────────┐
+│ ✅ API Key 验证成功            │ ← bg=#22C55E, fg=#FFFFFF
+│                                │   圆角 8px, inset-md
+│ ❌ 网络不可用，Key 暂未验证     │ ← bg=#EF4444
+│                                │   从底部滑入 (300ms ease-out)
+│ ⚠ 项目正在建立索引，搜索结果   │ ← bg=#F59E0B, fg=#FFFFFF
+│   可能不完整                   │
+└────────────────────────────────┘
+
+横幅（页面顶部，持续显示直到条件消除）:
+┌──────────────────────────────────────────────────────────┐
+│ 🔄 正在验证 API Key...                                   │ ← Chat 页顶部
+│    bg=#EFF6FF, fg=#3B82F6, 无关闭按钮                    │
+├──────────────────────────────────────────────────────────┤
+│ ⚠ API Key 无效，请检查 Settings                          │ ← Chat 页顶部
+│    bg=#FEE2E2, fg=#EF4444, [✕ 关闭] [⚙ Settings]       │
+└──────────────────────────────────────────────────────────┘
+```
+
+## 十二、ChatViewModel 接口
+
+```
+ChatViewModel
+├── messages: ObservableList<ChatMessage>  // UI 绑定列表（只读）
+├── streamingToken: ObservableString       // 当前流式 token（UI 绑定）
+├── session: AgentSession                  // 当前绑定的会话
+├── inputState: InputState                 // 输入区域状态
+│
+├── sendMessage(text: String, attachments: List<FileRef>, images: List<ImageRef>)
+│   → 调用 AgentLoop.run() → collect AgentEvent → 更新 messages/streamingToken
+├── cancelGeneration()                     // 停止按钮
+├── addFileRef(ref: FileRef)               // 添加文件引用（手动或选中）
+├── removeFileRef(ref: FileRef)
+├── updateSelectionRef(file: String, lines: IntRange?, content: String)  // 更新选中引用
+├── clearSelectionRef()                    // 取消选中时清除
+├── addImage(image: ImageRef)              // 粘贴图片
+├── removeImage(imageId: String)
+│
+├── clearSession()                          // 清空当前会话（/clear 和 /new 行为一致）
+│   → session.messages.clear()
+│   → session.compactSummary = null, session.compactCount = 0
+│   → session.plan = null
+│   → session.totalTokens 归零
+│   → 复用当前 session.id，不新建文件
+│
+├── rollbackToMessage(messageId: String)     // 回退：标记 messageId 之后的消息 deleted=true
+├── undoRollback()                           // 撤销回退：恢复最近回退的消息 deleted=false
+└── hasPendingRollback: Boolean              // 是否存在可撤销的回退
+│
+└── InputState:
+    ├── manualRefs: List<FileRef>          // @file 手动引用（可多个）
+    ├── selectionRef: FileRef?             // 选中代码引用（仅一个）
+    ├── images: List<ImageRef>             // 粘贴的图片（可多个，单次 ≤ 5 张）
+    └── tokenCount: Int                    // 当前输入估算 token 数（不含图片）
+
+ChatMessage:
+├── id: String
+├── type: USER_TEXT | AGENT_TEXT | TOOL_CALL | TOOL_RESULT | ERROR | SYSTEM
+├── content: String                        // Markdown 源码
+├── toolCall: ToolCallUIData?              // TOOL_CALL 类型的额外数据
+├── timestamp: Instant
+└── tokenDelta: TokenDelta?                // AGENT_TEXT 的单条消息级 token 增量
+
+ToolCallUIData:
+├── toolName: String
+├── parameters: Map<String, Any>
+├── state: PENDING | AWAITING_APPROVAL | EXECUTING | DONE | ERROR | TIMEOUT | REJECTED | CANCELLED
+├── result: String?
+├── durationMs: Long?
+└── planStepId: String?
+```
+
+## 十三、ChatBubbleRenderer 接口
+
+```
+ChatBubbleRenderer
+├── render(msg: ChatMessage): JComponent
+│   → 根据 msg.type 分发：
+│     USER_TEXT   → 右对齐蓝色气泡（JTextPane, HTML）
+│     AGENT_TEXT  → 左对齐 Markdown 气泡（BlockSequence）
+│     TOOL_CALL   → ToolCallCard
+│     ERROR       → 红色错误气泡 + [重试]
+│     SYSTEM      → 居中灰色分隔线
+│
+├── renderStreaming(markdownText: String): JComponent
+│   → 流式 Markdown → BlockSequence（30ms batch flush）
+│
+└── BlockSequence:
+    ├── 内部结构：List<Block>
+    │   Block = TextBlock | CodeBlock | HeaderBlock | ListBlock | QuoteBlock
+    ├── TextBlock   → JTextPane (HTML, 段落/加粗/斜体/行内代码)
+    ├── CodeBlock   → EditorTextField (语法高亮, 只读, viewer=true)
+    ├── HeaderBlock → JTextPane (大号字体)
+    ├── ListBlock   → JTextPane (项目符号/编号列表)
+    └── QuoteBlock  → JTextPane (灰色左边框)
+```
+
+## 十四、ChatInputArea 接口
+
+```
+ChatInputArea
+├── 构造: ChatInputArea(viewModel: ChatViewModel)
+├── textArea: JTextArea                       // 输入框（无边框，自适应 2-10 行）
+├── tagsRow: JPanel                           // Tags 行（FlowLayout，文件+图片混合排列，位于输入框上方）
+├── addFileButton: JButton                    // [+] 按钮 → 弹出文件选择 Popup
+├── sendButton: JButton                       // [→] 发送按钮
+├── hintLabel: JLabel                         // "@ 选择文件" 提示
+│
+├── onSlashTrigger(): Unit                    // 输入 `/` → 弹出指令列表 Popup
+├── onAtTrigger(): Unit                       // 输入 `@` 或点击 [+] → 弹出文件搜索 Popup
+├── handlePopupKeyDown(event: KeyEvent): Boolean  // Popup 键盘导航 (↑↓ Enter Esc)
+├── onPasteImage(image: BufferedImage)        // 剪贴板图片粘贴回调
+│
+└── 剪贴板监听：
+    → Toolkit.getDefaultToolkit().systemClipboard
+    → 检测 DataFlavor.imageFlavor
+    → Ctrl+V / Cmd+V 时若剪贴板含图片 → onPasteImage()
+```
+
+## 十五、ApprovalDialog 接口
+
+```
+ApprovalDialog
+├── 类型: MODAL（阻塞父窗口），可拖动
+├── 布局: BorderLayout
+│   ├── NORTH: JLabel 标题行
+│   │   ├── 首次审批: "允许 {toolName} 执行？"（蓝色图标）
+│   │   ├── 危险命令: "⚠️ 危险操作"（红色图标，不可跳过）
+│   │   └── 关键操作: "确认 {操作类型}？"（黄色图标）
+│   ├── CENTER: JTextPane（只读）
+│   │   ├── 说明行（如"Code Assistant 将执行: rm -rf /path"）
+│   │   └── 代码块展示完整命令/参数
+│   └── SOUTH: JPanel(FlowLayout.RIGHT) 按钮行
+│       ├── [允许一次] — 执行本次，下次再弹（默认按钮）
+│       ├── [允许此会话] — 仅首次审批场景，会话内后续不弹
+│       ├── [拒绝] — 不执行，ToolCallCard → REJECTED
+│       └── 危险命令无"允许此会话"按钮
+├── 超时: 无超时（CountDownLatch 永久等待）
+└── 生命周期: dispose() 时必须 countDown() 释放 latch，防止 EDT 死锁
+```
+
+### 审批触发规则
+
+| 场景         | 触发条件                                                | 审批类型           |
+|------------|-----------------------------------------------------|----------------|
+| 首次工具使用     | 每个会话每种工具首次调用                                        | 首次审批（可"允许此会话"） |
+| Shell 危险命令 | `rm -rf /`, `git push --force`, `sudo`, `chmod 777` | 危险命令确认（不可跳过）   |
+| 公共 API 变更  | Edit/Write 修改 `public`/`open` 方法签名                  | 关键操作确认（⏳ 规划中）  |
+| 大范围修改      | 同一 turn 修改 ≥5 个文件                                   | 关键操作确认（⏳ 规划中）  |
+| 文件删除       | Bash 含 `rm ` 且目标在项目内                                | 关键操作确认（⏳ 规划中）  |

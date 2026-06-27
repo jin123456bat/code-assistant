@@ -1,0 +1,207 @@
+# 持久化 JSON Schema
+
+> **原始来源：** `docs/tech-spec.md`（已拆分，内容归入 `docs/specs/` 各文件）
+
+本文档定义 Code Assistant Agent Mode 的持久化 JSON Schema，包括会话（Session）、会话索引（Session Index）和
+MCP 配置的数据结构。另附会话存储的写入流程与读取容错描述。
+
+---
+
+## 存储概述
+
+- 目录：`<project>/.code-assistant/sessions/<uuid>.json`
+- 写入流程：Jackson 序列化 → `.tmp` 临时文件 → `Files.move(ATOMIC_MOVE)` 原子替换 →
+  `FileChannel.tryLock()` OS 级排他锁（跨进程写锁）
+- 读取容错：`JsonParseException` → 跳过损坏文件；`FileNotFoundException` → 从 index.json 移除条目
+- SessionStore 在 Background Thread 上执行保存
+
+---
+
+## 6.1 Session JSON
+
+```json
+{
+  "id": "uuid",
+  "parentId": null,
+  "title": "重构 UserService",
+  "createdAt": "2026-06-24T14:30:00Z",
+  "updatedAt": "2026-06-24T14:45:00Z",
+  "messages": [
+    {
+      "id": "msg-1",
+      "role": "USER",
+      "content": "帮我重构 UserService",
+      "timestamp": "2026-06-24T14:30:00Z"
+    },
+    {
+      "id": "msg-2",
+      "role": "ASSISTANT",
+      "content": "好的，让我先读取文件...",
+      "timestamp": "2026-06-24T14:30:05Z",
+      "toolCalls": [
+        {
+          "id": "tooluse-1",
+          "name": "Read",
+          "parameters": {
+            "filePath": "UserService.kt",
+            "startLine": null,
+            "endLine": null
+          },
+          "result": "...",
+          "state": "DONE",
+          "durationMs": 15
+        }
+      ],
+      "tokenUsage": {
+        "inputTokens": 1200,
+        "outputTokens": 400
+      }
+    }
+  ],
+  "plan": {
+    "id": "plan-1",
+    "status": "EXECUTING",
+    "summary": "重构 UserService.findById 为 suspend 函数",
+    "currentStepIndex": 1,
+    "steps": [
+      {
+        "id": "step-1",
+        "description": "读取 UserService.kt",
+        "tool": "Read",
+        "files": [
+          "UserService.kt:40-60"
+        ],
+        "status": "DONE",
+        "result": "成功读取 156 行",
+        "retryCount": 0
+      },
+      {
+        "id": "step-2",
+        "description": "修改方法签名为 suspend fun",
+        "tool": "Edit",
+        "files": [
+          "UserService.kt"
+        ],
+        "status": "PENDING",
+        "retryCount": 0
+      }
+    ],
+    "createdAt": "2026-06-24T14:30:00Z",
+    "updatedAt": "2026-06-24T14:35:00Z"
+  },
+  "totalTokens": {
+    "inputTokens": 5200,
+    "outputTokens": 3000
+  },
+  "compactSummary": "用户任务为重构 UserService.findById 为 suspend 函数。已完成：读取 UserService.kt 和 UserController.kt。当前正在修改方法签名...",
+  "compactCount": 2
+}
+```
+
+### Message 字段说明
+
+| 字段           | 类型                       | 说明                                                                      |
+|--------------|--------------------------|-------------------------------------------------------------------------|
+| `id`         | String                   | 消息唯一标识                                                                  |
+| `role`       | String                   | `USER` / `ASSISTANT` / `SYSTEM` / `TOOL_CALL` / `TOOL_RESULT` / `ERROR` |
+| `content`    | String                   | 消息正文                                                                    |
+| `timestamp`  | String (ISO 8601)        | 时间戳                                                                     |
+| `toolCalls`  | Array\<ToolCallRecord\>? | ASSISTANT 消息可能含工具调用记录                                                   |
+| `tokenUsage` | TokenDelta?              | 单条 ASSISTANT 消息的 token 增量                                               |
+| `feedback`   | String?                  | 用户反馈 `"positive"` / `"negative"`，仅 ASSISTANT 消息                         |
+| `deleted`    | Boolean                  | 回退标记，`true` 时持久化保留但 UI 不渲染。撤销回退时恢复为 `false`                             |
+
+### Plan 字段说明
+
+| 字段                 | 类型                | 说明                                           |
+|--------------------|-------------------|----------------------------------------------|
+| `id`               | String            | 计划唯一标识                                       |
+| `status`           | String            | `PENDING` / `EXECUTING` / `DONE` / `DELETED` |
+| `summary`          | String            | 一句话描述                                        |
+| `currentStepIndex` | Int               | 当前执行到第几步（0-based）                            |
+| `steps`            | Array\<PlanStep\> | 步骤列表                                         |
+| `createdAt`        | String (ISO 8601) | 创建时间                                         |
+| `updatedAt`        | String (ISO 8601) | 更新时间                                         |
+
+### PlanStep 字段说明
+
+| 字段            | 类型              | 说明                                           |
+|---------------|-----------------|----------------------------------------------|
+| `id`          | String          | 步骤唯一标识                                       |
+| `description` | String          | 步骤描述                                         |
+| `tool`        | String          | 建议工具名，LLM 应优先使用但不强制                          |
+| `files`       | Array\<String\> | 涉及文件（含行号如 `"UserService.kt:40-60"`）          |
+| `status`      | String          | `PENDING` / `EXECUTING` / `DONE` / `DELETED` |
+| `result`      | String?         | 执行结果                                         |
+| `retryCount`  | Int             | 重试次数                                         |
+
+---
+
+## 6.2 Session Index
+
+```json
+[
+  {
+    "id": "uuid",
+    "title": "重构 UserService",
+    "createdAt": "2026-06-24T14:30:00Z",
+    "updatedAt": "2026-06-24T14:45:00Z",
+    "messageCount": 12,
+    "totalTokens": 8200,
+    "toolCallCount": 5,
+    "hasActivePlan": true,
+    "parentId": null
+  }
+]
+```
+
+### SessionIndex 字段说明
+
+| 字段              | 类型      | 说明                                                 |
+|-----------------|---------|----------------------------------------------------|
+| `id`            | String  | 会话唯一标识（UUID）                                       |
+| `title`         | String  | 会话标题，初始值为"新会话"，首条消息后异步 LLM 生成（≤ 20 字）              |
+| `createdAt`     | String  | 创建时间（ISO 8601）                                     |
+| `updatedAt`     | String  | 更新时间（ISO 8601）                                     |
+| `messageCount`  | Int     | 消息数量                                               |
+| `totalTokens`   | Long    | `inputTokens + outputTokens` 累加值，从 API usage 返回值获取 |
+| `toolCallCount` | Int     | 工具调用次数                                             |
+| `hasActivePlan` | Boolean | 是否有活跃计划                                            |
+| `parentId`      | String? | 子会话关联父会话 ID，`null` 表示顶级会话                          |
+
+---
+
+## 6.3 MCP Config
+
+存储路径：`<project>/.code-assistant/mcp-config.json`
+
+```json
+{
+  "servers": [
+    {
+      "id": "mysql",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@anthropic/mcp-server-mysql",
+        "--db",
+        "mydb"
+      ],
+      "env": {
+        "DB_HOST": "localhost"
+      },
+      "enabled": true
+    }
+  ]
+}
+```
+
+### McpServerConfig 字段说明
+
+| 字段        | 类型                    | 说明                       |
+|-----------|-----------------------|--------------------------|
+| `id`      | String                | Server 唯一标识              |
+| `command` | String                | 启动命令（如 `npx`、`python` 等） |
+| `args`    | Array\<String\>       | 命令行参数                    |
+| `env`     | Map\<String, String\> | 环境变量，敏感值建议通过环境变量注入       |
+| `enabled` | Boolean               | 是否启用                     |

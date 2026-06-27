@@ -1,16 +1,30 @@
-# Agent 正确性验证体系
+# 正确性验证
 
-> 从 [`agent.md`](agent.md) 第十五~十七节拆分。涵盖防幻觉、代码改动验证、方案正确性验证三层防御体系。
+> 关联文档：[[loop]], [[tools]], [[plan]]
+
+Agent 的正确性由三层防御保证，覆盖防幻觉、代码改动验证、方案正确性验证三个维度。
+
+## 正确性验证体系总览
+
+| 维度    | 核心问题    | 关键防御                | 详情                      |
+|-------|---------|---------------------|-------------------------|
+| 防幻觉   | 说的是真的吗？ | 精确匹配 + VFS 校验       | [§一](#一防止-llm-幻觉)       |
+| 代码正确性 | 改对了吗？   | 自动 readLints（⏳ 规划中） | [§二](#二agent-代码改动正确性验证) |
+| 方案正确性 | 方案对吗？   | Plan 审查 + 同类参考      | [§三](#三agent-方案正确性验证)   |
+
+### 防御层次速览
+
+```
+第 1 层（执行前）→ 第 2 层（执行中）→ 第 3 层（执行后）
+```
 
 ---
 
 ## 一、防止 LLM 幻觉
 
-> **关联技术契约：** System Prompt 反幻觉规则见 [
-`tech-spec.md` 8.1](tech-spec.md#81-agent-基础-system-prompt)，工具前置校验（VFS 校验/Read
-> 前置/stamp 校验）见 [`tech-spec.md` 2.3](tech-spec.md#23-toolregistry)，工具结果自检反馈环见 [
-`tech-spec.md` 2.1](tech-spec.md#21-agentloop)，Shell 输出强化标注见 [
-`tech-spec.md` 九 > Bash](tech-spec.md#bash)。
+> **关联技术契约：** System Prompt 反幻觉规则见 [[../specs/system-prompt]]，工具前置校验（VFS 校验/Read
+> 前置/stamp 校验）见 [[tools]]，工具结果自检反馈环见 [[loop]]，Shell
+> 输出强化标注见 [[../specs/tool-return-formats#bash]]。
 
 LLM 会产生几种典型幻觉：**凭空编造文件路径和 API**、**基于过时信息做决策**、**忽略工具返回的错误信息**、
 **假设搜索结果完整**。以下按防御层次说明已有措施和加强方案。
@@ -31,7 +45,7 @@ LLM 会产生几种典型幻觉：**凭空编造文件路径和 API**、**基于
 
 #### 方案一：System Prompt 反幻觉指令（零成本 ✅ 已实施）
 
-> 已实施于 [`tech-spec.md` 8.1](tech-spec.md#81-agent-基础-system-prompt) System Prompt 的「防止幻觉」段落。
+> 已实施于 [[../specs/system-prompt]] System Prompt 的「防止幻觉」段落。
 
 #### 方案二：文件路径 VFS 校验
 
@@ -116,11 +130,9 @@ $ ./gradlew build
 
 ## 二、Agent 代码改动正确性验证
 
-> **关联技术契约：** System Prompt 验证流程见 [
-`tech-spec.md` 8.1](tech-spec.md#81-agent-基础-system-prompt)，修改后自动 readLints +
-> 回归测试提示 + 影响范围分析见 [`tech-spec.md` 2.3](tech-spec.md#23-toolregistry)，Diff
-> 可视化见 [`tech-spec.md` 九 > Edit](tech-spec.md#editfile) 和 [
-`tech-spec.md` 2.6](tech-spec.md#26-toolcallcard--plancard)。
+> **关联技术契约：** System Prompt 验证流程见 [[../specs/system-prompt]]，修改后自动 readLints +
+> 回归测试提示 + 影响范围分析见 [[tools]]，Diff
+> 可视化见 [[../specs/tool-return-formats#edit]] 和 [[../ui/components]]。
 
 Agent 改完代码后，核心问题是：**改对了吗？** 这个问题分两层——Agent 自己如何验证（自检），用户如何验证（审查）。
 
@@ -248,11 +260,10 @@ Edit 成功后
 
 ## 三、Agent 方案正确性验证
 
-> **关联技术契约：** System Prompt 方案设计原则 + 自检清单见 [
-`tech-spec.md` 8.1](tech-spec.md#81-agent-基础-system-prompt)，关键操作确认 +
-> 同类代码自动参考见 [`tech-spec.md` 2.3](tech-spec.md#23-toolregistry)，PlanCard `createPlan`
-> 工具入口见 [`tech-spec.md` 2.6](tech-spec.md#26-toolcallcard--plancard) 和 [
-`tech-spec.md` 2.7](tech-spec.md#27-planexecutor)。
+> **关联技术契约：** System Prompt 方案设计原则 + 自检清单见 [[../specs/system-prompt]]
+> ，关键操作确认 +
+> 同类代码自动参考见 [[tools]]，PlanCard `createPlan`
+> 工具入口见 [[../ui/components]] 和 [[plan]]。
 
 上一节解决的是"代码改对了吗"（语法/编译/测试通过），本节解决更高层的问题：**"方案本身对吗"**
 ——架构决策是否合理、设计模式是否恰当、是否对齐项目约定。代码编译通过 ≠ 方案正确。
@@ -376,11 +387,11 @@ Read 返回 UserService.kt
 
 以下是全部四套"三层"体系的统一视图。按时间轴对齐：**执行前 → 执行中 → 执行后**。
 
-| 防线层次      | 时间点 | 防幻觉（第一节）                                          | 代码正确性（第二节）                                            | 方案正确性（第三节）                         | 超长任务（agent.md 第八节）                           |
-|-----------|-----|---------------------------------------------------|-------------------------------------------------------|------------------------------------|----------------------------------------------|
-| **第 1 层** | 执行前 | **事前预防**：System Prompt 反幻觉指令 + 复杂度判断              | **Agent 自检**：System Prompt 自检指令                       | **方案合理性**：Plan 审查 + 方案设计原则 + 自检清单  | **预防**：LLM 自动规划 / System Prompt 复杂度自判        |
-| **第 2 层** | 执行中 | **事前硬约束**：Read 前置 + VFS 校验 + Edit 精确匹配 + stamp 校验 | **Agent 主动验证**：修改后自动 readLints + 编译/测试 + 影响范围分析       | —（方案正确性只有事前和事后）                    | **预警**：⏳ 规划中 轮次预警（turn ≥ maxTurns × 0.6 时提示） |
-| **第 3 层** | 执行后 | **事后纠偏**：Shell 输出强化标注 + 工具结果自检反馈环 + 截断标注          | **用户审查**：Diff 可视化 + PlanCard 进度展示 + ToolCallCard 前后对比 | **审查兜底**：AI 代码审查 + 用户最终审查 + 关键操作确认 | **兜底**：Auto-Compact（700K tokens 阈值压缩）        |
+| 防线层次      | 时间点 | 防幻觉（第一节）                                          | 代码正确性（第二节）                                            | 方案正确性（第三节）                         | 超长任务（[context.md](./context.md)）              |
+|-----------|-----|---------------------------------------------------|-------------------------------------------------------|------------------------------------|-----------------------------------------------|
+| **第 1 层** | 执行前 | **事前预防**：System Prompt 反幻觉指令 + 复杂度判断              | **Agent 自检**：System Prompt 自检指令                       | **方案合理性**：Plan 审查 + 方案设计原则 + 自检清单  | **预防**：LLM 自动规划 / System Prompt 复杂度自判         |
+| **第 2 层** | 执行中 | **事前硬约束**：Read 前置 + VFS 校验 + Edit 精确匹配 + stamp 校验 | **Agent 主动验证**：修改后自动 readLints + 编译/测试 + 影响范围分析       | —（方案正确性只有事前和事后）                    | **预警**：⏳ 规划中 轮次预警（turn >= maxTurns x 0.6 时提示） |
+| **第 3 层** | 执行后 | **事后纠偏**：Shell 输出强化标注 + 工具结果自检反馈环 + 截断标注          | **用户审查**：Diff 可视化 + PlanCard 进度展示 + ToolCallCard 前后对比 | **审查兜底**：AI 代码审查 + 用户最终审查 + 关键操作确认 | **兜底**：Auto-Compact（700K tokens 阈值压缩）         |
 
 ```
 时间轴：  执行前                 执行中                 执行后
@@ -423,13 +434,3 @@ Read 返回 UserService.kt
 > 的小模型可能会发现。建议在方案
 > 2（自动 readLints）落地后优先实施。
 
-### 独立评估（AI Code Review）
-
-每次 Agent 任务完成（`end_turn`）后，自动用独立 API 调用做轻量代码审查：
-
-- 独立 API 调用：不带 tools，`max_tokens=512`，system prompt = "你是代码审查专家"
-- 输入：当前 Session 中所有 `Edit`/`Write` 的 diff 聚合
-- 关注：风格不一致、过度设计、可能破坏的调用者、可复用的已有工具
-- 输出：仅报告有问题的地方。无问题则输出"无问题"
-- 结果以系统消息追加到对话，Agent 可以在下一轮修正
-- 不阻塞流程（审查结果作为参考信息呈现）
