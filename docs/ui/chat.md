@@ -150,9 +150,9 @@ DeepSeek V4 在流式响应中会先输出 `reasoning_content`（思考过程）
 
 | 状态                   | 图标         | 颜色       | 说明              |
 |----------------------|------------|----------|-----------------|
-| ⏳ PENDING            | Step_0     | Gray 500 | 等待执行            |
+| ⏳ PENDING            | Plan_0     | Gray 500 | 等待执行            |
 | 🔒 AWAITING_APPROVAL | Warning    | 黄色       | 等待用户审批，始终展开不可折叠 |
-| 🔄 EXECUTING         | Step_4 旋转  | 蓝色       | 执行中，不可折叠，显示进度条  |
+| 🔄 EXECUTING         | Plan_4 旋转  | 蓝色       | 执行中，不可折叠，显示进度条  |
 | ✅ DONE               | TestPassed | 绿色       | 执行成功            |
 | ❌ ERROR              | TestFailed | 红色       | 执行失败，含 [重试] 按钮  |
 | ⏰ TIMEOUT            | Warning    | 橙色       | 超时              |
@@ -167,7 +167,7 @@ DeepSeek V4 在流式响应中会先输出 `reasoning_content`（思考过程）
 - EXECUTING 不可折叠
 - 结果区域 max-height=240px，超出滚动显示
 
-### Diff 可视化（⏳ 规划中）
+### Diff 可视化
 
 `Edit` 执行成功后，ToolCallCard 内联展示可视化 Diff（`SimpleDiff` 生成，ADD 绿色/DEL 红色/CTX
 灰色），替换纯文本的前后对比。
@@ -180,17 +180,17 @@ DeepSeek V4 在流式响应中会先输出 `reasoning_content`（思考过程）
 │ 任务: {summary}                          │ ← Body Small
 │ 涉及: {fileCount}个文件 {toolList}        │
 ├──────────────────────────────────────────┤
-│ Step N:                                  │ ← 每步独立行
+│ Plan N:                                  │ ← 每项独立行
 │ ⬜/🔄/✅/❌/🗑  {description}              │ ← 状态图标 + 描述
 │    工具: {tool}  文件: {fileList}        │ ← Caption
-│                           [✕]  ← PENDING │ ← 用户可删除待执行步
+│                           [✕]  ← PAUSED  │ ← 用户可删除待执行项
 └──────────────────────────────────────────┘
 
-折叠态（仅显示头部 + 当前执行步骤）:
+折叠态（仅显示头部 + 当前执行项）:
 ┌──────────────────────────────────────────┐
 │ ▶ 📋 执行计划                   1/4 已完成│ ← 头部（点击展开）
 │ 任务: {summary}                          │
-│ 🔄 {当前 EXECUTING 步骤描述}              │ ← 仅显示执行中步骤
+│ 🔄 {当前 EXECUTING 项描述}               │ ← 仅显示执行中项
 │    工具: {tool}  文件: {fileList}        │
 └──────────────────────────────────────────┘
 ```
@@ -199,17 +199,17 @@ DeepSeek V4 在流式响应中会先输出 `reasoning_content`（思考过程）
 
 - 默认折叠（仅显示头部标题+摘要+进度）
 - 点击头部任意位置切换折叠/展开
-- EXECUTING 状态下自动展开且不可折叠（确保用户看到当前执行步骤）
-- 全部步骤 DONE 或 DELETED 后 PlanCard 消失
+- EXECUTING 状态下自动展开且不可折叠（确保用户看到当前执行项）
+- 全部计划项 COMPLETED 或 CANCELLED 后 PlanCard 消失
 
-### Step 状态样式
+### Plan 状态样式
 
 | 状态        | 图标 | 样式                                    |
 |-----------|----|---------------------------------------|
-| PENDING   | ⬜  | fg=#6B7280, bg=transparent, 行末 [✕] 可见 |
+| PAUSED    | ⬜  | fg=#6B7280, bg=transparent, 行末 [✕] 可见 |
 | EXECUTING | 🔄 | fg=#3B82F6, bg=#EFF6FF, 左侧蓝色竖线 2px    |
-| DONE      | ✅  | fg=#22C55E, bg=transparent            |
-| DELETED   | 🗑 | fg=#9CA3AF, bg=transparent, 删除线       |
+| COMPLETED | ✅  | fg=#22C55E, bg=transparent            |
+| CANCELLED | 🗑 | fg=#9CA3AF, bg=transparent, 删除线       |
 
 ## 六、多 Agent 调度卡片（MultiAgentBlock）
 
@@ -438,7 +438,7 @@ ToolCallUIData:
 ├── state: PENDING | AWAITING_APPROVAL | EXECUTING | DONE | ERROR | TIMEOUT | REJECTED | CANCELLED
 ├── result: String?
 ├── durationMs: Long?
-└── planStepId: String?
+└── planId: String?
 ```
 
 ## 十三、ChatBubbleRenderer 接口
@@ -516,6 +516,6 @@ ApprovalDialog
 |------------|-----------------------------------------------------|----------------|
 | 首次工具使用     | 每个会话每种工具首次调用                                        | 首次审批（可"允许此会话"） |
 | Shell 危险命令 | `rm -rf /`, `git push --force`, `sudo`, `chmod 777` | 危险命令确认（不可跳过）   |
-| 公共 API 变更  | Edit/Write 修改 `public`/`open` 方法签名                  | 关键操作确认（⏳ 规划中）  |
-| 大范围修改      | 同一 turn 修改 ≥5 个文件                                   | 关键操作确认（⏳ 规划中）  |
-| 文件删除       | Bash 含 `rm ` 且目标在项目内                                | 关键操作确认（⏳ 规划中）  |
+| 公共 API 变更  | Edit/Write 修改 `public`/`open` 方法签名                  | 关键操作确认         |
+| 大范围修改      | 同一 turn 修改 ≥5 个文件                                   | 关键操作确认         |
+| 文件删除       | Bash 含 `rm ` 且目标在项目内                                | 关键操作确认         |

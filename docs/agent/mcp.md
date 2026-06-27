@@ -199,3 +199,38 @@ McpServerConfig:
 ├── env: Map<String, String>            // 敏感值建议环境变量注入
 └── enabled: Boolean
 ```
+
+---
+
+## 八、安全边界
+
+### 工具 Schema 校验
+
+`tools/list` 返回的每个工具在注册到 `ToolRegistry` 前校验：
+
+- `name` 非空，仅允许 `[a-zA-Z0-9_-]+`，长度 ≤ 64
+- `description` 非空字符串，长度 ≤ 1024
+- `inputSchema` 为有效 JSON Schema（`type: "object"`、`properties` 非空 Map）
+
+校验失败的工具**跳过不注册**，通过 `McpServerStateChanged` 事件通知 MCP 页面显示 ⚠️ 标记 + 失败原因。
+
+### 工具执行错误传播
+
+MCP 工具执行失败（JSON-RPC error / 超时 / Server 异常断开）时，统一返回：
+
+```
+MCP 工具 {serverName}/{toolName} 执行失败: {errorMessage}
+```
+
+作为 `ToolResult(success=false)` 写回 `session.messages`，LLM 看到失败信息后可自行决定重试或调整策略。单轮内同一
+MCP 工具连续失败 3 次 → 自动跳过，返回 "已连续失败 3 次，请检查 MCP Server 状态"。
+
+### 结果截断
+
+MCP 工具返回值统一走 `ToolExecutor` 的截断通道：保留头部 200 行，超出截断并标注
+`... (共 N 行，已截断到 200 行)`。截断结果写回 `session.messages`，参与 compact。
+
+### compact 参与
+
+MCP 工具结果作为 `session.messages` 的一部分参与 compact 压缩，与内置工具结果同等对待。compact 后不保留
+MCP 工具历史结果原文——LLM 仅看到摘要中保留的关键信息。

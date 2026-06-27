@@ -8,21 +8,25 @@
 
 **MultiAgentManager 职责：**
 
-- 并发控制：`Semaphore(3)` 限制全局最大并发 Agent 数（父 + 子总计）
+- 并发控制：`Semaphore(maxConcurrentAgents)` 限制全局最大并发 Agent 数（父 + 子总计），上限由 Settings 的
+  `maxConcurrentAgents` 配置（默认 3）
 - 子 Agent 创建：`Task(task, parentSession)` → 新建 `AgentLoop` 实例 → 提交到线程池
 - 结果收集：`CompletableFuture<ToolResult>` 回调，子完成 → 父的 toolResult 写入子任务摘要
 - 文件写锁：`ConcurrentHashMap<VirtualFile, ReentrantLock>`（所有 Agent 共享同一份锁表）
+- crash 清理：子 Agent 异常退出时自动释放信号量、释放文件写锁、销毁 Shell 进程
+- 文件变更通知：子 Agent 完成后，父 Agent 的 `fileStamps` 中被修改的文件自动失效，下次 Edit 前强制重新
+  Read
 
 ## 二、关键约束
 
-| 约束项        | 规则                                                                                                                |
-|------------|-------------------------------------------------------------------------------------------------------------------|
-| 并发控制       | `Semaphore(3)` 限制全局最大并发 Agent 数（父 + 子总计）                                                                          |
-| 文件写锁       | `ConcurrentHashMap<VirtualFile, ReentrantLock>`（所有 Agent 共享）                                                      |
-| 递归限制       | 最多 1 层嵌套（子不可再 spawn 孙）。Phase 5 后可评估是否放宽                                                                           |
-| 结果摘要       | ≤ 2000 tokens 写入父的 toolResult。摘要 = 子 Agent 最后一轮 assistant 消息 + 所有 tool call 结果原文拼接，截断到 2000 tokens。不额外调用 LLM 生成摘要 |
-| 子 Session  | 独立持久化（`session.parentId` 关联）                                                                                      |
-| 子 Agent 失败 | 子 Agent crash 或超时 → toolResult 返回 `"Sub-agent failed: <error>"`，父 LLM 自行决定重试或调整策略                                 |
+| 约束项        | 规则                                                                                                                     |
+|------------|------------------------------------------------------------------------------------------------------------------------|
+| 并发控制       | `Semaphore(maxConcurrentAgents)` 限制全局最大并发 Agent 数（父 + 子总计），默认 3，0=不限                                                   |
+| 文件写锁       | `ConcurrentHashMap<VirtualFile, ReentrantLock>`（所有 Agent 共享）                                                           |
+| 递归限制       | 最多 1 层嵌套（子不可再 spawn 孙）。Phase 5 后可评估是否放宽                                                                                |
+| 结果摘要       | ≤ 2000 tokens 写入父的 toolResult。摘要 = 子 Agent 最后一轮 assistant 消息 + 所有 tool call 结果原文拼接，截断到 2000 tokens。不额外调用 LLM 生成摘要      |
+| 子 Session  | 独立持久化（`session.parentId` 关联）                                                                                           |
+| 子 Agent 失败 | 子 Agent crash 或超时 → toolResult 返回 `"Sub-agent failed: <error>"`，父 LLM 自行决定重试或调整策略。crash 后自动清理：释放信号量、释放文件写锁、销毁 Shell 进程 |
 
 ## 三、父子通信
 
@@ -43,8 +47,8 @@
   spawn（最多 3 个）。
 - **结果传递**：子 Agent 完成后，结果摘要（≤ 2000 tokens）写入父的 toolResult。子 Agent 的完整执行过程作为一个独立
   Session 持久化（`session.parentId` 关联）。
-- **文件修改通知**：子 Agent 修改文件后，父 Agent 从 toolResult 中获知文件变更。父 Agent 应主动 `Read`
-  获取最新状态后再传递给其他子 Agent。
+- **文件修改通知**：子 Agent 完成时，`MultiAgentManager` 自动清除父 Agent 的 `fileStamps` 中被子 Agent
+  修改过的文件，迫使父 Agent 下次 `Edit` 前必须重新 `Read`。对齐 Claude Code 的 `readFileState` 失效机制。
 - **Chat 页面展示**：仅显示 `🔧 Task: 重构 UserService → 已完成 (sub-session #42)，摘要: ...`。子 Agent
   的 ToolCallCard 出现在自己的 Session 视图中，不嵌入父的 ChatPage。
 

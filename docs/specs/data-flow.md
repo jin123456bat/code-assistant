@@ -95,32 +95,31 @@ ChatViewModel.sendMessage("/plan 重构 UserService", ...)
     → PlanCard 渲染
     → 自动开始执行
 
-PlanExecutor.executeNextStep() 自动循环:
-  → 获取 nextStep (currentStepIndex 对应的 PENDING step)
-  → 构建 stepPrompt: "执行步骤: {step.description}。文件: {step.files}。工具: {step.tool}"
-  → AgentLoop.run(stepPrompt)
-  → 更新 step.status + step.result
-  → currentStepIndex++
-  → 自动继续执行下一步
-  → 全部 DONE → PlanCard 消失
-  → LLM 可在任意 Step 完成后通过工具调整计划（deleteStep/reorderSteps/markStepDone/createPlan）
+PlanExecutor.executeNext() 自动循环:
+  → 获取 nextPlan (currentPlanIndex 对应的 PAUSED 计划项)
+  → AgentLoop.run(plan.summary)
+  → 更新 plan.status + plan.result
+  → currentPlanIndex++
+  → 自动继续执行下一个
+  → 全部 COMPLETED → PlanCard 消失
+  → LLM 可在任意计划项完成后通过工具调整计划（removePlan/reorderPlans/markPlanDone/createPlan）
 
 LLM 通过工具管理计划:
-  listSteps()    → 查看步骤状态
-  deleteStep(id) → 删除 PENDING 步骤，执行时自动跳过
-  reorderSteps([id...]) → 重排 PENDING 步骤顺序
-  markStepDone(id) → 将步骤标记为 DONE
-  createPlan(task, steps) → 重新创建/更新计划
+  listPlans()    → 查看计划项状态
+  removePlan(id) → 删除 PAUSED 计划项，执行时自动跳过
+  reorderPlans([id...]) → 重排 PAUSED 计划项顺序
+  markPlanDone(id) → 将计划项标记为 COMPLETED
+  createPlan(task, plans) → 重新创建/更新计划
 ```
 
 ### Plan 解析流程（4 层回退）
 
 1. 提取 ` ```json ``` ` → Gson → Plan
 2. 搜索裸 `{ ... }` → Gson → Plan
-3. 正则 `"Step N:"` / `"步骤 N:"` → 文本拆分 → Plan
-4. 原始文本 → `Plan(summary=原始文本, steps=[Step(description=原始文本)])`
+3. 正则 `"Plan N: "` → 文本拆分 → Plan
+4. 原始文本 → `Plan(summary=原始文本, plans=[Plan(description=原始文本)])`
 
 ### Plan 生命周期
 
-- 创建计划后自动开始，逐步执行直到全部 DONE 或 LLM 调用 `deleteStep` 删除所有步骤终止（DELETED）
+- 创建计划后自动开始，逐步执行直到全部 COMPLETED 或 LLM 调用 `removePlan` 删除所有计划项终止（CANCELLED）
 - 入口：用户 `/plan` 命令或 LLM 通过 `createPlan` 工具主动创建。两者触发 `generatePlan()` 流程一致

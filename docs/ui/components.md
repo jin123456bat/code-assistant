@@ -15,7 +15,7 @@
 | 用户气泡           | `JPanel(BorderLayout)` → 右对齐              | `setMaximumSize(Dimension(maxWidth, ...))` 限制宽度为面板的 70%                                    |
 | Agent 气泡       | `BubblePanel(BoxLayout.Y_AXIS)`           | 文本段+代码块+文本段垂直排列，用 `Box.createVerticalStrut(4)` 间隔                                          |
 | ToolCallCard   | `JPanel(BorderLayout)`                    | NORTH=头部(图标+名称+状态), CENTER=折叠面板(JPanel.BoxLayout_Y_AXIS)                                   |
-| PlanCard       | `JPanel(BorderLayout)`                    | NORTH=摘要行, CENTER=步骤列表(BoxLayout.Y_AXIS)                                                   |
+| PlanCard       | `JPanel(BorderLayout)`                    | NORTH=摘要行, CENTER=计划项列表(BoxLayout.Y_AXIS)                                                  |
 | ChatInputArea  | `JPanel(BorderLayout)`                    | NORTH=TagsRow(FlowLayout: 文件+图片), CENTER=JTextArea, SOUTH=底部栏(FlowLayout: [+]按钮+@提示+[→]发送) |
 | WelcomePage    | `JPanel(GridBagLayout)`                   | 居中单列，GridBagConstraints.fill=HORIZONTAL, insets=Insets(8,20,8,20)                          |
 | SessionsPage   | `JPanel(BorderLayout)`                    | NORTH=搜索栏, CENTER=JScrollPane→JPanel(BoxLayout.Y_AXIS) 会话卡片列表                              |
@@ -186,7 +186,7 @@ ToolCallUIData:
 ├── state: PENDING | AWAITING_APPROVAL | EXECUTING | DONE | ERROR | TIMEOUT | REJECTED | CANCELLED
 ├── result: String?
 ├── durationMs: Long?
-└── planStepId: String?
+└── planId: String?
 
 ImageRef:
 ├── id: String (UUID)
@@ -215,19 +215,20 @@ ToolCallCard
 ├── setCancelled()
 ├── isExpanded: Boolean = false
 ├── toggleExpanded()
-├── renderDiff(oldText: String, newText: String)  // ⏳ 规划中
-└── 渲染: JPanel (带箭头 + 状态图标 + 参数区 + 结果滚动区(max-height=240px) + 可视化 Diff + 底部耗时)
+├── renderDiff(oldText: String, newText: String)  //
+├── setChildTokenCost(tokens: Long, cost: BigDecimal)  // Agent 工具调用时显示子任务 Token 消耗
+└── 渲染: JPanel (带箭头 + 状态图标 + 参数区 + 结果滚动区(max-height=240px) + 可视化 Diff + 子任务 Token 行 + 底部耗时)
 
 ToolCallState: PENDING | AWAITING_APPROVAL | EXECUTING | DONE | ERROR | TIMEOUT | REJECTED | CANCELLED
 
 PlanCard
 ├── 构造: PlanCard(plan: Plan)
-├── setStepState(stepId: String, state: StepState)
-├── setCurrentStepIndex(index: Int)
+├── setPlanState(planId: String, state: PlanStatus)
+├── setCurrentPlanIndex(index: Int)
 ├── isExpanded: Boolean = false
 ├── toggleExpanded()
-├── onStepDeleted: ((stepId: String) -> Unit)?
-└── 渲染: JPanel (计划摘要 + 步骤列表，单步行末 [✕] 仅 PENDING 和 ERROR 状态可见)
+├── onPlanDeleted: ((planId: String) -> Unit)?
+└── 渲染: JPanel (计划摘要 + 计划项列表，行末 [✕] 仅 PAUSED 状态可见)
 ```
 
 ## 六、其他组件接口
@@ -315,7 +316,7 @@ ApprovalDialog
 |------------|-----------------------------------|----------------|
 | 首次工具使用     | 每个会话每种工具首次调用                      | 首次审批           |
 | Shell 危险命令 | rm -rf /, git push --force, sudo... | 危险命令确认（不可跳过）   |
-| 公共 API 变更  | Edit/Write 修改 public 方法签名         | 关键操作确认（⏳ 规划中）  |
-| 大范围修改      | 同一 turn 修改 ≥5 个文件                | 关键操作确认（⏳ 规划中）  |
-| 文件删除       | Bash 含 rm 且目标在项目内               | 关键操作确认（⏳ 规划中）  |
+| 公共 API 变更  | Edit/Write 修改 public 方法签名         | 关键操作确认  |
+| 大范围修改      | 同一 turn 修改 ≥5 个文件                | 关键操作确认  |
+| 文件删除       | Bash 含 rm 且目标在项目内               | 关键操作确认  |
 ```

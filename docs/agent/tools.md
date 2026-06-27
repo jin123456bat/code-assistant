@@ -29,13 +29,13 @@
 
 ## 二、5 个计划管理工具
 
-| 工具             | 参数                      | 用途                                |
-|----------------|-------------------------|-----------------------------------|
-| `createPlan`   | `task` + `steps[]`      | 创建/更新执行计划，自动开始执行，steps ≤ 20 步     |
-| `listSteps`    | 无                       | 查看当前计划的所有步骤及状态                    |
-| `deleteStep`   | `stepId: String`        | 删除指定步骤（仅 PENDING 状态可删）            |
-| `reorderSteps` | `stepIds: List<String>` | 重排剩余 PENDING 步骤的执行顺序              |
-| `markStepDone` | `stepId: String`        | 将 PENDING/EXECUTING 状态的步骤标记为 DONE |
+| 工具             | 参数                      | 用途                                   |
+|----------------|-------------------------|--------------------------------------|
+| `createPlan`   | `task` + `plans[]`      | 创建/更新执行计划，自动开始执行，≤ 20 项              |
+| `listPlans`    | 无                       | 查看当前计划的所有计划项及状态                      |
+| `removePlan`   | `planId: String`        | 删除指定计划项（仅 PAUSED 状态可删）               |
+| `reorderPlans` | `planIds: List<String>` | 重排剩余 PAUSED 计划项的执行顺序（传入新的 planId 序列） |
+| `markPlanDone` | `planId: String`        | 将指定计划项标记为 COMPLETED                  |
 
 ## 三、工具执行分发
 
@@ -47,7 +47,7 @@
 | Write / Edit                                                      | `invokeAndWait { WriteCommandAction }` | 文件写入必须在 EDT 上通过 WriteCommandAction     |
 | Bash                                                              | Background Thread                      | 通过 `ProcessHandler` + 实时 `onOutput` 回调 |
 | Task                                                              | `MultiAgentManager.spawn()`            | 子 Agent 在线程池中运行                        |
-| createPlan / listSteps / deleteStep / reorderSteps / markStepDone | PlanExecutor（Agent 线程）                 | 计划任务管理                                 |
+| createPlan / listPlans / removePlan / reorderPlans / markPlanDone | PlanExecutor（Agent 线程）                 | 计划任务管理                                 |
 
 **超时机制：** 每个工具都包含必填的 `timeout` 参数（秒），由 LLM 在 tool call 时传入。0=不限。Bash 超时时强制
 `destroyForcibly()` 终止进程。其他 I/O 工具的 timeout 由 ToolExecutor 统一读取，目前作为安全兜底。
@@ -62,10 +62,11 @@
 | `Read`         | 500 行                 | 尾部注 `... (共 N 行，已截断到 500 行，如需查看剩余内容请用 startLine 参数分页读取)`                |
 | `Grep`         | 50 条匹配                | 尾部注 `... (共 N 条，已截断到 50 条。如有必要，请使用更精确的搜索词缩小范围)`                         |
 | `Glob`         | 50 条目                 | 尾部注 `... (共 N 条目，已截断到 50。用 dirPath/maxDepth 缩小范围，或用 offset={N} 翻页获取更多)` |
-| `Bash`         | 200 行 (stdout+stderr) | 传给 LLM 前截断，完整输出保留在 ToolCallCard 中                                       |
+| `Bash`         | 200 行 (stdout+stderr) | 中段截断：保留头部 30 行 + 尾部 30 行，中间标注 `... (省略 N 行)`。Bash 不支持翻页（重新执行有副作用）       |
 | `readLints`    | 50 条诊断                | 按 severity 排序（error > warning > info），截断后注 `还有 N 条未显示，优先展示 error 级别`    |
 | `Edit`/`Write` | 写入 ≤ 3000 行           | 超过拒绝并返回错误 `内容过长 (N 行, 上限 3000 行)`                                       |
 | `Task`         | 返回 ≤ 2000 tokens 摘要   | 完整结果保存到子 session，LLM 看到摘要 + `详情见 sub-session #N`                        |
+| MCP 工具         | 200 行                 | 尾部注 `... (共 N 行，已截断到 200 行)`。MCP 工具不支持翻页（重新调用有副作用）                      |
 
 ## 五、Shell 安全
 
@@ -84,9 +85,9 @@
 |------------|-----------------------------------------------------|----------------|
 | 首次工具使用     | 每个会话每种工具首次调用                                        | 首次审批（可"允许此会话"） |
 | Shell 危险命令 | `rm -rf /`, `git push --force`, `sudo`, `chmod 777` | 危险命令确认（不可跳过）   |
-| 公共 API 变更  | Edit/Write 修改了方法签名且文件被 ≥3 个其他文件引用                   | 关键操作确认（⏳ 规划中）  |
-| 大范围修改      | 同一 turn 修改 ≥5 个文件                                   | 关键操作确认（⏳ 规划中）  |
-| 文件删除       | Bash 含 `rm ` 且目标在项目内                                | 关键操作确认（⏳ 规划中）  |
+| 公共 API 变更  | Edit/Write 修改了方法签名且文件被 ≥3 个其他文件引用                   | 关键操作确认         |
+| 大范围修改      | 同一 turn 修改 ≥5 个文件                                   | 关键操作确认         |
+| 文件删除       | Bash 含 `rm ` 且目标在项目内                                | 关键操作确认         |
 
 ### 审批弹窗行为
 
@@ -96,7 +97,7 @@
   Dialog，用户离开前必须处理
 - **被拒绝后**：ToolCallCard 保留 [重审] 按钮，用户点击后从 IDLE 重新进入 AWAITING_APPROVAL，无需重新发送消息
 
-## 七、前置校验（⏳ 规划中）
+## 七、前置校验
 
 `ToolExecutor` 在执行文件操作工具前做前置校验，防止 LLM 幻觉导致非法操作：
 
@@ -140,22 +141,22 @@ ToolInfo (ToolRegistry 内部类):
 
 每个工具的 `description` 字段必须包含返回值上限，让 LLM **事前知道**限制：
 
-| 工具             | description 中应包含的上限声明                                                                                        |
-|----------------|--------------------------------------------------------------------------------------------------------------|
-| `Read`         | `单次最多返回 500 行。如果文件行数超过此限制，返回内容会被截断，请使用 startLine 参数分页读取剩余内容。`                                                |
-| `Grep`         | `最多返回 50 条匹配。如果匹配数超过此限制，结果会被截断，请使用更精确的搜索词缩小范围。`                                                              |
-| `Glob`         | `最多返回 50 个条目（文件+目录）。如果超出此限制，结果会被截断并在返回值中标注。请用 dirPath/maxDepth 缩小范围，或用 offset 参数翻页获取更多条目。`                   |
-| `Bash`         | `最多返回 200 行输出（stdout+stderr）。如果超出此限制，传给 LLM 的内容会被截断，完整输出保留在 IDE 工具卡片中。timeout 参数由 LLM 根据命令类型自行判断传入（秒），0=不限。` |
-| `readLints`    | `最多返回 50 条诊断，按 severity 排序（ERROR > WARNING > INFO）。如果超出此限制，低严重度诊断可能不显示。`                                     |
-| `Edit`         | `newString 最多 3000 行。超过此限制的操作会被拒绝。`                                                                          |
-| `Write`        | `内容最多 3000 行。超过此限制的操作会被拒绝。`                                                                                  |
-| `Skill`        | `执行指定 Skill。LLM 根据用户需求自主判断触发时机，将 SKILL.md 内容作为消息注入 conversation。`                                            |
-| `Task`         | `子 Agent 结果摘要最多 2000 tokens。完整执行过程保存为独立 Session。`                                                            |
-| `createPlan`   | `创建执行计划，最多 20 步。计划创建后自动开始执行，LLM 可用 listSteps/deleteStep/reorderSteps 管理。`                                    |
-| `listSteps`    | `查看当前计划的所有步骤及状态，无参数。`                                                                                        |
-| `deleteStep`   | `删除指定步骤（仅 PENDING 状态可删）。`                                                                                    |
-| `reorderSteps` | `重排剩余 PENDING 步骤的执行顺序，传入新的 stepId 序列。`                                                                       |
-| `markStepDone` | `将指定步骤标记为 DONE（PENDING/EXECUTING 状态均可标记）。`                                                                   |
+| 工具             | description 中应包含的上限声明                                                                                                         |
+|----------------|-------------------------------------------------------------------------------------------------------------------------------|
+| `Read`         | `单次最多返回 500 行。如果文件行数超过此限制，返回内容会被截断，请使用 startLine 参数分页读取剩余内容。`                                                                 |
+| `Grep`         | `最多返回 50 条匹配。如果匹配数超过此限制，结果会被截断，请使用更精确的搜索词缩小范围。`                                                                               |
+| `Glob`         | `最多返回 50 个条目（文件+目录）。如果超出此限制，结果会被截断并在返回值中标注。请用 dirPath/maxDepth 缩小范围，或用 offset 参数翻页获取更多条目。`                                    |
+| `Bash`         | `最多返回 200 行输出（stdout+stderr）。超出时中段截断：保留头部 30 行 + 尾部 30 行，中间标注省略行数。Bash 不支持翻页（重新执行有副作用）。timeout 参数由 LLM 根据命令类型自行判断传入（秒），0=不限。` |
+| `readLints`    | `最多返回 50 条诊断，按 severity 排序（ERROR > WARNING > INFO）。如果超出此限制，低严重度诊断可能不显示。`                                                      |
+| `Edit`         | `newString 最多 3000 行。超过此限制的操作会被拒绝。`                                                                                           |
+| `Write`        | `内容最多 3000 行。超过此限制的操作会被拒绝。`                                                                                                   |
+| `Skill`        | `执行指定 Skill。LLM 根据用户需求自主判断触发时机，将 SKILL.md 内容作为消息注入 conversation。`                                                             |
+| `Task`         | `子 Agent 结果摘要最多 2000 tokens。完整执行过程保存为独立 Session。`                                                                             |
+| `createPlan`   | `创建执行计划，最多 20 项。计划创建后自动开始执行，LLM 可用 listPlans/removePlan/reorderPlans 管理。`                                                     |
+| `listPlans`    | `查看当前计划的所有计划项及状态，无参数。`                                                                                                        |
+| `removePlan`   | `删除指定计划项（仅 PAUSED 状态可删）。`                                                                                                     |
+| `reorderPlans` | `重排剩余 PAUSED 计划项的执行顺序，传入新的 planId 序列。`                                                                                        |
+| `markPlanDone` | `将指定计划项标记为 COMPLETED。`                                                                                                        |
 
 ### 工具模型
 

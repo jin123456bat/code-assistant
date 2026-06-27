@@ -154,8 +154,8 @@ dialog:     0px 8px 24px rgba(0,0,0,0.15)    — 弹窗（审批、确认）
 | TabBar - Welcome         | `AllIcons.Actions.Home`                 |
 | ToolCallCard - DONE      | `AllIcons.RunConfigurations.TestPassed` |
 | ToolCallCard - ERROR     | `AllIcons.RunConfigurations.TestFailed` |
-| ToolCallCard - EXECUTING | `AllIcons.Process.Step_4`（旋转动画）         |
-| ToolCallCard - PENDING   | `AllIcons.Process.Step_0`               |
+| ToolCallCard - EXECUTING | `AllIcons.Process.Plan_4`（旋转动画）         |
+| ToolCallCard - PENDING   | `AllIcons.Process.Plan_0`               |
 | 发送按钮                     | `AllIcons.Actions.Commit`               |
 | 停止按钮                     | `AllIcons.Actions.Suspend`              |
 | 文件引用 tag                 | `AllIcons.FileTypes.Text`               |

@@ -95,7 +95,7 @@ oldString 匹配到 {count} 处:
 错误: 请先用 Read 读取 {filePath} 后再修改。
 提示: 当前 turn 中该文件未被 Read，拒绝执行 Edit。先用 Read 读取文件内容和 modification stamp 后再试。
 
-自动 readLints 结果（⏳ 规划中，Edit/Write 成功后自动追加）:
+自动 readLints 结果（Edit/Write 成功后自动追加）:
 ⚠️ 该文件修改后存在 2 个编译错误:
   45:12: Unresolved reference: findById [ERROR]
   78:5: Type mismatch: inferred type is String but Unit was expected [ERROR]
@@ -103,14 +103,14 @@ oldString 匹配到 {count} 处:
 
 上限：`newString` 最多 3000 行。无新诊断时不追加 lint 结果。
 
-**UI 展示（⏳ 规划中）：** `Edit` 成功后，ToolCallCard 内联展示 `SimpleDiff` 生成的可视化 diff（ADD 绿色/DEL
+**UI 展示：** `Edit` 成功后，ToolCallCard 内联展示 `SimpleDiff` 生成的可视化 diff（ADD 绿色/DEL
 红色/CTX 灰色），替换当前的前后 3 行文本对比。
 
 ---
 
 ## Bash
 
-**返回值格式（⏳ 强化版，错误优先）：**
+**返回值格式（错误优先）：**
 
 ```
 成功（退出码 0 + stderr 空）:
@@ -129,11 +129,12 @@ $ {command}
 $ {command}
 超时: 命令执行超过 {timeout}s，已强制终止
 
-输出截断:
+输出截断（中段截断，对齐 Claude Code）:
 $ {command}
-{stdout}
-... (共 {totalLines} 行输出，完整输出见 IDE 工具卡片)
-退出码: {exitCode} | 耗时: {duration}s
+{stdoutHead 前 30 行}
+... (省略 {omittedLines} 行) ...
+{stdoutTail 后 30 行}
+退出码: {exitCode} | 耗时: {duration}s | 共 {totalLines} 行
 
 命令失败（退出码非零，强化标注）:
 ⚠️ 命令执行失败 (退出码: {exitCode})
@@ -258,78 +259,78 @@ STDOUT:
 
 ```
 ✅ 已创建执行计划: {taskSummary}
-步骤数: {stepCount}
-步骤列表:
-1. {step1.description} — 工具: {step1.tool}, 文件: {step1.files}
-2. {step2.description} — 工具: {step2.tool}, 文件: {step2.files}
+计划项数: {planCount}
+计划项列表:
+1. {plan1.description} — 工具: {plan1.tool}, 文件: {plan1.files}
+2. {plan2.description} — 工具: {plan2.tool}, 文件: {plan2.files}
 ...
 计划已持久化，自动开始执行。
 ```
 
-上限：最多 20 步。
+上限：最多 20 项。
 
 ---
 
-## listSteps
+## listPlans
 
 ```
 当前计划: {summary}
 进度: {doneCount}/{totalCount} 已完成
 
-步骤列表:
-1. ✅ {step1.description} — DONE
-2. 🔄 {step2.description} — EXECUTING
-3. ⬜ {step3.description} — PENDING
-4. 🗑 {step4.description} — DELETED
+计划项列表:
+1. ✅ {plan1.description} — COMPLETED
+2. 🔄 {plan2.description} — EXECUTING
+3. ⬜ {plan3.description} — PAUSED
+4. 🗑 {plan4.description} — CANCELLED
 ```
 
 无参数工具。
 
 ---
 
-## deleteStep
+## removePlan
 
 ```
 成功:
-✅ 已删除步骤: {stepId} — "{description}"
-剩余步骤: {remainingCount} 步，继续自动执行。
+✅ 已删除计划项: {planId} — "{description}"
+剩余计划项: {remainingCount} 项，继续自动执行。
 
-拒绝（步骤非 PENDING 状态）:
-❌ 无法删除步骤 {stepId}：当前状态为 {status}，仅 PENDING 状态的步骤可删除。
+拒绝（非 PAUSED 状态）:
+❌ 无法删除计划项 {planId}：当前状态为 {status}，仅 PAUSED 状态可删。
 ```
 
-仅 PENDING 状态可删。
+仅 PAUSED 状态可删。
 
 ---
 
-## reorderSteps
+## reorderPlans
 
 ```
 成功:
-✅ 已重排剩余步骤:
+✅ 已重排剩余计划项:
 新顺序:
-1. {step2.description} (原 step-2)
-2. {step3.description} (原 step-3)
-3. {step1.description} (原 step-1)
+1. {plan2.description} (原 plan-2)
+2. {plan3.description} (原 plan-3)
+3. {plan1.description} (原 plan-1)
 继续自动执行。
 
-参数无效（stepId 不完整或不匹配）:
-❌ 重排失败：提供的 stepId 列表与当前 PENDING 步骤不匹配。
-当前 PENDING 步骤: step-1, step-3, step-5
-提供的: step-1, step-5
+参数无效（planId 不完整或不匹配）:
+❌ 重排失败：提供的 planId 列表与当前 PAUSED 计划项不匹配。
+当前 PAUSED 计划项: plan-1, plan-3, plan-5
+提供的: plan-1, plan-5
 ```
 
 ---
 
-## markStepDone
+## markPlanDone
 
 ```
 成功:
-✅ 已将步骤 {stepId} — "{description}" 标记为 DONE。
-剩余步骤: {remainingCount} 步，继续自动执行。
+✅ 已将计划项 {planId} — "{description}" 标记为 COMPLETED。
+剩余计划项: {remainingCount} 项，继续自动执行。
 
-拒绝（步骤当前为 DONE/DELETED 状态）:
-❌ 无法标记步骤 {stepId}：当前状态为 {status}。DONE/DELETED 状态的步骤已是终态，无法再标记为完成。
+拒绝（已经是终态）:
+❌ 无法标记计划项 {planId}：当前状态为 {status}。COMPLETED/CANCELLED 状态已是终态，无法再标记。
 ```
 
-PENDING/EXECUTING 状态均可标记。
+PAUSED/EXECUTING 状态均可标记。

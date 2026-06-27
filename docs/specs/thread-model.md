@@ -62,4 +62,4 @@
 | Write / Edit                                                      | `invokeAndWait { WriteCommandAction }`                 |
 | Bash                                                              | Background Thread（`ProcessHandler` + 实时 `onOutput` 回调） |
 | Task                                                              | `MultiAgentManager.spawn()`                            |
-| createPlan / listSteps / deleteStep / reorderSteps / markStepDone | `PlanExecutor`                                         |
+| createPlan / listPlans / removePlan / reorderPlans / markPlanDone | `PlanExecutor`                                         |

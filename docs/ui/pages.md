@@ -124,7 +124,7 @@ UNSET ──saveKey()──→ VALIDATING ──200──→ VALID
 │                                                  │
 │  ┌──────────────────────────────────────────────┐│
 │  │ 📝 重构 UserService — 添加 suspend 支持      ││ ← 会话卡片
-│  │    └ ⏸ 计划暂停中 (Step 3/5)               ││   暂停计划标记
+│  │    └ ⏸ 计划暂停中 (3/5)                    ││   暂停计划标记
 │  │    3 小时前  ·  tokens: 8.2K  ·  12 次工具   ││
 │  └──────────────────────────────────────────────┘│
 │  ┌──────────────────────────────────────────────┐│
@@ -151,7 +151,7 @@ UNSET ──saveKey()──→ VALIDATING ──200──→ VALID
 ┌──────────────────────────────────────────────────┐
 │ [🏠] [💬] [📁] [📊*] [🔌] [🎯] [⚙]        │
 ├──────────────────────────────────────────────────┤
-│  时间范围: [本月 ▾]    总消耗: 128.5K  ·  ¥0.87  │
+│  时间范围: [本月 ▾]  [☐ 含子任务]   总消耗: 128.5K  ·  ¥0.87  │
 ├──────────────────────────────────────────────────┤
 │                                                  │
 │  ┌──────────────────────────────────────────────┐│
@@ -177,6 +177,8 @@ UNSET ──saveKey()──→ VALIDATING ──200──→ VALID
 - sparkline：30 天按日折线图，X 轴 = 日期，Y 轴 = 当日 totalTokens（input+output），Custom JComponent
   `paintComponent` 手绘。仅显示趋势线，省略坐标轴标签（鼠标 hover 显示具体数值）
 - 数据源：Session JSON 的 `totalTokens.output` + `totalTokens.input` 按 `updatedAt` 日期聚合
+- **含子任务模式**：勾选 `[☐ 含子任务]` 后，父 session 的 token 统计自动包含所有子 session 的
+  token（递归聚合 `parentTotalTokens`）。默认不勾选（仅显示自身消耗）
 
 ## 六、MCP 页面
 
@@ -338,8 +340,8 @@ Chat 页面内流转（统一模式，无需切换）:
   │     │                                                │
   │     ├─ /plan 命令/createPlan → PlanCard + 自动执行    │
   │     │               ├─ 逐步自动执行                     │
-  │     │               ├─ LLM 通过 listSteps 查看进度      │
-  │     │               └─ LLM 通过 deleteStep/reorderSteps 调整 │
+  │     │               ├─ LLM 通过 listPlans 查看进度      │
+  │     │               └─ LLM 通过 removePlan/reorderPlans 调整 │
   │     │                                                │
   │     ├─ 工具调用（随对话自然触发）                        │
   │     │   ├─ ToolCallCard (PENDING)                    │
@@ -368,7 +370,7 @@ Chat 页面内流转（统一模式，无需切换）:
 | `TokenUsageUpdated`     | sessionId + delta                               | AgentSession   | TokenUsagePage         |
 | `McpServerStateChanged` | serverId + newState                             | McpManager     | McpPage                |
 | `ApiKeyValidated`       | keyState (VALID/INVALID/UNKNOWN)                | WelcomePage    | ChatPage, SettingsPage |
-| `PlanStateChanged`      | sessionId + planStatus + currentStep            | PlanExecutor   | ChatPage, SessionsPage |
+| `PlanStateChanged`      | sessionId + planStatus + currentPlan            | PlanExecutor   | ChatPage, SessionsPage |
 | `PageSwitched`          | from + to (PageId)                              | ChatToolWindow | 所有 Page                |
 
 ## 十二、组件接口

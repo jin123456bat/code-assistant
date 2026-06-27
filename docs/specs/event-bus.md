@@ -16,7 +16,7 @@
 | `TokenUsageUpdated`     | `TokenUsageEvent` | `sessionId: String, delta: TokenDelta`                                 | AgentSession   | TokenUsagePage         |
 | `McpServerStateChanged` | `McpServerEvent`  | `serverId: String, oldState: McpServerState, newState: McpServerState` | McpManager     | McpPage                |
 | `ApiKeyValidated`       | `ApiKeyEvent`     | `state: VALID\|INVALID\|UNKNOWN`                                       | WelcomePage    | ChatPage, SettingsPage |
-| `PlanStateChanged`      | `PlanStateEvent`  | `sessionId: String, planStatus: PlanStatus, currentStep: Int`          | PlanExecutor   | ChatPage, SessionsPage |
+| `PlanStateChanged`      | `PlanStateEvent`  | `sessionId: String, planStatus: PlanStatus, currentPlan: Int`          | PlanExecutor   | ChatPage, SessionsPage |
 | `PageSwitched`          | `PageEvent`       | `from: PageId, to: PageId`                                             | ChatToolWindow | 所有 Page                |
 
 ## AgentState 枚举
@@ -36,5 +36,5 @@ McpServerState = CONFIGURED | INITIALIZING | RUNNING | CRASHED | STOPPED | DISCO
 ## PlanStatus 枚举
 
 ```
-PlanStatus = PENDING | EXECUTING | DONE | DELETED
+PlanStatus = PAUSED | EXECUTING | COMPLETED | CANCELLED
 ```

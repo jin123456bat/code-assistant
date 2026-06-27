@@ -29,7 +29,7 @@ AppSettingsService（SettingsConfigurable 读写）
 | `completionEnabled`   | Boolean | `true`            | `PropertiesComponent` | 代码补全总开关                                                         |
 | `commitPrompt`        | String  | —                 | `PropertiesComponent` | Commit 消息生成模板，`{diff}` 为 diff 内容占位符                             |
 | `maxAgentTurns`       | Int     | `20`              | `PropertiesComponent` | Agent 每轮最大 API 调用次数。每轮 = 一次用户消息触发的 API 调用（续写不计数）。设为 0 时内部转为不限轮次 |
-| `maxConcurrentAgents` | Int     | `3`               | `PropertiesComponent` | 多 Agent 模式下的并发上限（⏳ 规划中）                                         |
+| `maxConcurrentAgents` | Int     | `3`               | `PropertiesComponent` | 多 Agent 模式下的并发上限                                                |
 
 ## 存储方式
 
