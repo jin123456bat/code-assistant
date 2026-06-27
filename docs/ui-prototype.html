@@ -5,233 +5,550 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Code Assistant — UI 原型</title>
     <style>
+        /* ===== Design Tokens ===== */
         :root {
-          --primary:#3B82F6;--primary-hover:#2563EB;--primary-pressed:#1D4ED8;--primary-light:#EFF6FF;
-          --success:#22C55E;--warning:#F59E0B;--error:#EF4444;--error-light:#FEE2E2;
-          --g9:#111827;--g7:#374151;--g5:#6B7280;--g4:#9CA3AF;--g3:#D1D5DB;--g2:#E5E7EB;--g1:#F3F4F6;--g0:#F9FAFB;
-          --code-bg:#F6F8FA;--code-border:#E1E4E8;
-          --blue-50:#E8F0FE;--blue-200:#BFDBFE;
-          --amber-50:#FFFBEB;--amber-100:#FDE8D0;--amber-200:#FDE68A;--amber-700:#B45309;--amber-800:#92400E;--amber-bg:#FFF8F0;
-          --multi-agent-bg:#F0F7FF;
-          --rb:12px;--rc:8px;--rbtn:6px;--rtag:4px;
-          --font:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-          --mono:"JetBrains Mono","Fira Code","Monospaced",monospace;
+          /* Primary */
+          --primary: #3B82F6; --primary-hover: #2563EB; --primary-pressed: #1D4ED8; --primary-light: #EFF6FF;
+          /* Semantic */
+          --success: #22C55E; --warning: #F59E0B; --error: #EF4444; --error-light: #FEE2E2;
+          /* Neutrals */
+          --g900: #111827; --g700: #374151; --g500: #6B7280; --g400: #9CA3AF; --g300: #D1D5DB; --g200: #E5E7EB; --g100: #F3F4F6; --g50: #F9FAFB;
+          /* Code */
+          --code-bg: #F6F8FA; --code-border: #E1E4E8;
+          /* Extended */
+          --blue-50: #E8F0FE; --blue-200: #BFDBFE; --blue-700: #1D4ED8;
+          --amber-50: #FFFBEB; --amber-100: #FDE8D0; --amber-200: #FDE68A; --amber-700: #B45309; --amber-800: #92400E; --amber-bg: #FFF8F0;
+          --multi-agent-bg: #F0F7FF;
+          /* Radius */
+          --rb: 12px; --rc: 8px; --rbtn: 6px; --rtag: 4px;
+          /* Fonts */
+          --font: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+          --mono: "JetBrains Mono", "Fira Code", "Monospaced", monospace;
+          /* Shadows */
+          --shadow-tooltip: 0 4px 12px rgba(0,0,0,.10);
+          --shadow-dialog: 0 8px 24px rgba(0,0,0,.15);
         }
-        *{margin:0;padding:0;box-sizing:border-box}
-        body{font-family:var(--font);font-size:14px;line-height:1.6;color:var(--g9);background:#E5E7EB;display:flex;justify-content:center;padding:24px;}
 
-        .panel{max-width:740px;width:100%;height:820px;background:#fff;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.12);display:flex;flex-direction:column;overflow:hidden}
+        /* ===== Dark Theme ===== */
+        .dark {
+          --primary: #60A5FA; --primary-hover: #93BBFD; --primary-light: #1E3A5F; --primary-pressed: #BFDBFE;
+          --success: #4ADE80; --warning: #FBBF24; --error: #F87171; --error-light: #7F1D1D;
+          --g900: #E5E7EB; --g700: #D1D5DB; --g500: #9CA3AF; --g400: #6B7280; --g300: #4B5563; --g200: #374151; --g100: #1F2937; --g50: #111827;
+          --code-bg: #1E1E2E; --code-border: #2D2D3F;
+          --blue-50: #1E3A5F; --blue-200: #1E40AF; --blue-700: #BFDBFE;
+          --amber-50: #422006; --amber-100: #5C2D0E; --amber-200: #78350F; --amber-700: #FBBF24; --amber-800: #FDE68A; --amber-bg: #422006;
+          --multi-agent-bg: #0F1D2F;
+          --shadow-tooltip: 0 4px 12px rgba(0,0,0,.4);
+          --shadow-dialog: 0 8px 24px rgba(0,0,0,.5);
+        }
 
-        /* TabBar */
-        .tab-bar{display:flex;border-bottom:1px solid var(--g2);background:#fff;flex-shrink:0}
-        .tab{padding:8px 16px;font-size:13px;color:var(--g5);cursor:pointer;border-bottom:2px solid transparent;transition:all .1s;white-space:nowrap;user-select:none}
-        .tab:hover{background:var(--g1);color:var(--g7)}
-        .tab.active{color:var(--primary);border-bottom-color:var(--primary);font-weight:600}
-        .tab.disabled{color:var(--g3);cursor:default;pointer-events:none}
-        .tab.hidden{display:none}
-        .tab .badge{background:var(--error);color:#fff;font-size:9px;padding:1px 5px;border-radius:8px;margin-left:4px;vertical-align:top;display:none}
-        .tab .badge.show{display:inline}
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body {
+          font-family: var(--font); font-size: 14px; line-height: 1.6; color: var(--g900);
+          background: var(--g200); display: flex; justify-content: center; padding: 24px;
+          transition: background .3s, color .3s;
+        }
 
-        /* 页面容器 */
-        .page{flex:1;overflow-y:auto;display:none;flex-direction:column}
-        .page.active{display:flex}
-        .page-body{flex:1;overflow-y:auto;padding:16px;background:var(--g0);display:flex;flex-direction:column;gap:8px}
+        /* ===== Panel ===== */
+        .panel {
+          max-width: 740px; width: 100%; height: 860px; background: #fff; border-radius: 12px;
+          box-shadow: var(--shadow-dialog); display: flex; flex-direction: column; overflow: hidden;
+          transition: background .3s;
+        }
+        .dark .panel { background: var(--g100); }
 
-        /* 聊天气泡 */
-        .bubble{max-width:85%;padding:12px 16px;border-radius:var(--rb);animation:fadeIn .15s ease-out}
-        @keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
-        .bubble.user{align-self:flex-end;background:var(--blue-50);max-width:60%;border-bottom-right-radius:4px}
-        .bubble.agent{align-self:flex-start;background:#fff;border-left:3px solid var(--primary);max-width:75%}
-        .bubble.error{align-self:flex-start;background:var(--error-light);border-left:3px solid var(--error)}
-        .bubble h3{font-size:14px;font-weight:600;margin:8px 0 4px}
-        .bubble ul,.bubble ol{padding-left:20px;margin:4px 0}
-        .bubble p{margin:4px 0}
-        .bubble code.inline{font-family:var(--mono);font-size:13px;background:var(--code-bg);padding:1px 6px;border-radius:3px;border:1px solid var(--code-border)}
+        /* ===== TabBar ===== */
+        .tab-bar { display: flex; border-bottom: 1px solid var(--g200); background: inherit; flex-shrink: 0; }
+        .tab {
+          padding: 8px 16px; font-size: 13px; color: var(--g500); cursor: pointer;
+          border-bottom: 2px solid transparent; transition: all .1s; white-space: nowrap; user-select: none;
+        }
+        .tab:hover { background: var(--g100); color: var(--g700); }
+        .tab.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
+        .tab.disabled { color: var(--g300); cursor: default; pointer-events: none; }
+        .tab.hidden { display: none; }
+        .tab .badge {
+          background: var(--error); color: #fff; font-size: 9px; padding: 1px 5px;
+          border-radius: 8px; margin-left: 4px; vertical-align: top; display: none;
+        }
+        .tab .badge.show { display: inline; }
 
-        .msg-row{display:flex;flex-direction:column}
-        .msg-row.user{align-items:flex-end}
-        .msg-row.agent,.msg-row.error{align-items:flex-start}
-        .msg-ts{font-size:11px;color:var(--g5);margin:2px 4px 4px;display:flex;gap:12px}
-        .msg-row.user .msg-ts{justify-content:flex-end}
-        .msg-row.agent .msg-ts{justify-content:flex-start}
+        /* ===== Theme Toggle ===== */
+        .theme-toggle {
+          position: fixed; top: 28px; right: 280px; width: 36px; height: 36px;
+          border-radius: 8px; border: 1px solid var(--g300); background: var(--g50);
+          font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+          transition: all .15s; z-index: 50;
+        }
+        .theme-toggle:hover { border-color: var(--primary); background: var(--primary-light); }
+        @media (max-width: 800px) { .theme-toggle { right: 32px; top: auto; bottom: 32px; } }
 
-        /* 代码块 */
-        .code-block{font-family:var(--mono);font-size:13px;line-height:1.5;background:var(--code-bg);border:1px solid var(--code-border);border-radius:var(--rc);padding:12px;margin:8px 0;overflow-x:auto}
-        .code-block .kw{color:#CF222E}.code-block .fn{color:#8250DF}.code-block .str{color:#0A3069}.code-block .cm{color:#6E7781}
+        /* ===== Pages ===== */
+        .page { flex: 1; overflow-y: auto; display: none; flex-direction: column; }
+        .page.active { display: flex; }
+        .page-body {
+          flex: 1; overflow-y: auto; padding: 16px; background: var(--g50);
+          display: flex; flex-direction: column; gap: 8px; transition: background .3s;
+        }
 
-        /* 工具卡片 */
-        .tool-card{background:#fff;border:1px solid var(--g2);border-radius:var(--rc);align-self:flex-start;max-width:90%;width:100%;box-shadow:0 1px 3px rgba(0,0,0,.04)}
-        .tool-card-header{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--g0);border-bottom:1px solid var(--g1);cursor:pointer;font-size:13px;font-weight:500}
-        .tool-card-header .state{margin-left:auto;font-size:12px}
-        .state-pending{color:var(--g5)}.state-awaiting{color:var(--warning)}.state-executing{color:var(--primary)}.state-done{color:var(--success)}.state-error-s{color:var(--error)}.state-rejected{color:var(--g5)}
-        .tool-approval{background:var(--amber-50);border:1px solid var(--amber-200);border-radius:6px;padding:10px 12px;margin-top:8px;display:flex;align-items:center;gap:8px}
-        .tool-approval .msg{flex:1;font-size:13px;color:var(--amber-800)}
-        .tool-approval .timer{font-size:11px;color:var(--amber-700)}
-        .tool-card-body{padding:8px 12px}
-        .tool-card-params{font-family:var(--mono);font-size:12px;color:var(--g7);background:var(--g0);padding:6px 8px;border-radius:4px;margin-bottom:6px}
-        .tool-card-result{font-family:var(--mono);font-size:13px;background:var(--code-bg);padding:8px;border-radius:4px;max-height:200px;overflow-y:auto}
-        .tool-card-footer{font-size:11px;color:var(--g5);padding:6px 12px;border-top:1px solid var(--g1);display:flex;justify-content:space-between}
+        /* ===== Chat Bubbles ===== */
+        .bubble {
+          max-width: 85%; padding: 12px 16px; border-radius: var(--rb);
+          animation: fadeIn .15s ease-out;
+        }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+        .bubble.user { align-self: flex-end; background: var(--blue-50); max-width: 60%; border-bottom-right-radius: 4px; }
+        .bubble.agent { align-self: flex-start; background: #fff; border-left: 3px solid var(--primary); max-width: 75%; }
+        .dark .bubble.agent { background: var(--g100); }
+        .bubble.error { align-self: flex-start; background: var(--error-light); border-left: 3px solid var(--error); }
+        .bubble h3 { font-size: 14px; font-weight: 600; margin: 8px 0 4px; }
+        .bubble ul, .bubble ol { padding-left: 20px; margin: 4px 0; }
+        .bubble p { margin: 4px 0; }
+        .bubble code.inline {
+          font-family: var(--mono); font-size: 13px; background: var(--code-bg);
+          padding: 1px 6px; border-radius: 3px; border: 1px solid var(--code-border);
+        }
 
-        /* 计划卡片 */
-        .thinking-block{background:var(--amber-bg);border:1px solid var(--amber-100);border-radius:var(--rc);margin:4px 0;align-self:flex-start;max-width:88%;width:100%}
-        .thinking-header{display:flex;align-items:center;gap:6px;padding:6px 10px;font-size:12px;color:var(--amber-700);cursor:pointer;user-select:none}
-        .thinking-body{display:none;padding:6px 10px 10px;font-size:12px;color:var(--amber-800);border-top:1px solid var(--amber-100);line-height:1.5;max-height:200px;overflow-y:auto;font-style:italic}
-        .thinking-body.show{display:block}
-        .thinking-header.expanded .arrow{transform:rotate(90deg)}
+        .msg-row { display: flex; flex-direction: column; }
+        .msg-row.user { align-items: flex-end; }
+        .msg-row.agent, .msg-row.error { align-items: flex-start; }
+        .msg-ts {
+          font-size: 11px; color: var(--g400); margin: 2px 4px 4px;
+          display: flex; gap: 12px;
+        }
+        .msg-row.user .msg-ts { justify-content: flex-end; }
+        .msg-row.agent .msg-ts { justify-content: flex-start; }
 
-        /* === 选项组件 === */
-        .options-block{background:#fff;border:1px solid var(--g2);border-radius:var(--rc);padding:0;align-self:flex-start;max-width:85%;width:100%}
-        .options-block .opt-header{padding:8px 12px;font-size:13px;color:var(--g7);border-bottom:1px solid var(--g1);background:var(--g0)}
-        .options-block .opt-item{display:flex;align-items:center;gap:8px;padding:8px 12px;cursor:pointer;font-size:13px;border-bottom:1px solid var(--g1);transition:background .1s}
-        .options-block .opt-item:last-child{border-bottom:none}
-        .options-block .opt-item:hover{background:var(--primary-light)}
-        .options-block .opt-item.selected{background:var(--primary-light);border-left:3px solid var(--primary)}
-        .options-block .opt-item .opt-letter{width:20px;height:20px;border-radius:50%;border:2px solid var(--g3);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:var(--g5);flex-shrink:0}
-        .options-block .opt-item.selected .opt-letter{background:var(--primary);border-color:var(--primary);color:#fff}
-        .options-block .opt-item .opt-text{flex:1}
-        .options-block .opt-item .opt-desc{font-size:11px;color:var(--g5);margin-top:1px}
-        .options-block .opt-footer{padding:8px 12px;display:flex;gap:8px;border-top:1px solid var(--g1)}
-        .multi-agent-block{background:var(--multi-agent-bg);border:1px solid var(--blue-200);border-radius:var(--rc);padding:12px;align-self:flex-start;max-width:92%;width:100%;margin:4px 0}
-        .ma-header{font-size:13px;font-weight:600;color:var(--primary);margin-bottom:8px}
-        .ma-sub{display:flex;align-items:center;gap:8px;padding:6px 10px;background:#fff;border-radius:4px;margin-bottom:4px;font-size:12px;border:1px solid var(--g1)}
-        .ma-sub .ma-status{font-size:11px;margin-left:auto}
-        .plan-card{background:#fff;border-bottom:1px solid var(--g2);padding:10px 16px;width:100%;flex-shrink:0}
-        .plan-card.pinned{position:sticky;top:0;z-index:10;box-shadow:0 2px 8px rgba(0,0,0,.08)}
-        .plan-card h3{font-size:14px;margin-bottom:4px}
-        .plan-meta{font-size:12px;color:var(--g5);margin-bottom:8px}
-        .plan-step{display:flex;align-items:flex-start;gap:8px;padding:6px 0;border-bottom:1px solid var(--g1);font-size:13px}
-        .plan-step .status{flex-shrink:0;width:20px}
-        .plan-step .info{flex:1}
-        .plan-step .files{font-size:11px;color:var(--g5);margin-top:2px}
-        .step-pending .status{color:var(--g5)}.step-executing{background:var(--primary-light);border-radius:4px;padding:6px 8px}.step-executing .status{color:var(--primary)}.step-paused{background:#FFF8F0;border-radius:4px;padding:6px 8px}.step-paused .status{color:var(--warning)}.step-done .status{color:var(--success)}
-        .plan-actions{display:flex;gap:8px;margin-top:8px}
+        /* ===== Code Block ===== */
+        .code-block {
+          font-family: var(--mono); font-size: 13px; line-height: 1.5;
+          background: var(--code-bg); border: 1px solid var(--code-border);
+          border-radius: var(--rc); padding: 12px; margin: 8px 0; overflow-x: auto;
+        }
+        .code-block .kw { color: #CF222E; } .code-block .fn { color: #8250DF; }
+        .code-block .str { color: #0A3069; } .code-block .cm { color: #6E7781; }
+        .dark .code-block .kw { color: #FF7B72; } .dark .code-block .fn { color: #D2A8FF; }
+        .dark .code-block .str { color: #A5D6FF; } .dark .code-block .cm { color: #8B949E; }
 
-        /* 系统消息 */
-        .sys-msg{text-align:center;font-size:11px;color:var(--g4);padding:12px 0}
+        /* ===== Streaming Cursor ===== */
+        .stream-cursor {
+          display: inline-block; width: 8px; height: 16px; background: var(--primary);
+          vertical-align: text-bottom; margin-left: 1px;
+          animation: blink 500ms step-end infinite;
+        }
+        @keyframes blink { 50% { opacity: 0; } }
+        @keyframes progressPulse { 0%,100% { opacity: .8; } 50% { opacity: 1; } }
 
-        /* 按钮 */
-        .btn{padding:6px 14px;border-radius:var(--rbtn);border:none;cursor:pointer;font-size:13px;font-family:inherit;transition:background .1s}
-        .btn-primary{background:var(--primary);color:#fff}.btn-primary:hover{background:var(--primary-hover)}.btn-primary:active{background:var(--primary-pressed)}
-        .btn-secondary{background:transparent;color:var(--g7);border:1px solid var(--g3)}.btn-secondary:hover{background:var(--g1)}.btn-secondary:disabled{color:var(--g5);border-color:var(--g2);cursor:default}
-        .btn-danger{background:transparent;color:var(--error)}.btn-danger:hover{background:var(--error-light)}
-        .btn-xs{padding:2px 8px;font-size:11px}
+        /* ===== Tool Call Card ===== */
+        .tool-card {
+          background: #fff; border: 1px solid var(--g200); border-radius: var(--rc);
+          align-self: flex-start; max-width: 90%; width: 100%;
+          transition: background .3s;
+        }
+        .dark .tool-card { background: var(--g100); }
+        .tool-card-header {
+          display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+          background: var(--g50); border-bottom: 1px solid var(--g100); cursor: pointer;
+          font-size: 13px; font-weight: 500; border-radius: var(--rc) var(--rc) 0 0;
+          user-select: none;
+        }
+        .tool-card-header .arrow { font-size: 10px; transition: transform .2s; }
+        .tool-card.collapsed .tool-card-header { border-bottom: none; border-radius: var(--rc); }
+        .tool-card.collapsed .tool-collapsible { display: none; }
+        /* AWAITING_APPROVAL 始终展开，不可折叠 */
+        .tool-card.awaiting .tool-card-header { cursor: default; }
+        .tool-card.awaiting .tool-card-header .arrow { visibility: hidden; }
+        .dark .tool-card-header { background: var(--g50); }
+        .tool-card-header .state { margin-left: auto; font-size: 12px; }
+        .state-pending { color: var(--g500); }
+        .state-awaiting { color: var(--warning); }
+        .state-executing { color: var(--primary); }
+        .state-done { color: var(--success); }
+        .state-error-s { color: var(--error); }
+        .state-timeout { color: #F97316; }
+        .state-rejected { color: var(--g400); }
+        .state-cancelled { color: var(--g400); }
 
-        /* 输入区域 */
-        .input-area{border-top:1px solid var(--g2);background:#fff;flex-shrink:0;position:relative}
-        .input-tags-row{display:flex;gap:6px;padding:8px 12px 8px 12px;flex-wrap:wrap;min-height:0}
-        .input-tag{font-size:11px;padding:3px 8px;border-radius:var(--rtag);display:inline-flex;align-items:center;gap:5px;white-space:nowrap;cursor:default}
-        .input-tag.file{background:var(--primary-light);border:1px solid var(--blue-200);color:var(--g7)}
-        .input-tag.img{background:var(--g1);border:1px solid var(--g3);color:var(--g7)}
-        .input-tag .tag-close{cursor:pointer;opacity:.5;font-size:10px;line-height:1}
-        .input-tag .tag-close:hover{opacity:1;color:var(--error)}
-        .input-area textarea{width:100%;border:none;padding:10px 12px;font-family:inherit;font-size:13px;resize:none;height:60px;outline:none;background:transparent}
-        .input-area textarea:focus{box-shadow:inset 0 0 0 2px var(--primary)}
-        .input-bottom-row{display:flex;align-items:center;justify-content:space-between;padding:0 12px 10px}
-        .btn-add-file{width:28px;height:28px;border-radius:6px;border:1px solid var(--g3);background:#fff;color:var(--g5);font-size:18px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .1s}
-        .btn-add-file:hover{background:var(--primary-light);border-color:var(--primary);color:var(--primary)}
-        .input-hint{font-size:11px;color:var(--g5)}
-        .btn-send{width:32px;height:32px;border-radius:8px;border:none;background:var(--primary);color:#fff;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .1s}
-        .btn-send:hover{background:var(--primary-hover)}
-        .btn-send:disabled{background:var(--g3);cursor:default}
-        /* 文件选择 Popup（从底部弹出） */
-        .file-popup{position:absolute;bottom:100%;left:12px;right:12px;background:#fff;border:1px solid var(--g2);border-radius:var(--rc);box-shadow:0 -4px 16px rgba(0,0,0,.1);max-height:280px;overflow-y:auto;display:none;z-index:20;margin-bottom:4px}
-        .file-popup.show{display:block}
-        .file-popup .fp-group{font-size:10px;color:var(--g5);padding:8px 12px 4px;text-transform:uppercase;letter-spacing:.5px}
-        .file-popup .fp-item{display:flex;align-items:center;gap:8px;padding:6px 12px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--g1)}
-        .file-popup .fp-item:last-child{border-bottom:none}
-        .file-popup .fp-item:hover,.file-popup .fp-item.active{background:var(--primary-light)}
-        .file-popup .fp-item .fp-name{font-family:var(--mono);font-size:12px;color:var(--g9)}
-        .file-popup .fp-item .fp-path{font-size:10px;color:var(--g5);margin-left:auto}
+        /* Tool Approval Bar */
+        .tool-approval {
+          background: var(--amber-50); border: 1px solid var(--amber-200); border-radius: 6px;
+          padding: 10px 12px; margin: 8px 12px; display: flex; align-items: center; gap: 8px;
+        }
+        .tool-approval .msg { flex: 1; font-size: 13px; color: var(--amber-800); }
+        .tool-approval .btn-row { display: flex; gap: 6px; }
 
-        /* 通用页面样式 */
-        .page-title{font-size:18px;font-weight:700;margin-bottom:12px}
-        .section-title{font-size:14px;font-weight:600;color:var(--g7);margin:16px 0 8px}
-        .card{background:#fff;border:1px solid var(--g2);border-radius:var(--rc);padding:12px 16px}
-        .card-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--g1);font-size:13px}
-        .card-row:last-child{border-bottom:none}
-        .empty-state{text-align:center;padding:60px 20px;color:var(--g5)}
-        .empty-state .icon{font-size:40px;margin-bottom:12px}
-        .empty-state p{font-size:13px}
+        .tool-card-body { padding: 8px 12px; }
+        .tool-card-params {
+          font-family: var(--mono); font-size: 12px; color: var(--g700); background: var(--g50);
+          padding: 6px 8px; border-radius: 4px; margin-bottom: 6px;
+        }
+        .tool-card-result {
+          font-family: var(--mono); font-size: 13px; background: var(--code-bg);
+          padding: 8px; border-radius: 4px; max-height: 240px; overflow-y: auto;
+        }
+        /* 展开时限制输出文本区域高度 */
+        .tool-card .tool-collapsible { display: block; }
+        .tool-card.collapsed .tool-collapsible { display: none; }
+        .tool-card-footer {
+          font-size: 11px; color: var(--g400); padding: 6px 12px;
+          border-top: 1px solid var(--g100); display: flex; justify-content: space-between;
+        }
+
+        /* ===== Thinking Block ===== */
+        .thinking-block {
+          background: var(--amber-bg); border: 1px solid var(--amber-100); border-radius: var(--rc);
+          margin: 4px 0; align-self: flex-start; max-width: 88%; width: 100%;
+        }
+        .thinking-header {
+          display: flex; align-items: center; gap: 6px; padding: 6px 10px;
+          font-size: 12px; color: var(--amber-700); cursor: pointer; user-select: none;
+        }
+        .thinking-header .arrow { transition: transform .2s; display: inline-block; }
+        .thinking-header.expanded .arrow { transform: rotate(90deg); }
+        .thinking-body {
+          display: none; padding: 6px 10px 10px; font-size: 12px; color: var(--amber-800);
+          border-top: 1px solid var(--amber-100); line-height: 1.5;
+          max-height: 200px; overflow-y: auto; font-style: italic;
+        }
+        .thinking-body.show { display: block; }
+
+        /* ===== Options Block ===== */
+        .options-block {
+          background: #fff; border: 1px solid var(--g200); border-radius: var(--rc);
+          padding: 0; align-self: flex-start; max-width: 85%; width: 100%;
+        }
+        .dark .options-block { background: var(--g100); }
+        .options-block .opt-header {
+          padding: 8px 12px; font-size: 13px; color: var(--g700);
+          border-bottom: 1px solid var(--g100); background: var(--g50);
+        }
+        .options-block .opt-item {
+          display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+          cursor: pointer; font-size: 13px; border-bottom: 1px solid var(--g100);
+          transition: background .1s; border-left: 3px solid transparent;
+        }
+        .options-block .opt-item:last-child { border-bottom: none; }
+        .options-block .opt-item:hover { background: var(--primary-light); }
+        .options-block .opt-item.selected { background: var(--primary-light); border-left-color: var(--primary); }
+        .options-block .opt-item .opt-letter {
+          width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--g300);
+          display: flex; align-items: center; justify-content: center;
+          font-size: 11px; font-weight: 600; color: var(--g500); flex-shrink: 0;
+        }
+        .options-block .opt-item.selected .opt-letter {
+          background: var(--primary); border-color: var(--primary); color: #fff;
+        }
+        .options-block .opt-item .opt-text { flex: 1; }
+        .options-block .opt-item .opt-desc { font-size: 11px; color: var(--g500); margin-top: 1px; }
+        .options-block .opt-footer {
+          padding: 8px 12px; display: flex; gap: 8px; align-items: center;
+          border-top: 1px solid var(--g100); background: var(--g50);
+          justify-content: space-between;
+        }
+        .options-block .opt-footer .selected-label { font-size: 11px; color: var(--g500); }
+
+        /* ===== Multi-Agent Block ===== */
+        .multi-agent-block {
+          background: var(--multi-agent-bg); border: 1px solid var(--blue-200); border-radius: var(--rc);
+          padding: 12px; align-self: flex-start; max-width: 92%; width: 100%; margin: 4px 0;
+        }
+        .ma-header {
+          font-size: 13px; font-weight: 600; color: var(--primary); margin-bottom: 8px;
+          cursor: pointer; user-select: none; display: flex; align-items: center; gap: 6px;
+        }
+        .ma-header .arrow { font-size: 10px; transition: transform .2s; }
+        .multi-agent-block.collapsed .ma-collapsible { display: none; }
+        .ma-sub {
+          display: flex; align-items: center; gap: 8px; padding: 6px 10px;
+          background: #fff; border-radius: 4px; margin-bottom: 4px; font-size: 12px;
+          border: 1px solid var(--g100); cursor: pointer; user-select: none;
+        }
+        .ma-sub .ma-arrow { font-size: 10px; transition: transform .2s; }
+        .ma-sub.queued { cursor: default; }
+        .dark .ma-sub { background: var(--g50); }
+        .ma-sub .ma-status { font-size: 11px; margin-left: auto; }
+        .ma-sub-detail {
+          display: none; margin: 4px 0 8px 16px; padding: 8px;
+          background: #fff; border: 1px solid var(--g100); border-radius: 4px;
+          font-size: 12px; color: var(--g700);
+        }
+        .dark .ma-sub-detail { background: var(--g50); }
+        .ma-sub-detail.show { display: block; }
+        .ma-sub-detail .nested-tool { margin: 4px 0; }
+
+        /* ===== Plan Card ===== */
+        .plan-card {
+          background: #fff; border-bottom: 1px solid var(--g200);
+          padding: 10px 16px; width: 100%; flex-shrink: 0;
+        }
+        .dark .plan-card { background: var(--g100); }
+        .plan-card.pinned {
+          position: sticky; top: 0; z-index: 10; box-shadow: 0 2px 8px rgba(0,0,0,.08);
+        }
+        .plan-card h3 { font-size: 14px; margin-bottom: 4px; }
+        .plan-meta { font-size: 12px; color: var(--g500); margin-bottom: 8px; }
+        .plan-step {
+          display: flex; align-items: flex-start; gap: 8px; padding: 6px 0;
+          border-bottom: 1px solid var(--g100); font-size: 13px;
+        }
+        .plan-step .status { flex-shrink: 0; width: 20px; text-align: center; }
+        .plan-step .info { flex: 1; }
+        .plan-step .files { font-size: 11px; color: var(--g500); margin-top: 2px; }
+        .plan-step .step-del { font-size: 11px; cursor: pointer; color: var(--g400); padding: 0 4px; }
+        .plan-step .step-del:hover { color: var(--error); }
+        .step-pending .status { color: var(--g500); }
+        .step-executing { background: var(--primary-light); border-radius: 4px; padding: 6px 8px; }
+        .step-executing .status { color: var(--primary); }
+        .step-done .status { color: var(--success); }
+        .step-error { background: var(--error-light); border-radius: 4px; padding: 6px 8px; }
+        .step-error .status { color: var(--error); }
+        .step-deleted .status { color: var(--g400); }
+        .step-deleted .info { text-decoration: line-through; color: var(--g400); }
+        .plan-actions { display: flex; gap: 8px; margin-top: 8px; }
+
+        /* ===== System Message ===== */
+        .sys-msg { text-align: center; font-size: 11px; color: var(--g400); padding: 12px 0; }
+
+        /* ===== Buttons ===== */
+        .btn {
+          padding: 6px 14px; border-radius: var(--rbtn); border: none; cursor: pointer;
+          font-size: 13px; font-family: inherit; transition: background .1s;
+        }
+        .btn-primary { background: var(--primary); color: #fff; }
+        .btn-primary:hover { background: var(--primary-hover); }
+        .btn-primary:active { background: var(--primary-pressed); }
+        .btn-primary:disabled { background: var(--g300); color: var(--g400); cursor: default; }
+        .btn-secondary { background: transparent; color: var(--g700); border: 1px solid var(--g300); }
+        .btn-secondary:hover { background: var(--g100); }
+        .btn-secondary:disabled { color: var(--g400); border-color: var(--g200); cursor: default; }
+        .btn-danger { background: transparent; color: var(--error); border: 1px solid transparent; }
+        .btn-danger:hover { background: var(--error-light); }
+        .btn-xs { padding: 2px 8px; font-size: 11px; }
+
+        /* ===== Input Area ===== */
+        .input-area { border-top: 1px solid var(--g200); background: #fff; flex-shrink: 0; position: relative; }
+        .dark .input-area { background: var(--g100); }
+        .input-tags-row { display: flex; gap: 6px; padding: 8px 12px 8px; flex-wrap: wrap; min-height: 0; }
+        .input-tag {
+          font-size: 11px; padding: 3px 8px; border-radius: var(--rtag);
+          display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; cursor: default;
+        }
+        .input-tag.file { background: var(--primary-light); border: 1px solid var(--blue-200); color: var(--g700); }
+        .input-tag.img { background: var(--g100); border: 1px solid var(--g300); color: var(--g700); }
+        .input-tag .tag-close { cursor: pointer; opacity: .5; font-size: 10px; line-height: 1; }
+        .input-tag .tag-close:hover { opacity: 1; color: var(--error); }
+        .input-area textarea {
+          width: 100%; border: none; padding: 10px 12px; font-family: inherit; font-size: 13px;
+          resize: none; min-height: 40px; max-height: 220px; outline: none;
+          background: transparent; color: var(--g900); line-height: 1.6;
+        }
+        .input-area textarea:focus { box-shadow: inset 0 0 0 2px var(--primary); }
+        .input-area textarea:disabled { background: var(--g100); cursor: default; color: var(--g400); }
+        .input-bottom-row {
+          display: flex; align-items: center; justify-content: space-between; padding: 0 12px 10px;
+        }
+        .btn-add-file {
+          width: 28px; height: 28px; border-radius: 6px; border: 1px solid var(--g300);
+          background: #fff; color: var(--g500); font-size: 18px; line-height: 1; cursor: pointer;
+          display: flex; align-items: center; justify-content: center; transition: all .1s;
+        }
+        .dark .btn-add-file { background: var(--g50); }
+        .btn-add-file:hover { background: var(--primary-light); border-color: var(--primary); color: var(--primary); }
+        .input-hint { font-size: 11px; color: var(--g400); }
+        .btn-send {
+          width: 32px; height: 32px; border-radius: 8px; border: none; background: var(--primary);
+          color: #fff; font-size: 16px; cursor: pointer; display: flex; align-items: center;
+          justify-content: center; transition: background .1s;
+        }
+        .btn-send:hover { background: var(--primary-hover); }
+        .btn-send:disabled { background: var(--g300); cursor: default; }
+        .btn-stop {
+          width: 32px; height: 32px; border-radius: 8px; border: none; background: var(--error);
+          color: #fff; font-size: 14px; cursor: pointer; display: flex; align-items: center;
+          justify-content: center; transition: background .1s;
+        }
+        .btn-stop:hover { background: #DC2626; }
+
+        /* ===== Popups ===== */
+        .file-popup, .cmd-popup {
+          position: absolute; bottom: 100%; left: 12px; right: 12px;
+          background: #fff; border: 1px solid var(--g200); border-radius: var(--rc);
+          box-shadow: var(--shadow-tooltip); max-height: 280px; overflow-y: auto;
+          display: none; z-index: 20; margin-bottom: 4px;
+        }
+        .dark .file-popup, .dark .cmd-popup { background: var(--g100); }
+        .file-popup.show, .cmd-popup.show { display: block; }
+        .file-popup .fp-group, .cmd-popup .cmd-group {
+          font-size: 10px; color: var(--g500); padding: 8px 12px 4px;
+          text-transform: uppercase; letter-spacing: .5px;
+        }
+        .file-popup .fp-item, .cmd-popup .cmd-item {
+          display: flex; align-items: center; gap: 8px; padding: 6px 12px;
+          cursor: pointer; font-size: 12px; border-bottom: 1px solid var(--g100);
+        }
+        .file-popup .fp-item:hover, .file-popup .fp-item.active,
+        .cmd-popup .cmd-item:hover, .cmd-popup .cmd-item.active {
+          background: var(--primary-light);
+        }
+        .file-popup .fp-item .fp-name { font-family: var(--mono); font-size: 12px; color: var(--g900); }
+        .file-popup .fp-item .fp-path { font-size: 10px; color: var(--g400); margin-left: auto; }
+        .cmd-popup .cmd-item .slash { font-weight: 700; color: var(--primary); min-width: 70px; font-family: var(--mono); font-size: 12px; }
+        .cmd-popup .cmd-item .desc { font-size: 11px; color: var(--g500); }
+
+        /* ===== Approval Dialog ===== */
+        .dialog-overlay {
+          position: fixed; inset: 0; background: rgba(0,0,0,.3); z-index: 100;
+          display: none; align-items: center; justify-content: center;
+        }
+        .dialog-overlay.show { display: flex; }
+        .dialog {
+          background: #fff; border-radius: var(--rc); box-shadow: var(--shadow-dialog);
+          max-width: 420px; width: 90%; overflow: hidden;
+        }
+        .dark .dialog { background: var(--g100); }
+        .dialog-title {
+          padding: 12px 16px; font-size: 14px; font-weight: 600;
+          border-bottom: 1px solid var(--g100); display: flex; align-items: center; gap: 8px;
+        }
+        .dialog-title.warn { color: var(--amber-800); }
+        .dialog-title.danger { color: var(--error); }
+        .dialog-body {
+          padding: 12px 16px; font-size: 13px; color: var(--g700); max-height: 200px; overflow-y: auto;
+        }
+        .dialog-body pre {
+          font-family: var(--mono); font-size: 12px; background: var(--code-bg);
+          padding: 8px; border-radius: 4px; margin-top: 8px; overflow-x: auto;
+        }
+        .dialog-footer {
+          padding: 10px 16px; border-top: 1px solid var(--g100);
+          display: flex; gap: 8px; justify-content: flex-end;
+        }
+
+        /* ===== Generic Pages ===== */
+        .page-title { font-size: 20px; font-weight: 700; margin-bottom: 12px; line-height: 1.4; }
+        .section-title { font-size: 14px; font-weight: 600; color: var(--g700); margin: 16px 0 8px; }
+        .card { background: #fff; border: 1px solid var(--g200); border-radius: var(--rc); padding: 12px 16px; }
+        .dark .card { background: var(--g100); }
+        .card-row {
+          display: flex; justify-content: space-between; align-items: center;
+          padding: 8px 0; border-bottom: 1px solid var(--g100); font-size: 13px;
+        }
+        .card-row:last-child { border-bottom: none; }
+        .empty-state { text-align: center; padding: 60px 20px; color: var(--g500); }
+        .empty-state .icon { font-size: 40px; margin-bottom: 12px; }
+        .empty-state p { font-size: 13px; margin: 4px 0; }
 
         /* Search */
-        .search-box{border:1px solid var(--g3);border-radius:6px;padding:6px 12px;font-size:13px;width:100%;outline:none;margin-bottom:12px}
-        .search-box:focus{border-color:var(--primary)}
+        .search-box {
+          border: 1px solid var(--g300); border-radius: 6px; padding: 6px 12px;
+          font-size: 13px; width: 100%; outline: none; margin-bottom: 12px;
+          background: #fff; color: var(--g900);
+        }
+        .dark .search-box { background: var(--g50); }
+        .search-box:focus { border-color: var(--primary); }
 
         /* Sparkline */
-        .sparkline{display:flex;align-items:flex-end;gap:2px;height:80px;padding:8px 0}
-        .sparkline .bar{flex:1;background:var(--primary);border-radius:2px 2px 0 0;min-height:2px;opacity:.8}
-        .sparkline .bar:hover{opacity:1}
+        .sparkline { display: flex; align-items: flex-end; gap: 2px; height: 80px; padding: 8px 0; }
+        .sparkline .bar { flex: 1; background: var(--primary); border-radius: 2px 2px 0 0; min-height: 2px; opacity: .8; transition: opacity .15s; }
+        .sparkline .bar:hover { opacity: 1; }
 
-        /* 状态指示灯 */
-        .status-dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px}
-        .dot-green{background:var(--success)}.dot-yellow{background:var(--warning)}.dot-red{background:var(--error)}
+        /* Status Dot */
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+        .dot-green { background: var(--success); } .dot-yellow { background: var(--warning); } .dot-red { background: var(--error); }
 
-        /* 指令列表 Popup */
-        .cmd-popup{position:absolute;bottom:100%;left:0;right:0;background:#fff;border:1px solid var(--g3);border-radius:var(--rc);box-shadow:0 -4px 16px rgba(0,0,0,.1);max-height:260px;overflow-y:auto;display:none;z-index:20;margin-bottom:4px}
-        .cmd-popup.show{display:block}
-        .cmd-popup .cmd-item{display:flex;align-items:center;gap:10px;padding:8px 12px;cursor:pointer;font-size:13px;border-bottom:1px solid var(--g1)}
-        .cmd-popup .cmd-item:last-child{border-bottom:none}
-        .cmd-popup .cmd-item:hover,.cmd-popup .cmd-item.active{background:var(--primary-light)}
-        .cmd-popup .cmd-item .slash{font-weight:700;color:var(--primary);min-width:70px;font-family:var(--mono);font-size:12px}
-        .cmd-popup .cmd-item .desc{font-size:11px;color:var(--g5)}
-        .cmd-group{font-size:10px;color:var(--g5);padding:6px 12px 2px;text-transform:uppercase;letter-spacing:.5px}
+        /* Toast / Banner */
+        .toast {
+          position: fixed; bottom: 24px; right: 24px; padding: 10px 20px;
+          border-radius: 8px; color: #fff; font-size: 13px; z-index: 200;
+          animation: slideUp .3s ease-out; display: none;
+        }
+        .toast.success { background: var(--success); display: block; }
+        .toast.error-t { background: var(--error); }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+        .banner {
+          padding: 8px 16px; font-size: 12px; display: flex; align-items: center; gap: 8px;
+          border-bottom: 1px solid var(--g200);
+        }
+        .banner.info { background: var(--primary-light); color: var(--primary); }
+        .banner.warn { background: var(--amber-50); color: var(--amber-800); }
+        .banner.err { background: var(--error-light); color: var(--error); }
 
-        /* Toast/Banner */
-        .toast{position:fixed;bottom:24px;right:24px;padding:10px 20px;border-radius:8px;color:#fff;font-size:13px;z-index:100;animation:slideUp .3s ease-out;display:none}
-        .toast.success{background:var(--success)}.toast.error-t{background:var(--error)}
-        @keyframes slideUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
-        .banner{padding:8px 16px;font-size:12px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--g2)}
-        .banner.info{background:var(--primary-light);color:var(--primary)}
-        .banner.warn{background:#FFFBEB;color:#92400E}
-        .banner.err{background:var(--error-light);color:var(--error)}
+        /* Switch */
+        .switch { width: 36px; height: 20px; background: var(--g300); border-radius: 10px; position: relative; cursor: pointer; transition: background .2s; flex-shrink: 0; }
+        .switch.on { background: var(--success); }
+        .switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; background: #fff; border-radius: 50%; transition: transform .2s; }
+        .switch.on::after { transform: translateX(16px); }
 
-        /* Switch toggle */
-        .switch{width:36px;height:20px;background:var(--g3);border-radius:10px;position:relative;cursor:pointer;transition:background .2s}
-        .switch.on{background:var(--success)}
-        .switch::after{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;background:#fff;border-radius:50%;transition:transform .2s}
-        .switch.on::after{transform:translateX(16px)}
-
-        /* 滚动条 */
-        .page-body::-webkit-scrollbar,.content::-webkit-scrollbar,.page::-webkit-scrollbar{width:6px}
-        .page-body::-webkit-scrollbar-thumb,.content::-webkit-scrollbar-thumb{background:var(--g3);border-radius:3px}
+        /* Scrollbar */
+        .page-body::-webkit-scrollbar, .page::-webkit-scrollbar { width: 6px; }
+        .page-body::-webkit-scrollbar-thumb { background: var(--g300); border-radius: 3px; }
 
         /* Form */
-        .form-group{margin-bottom:12px}.form-group label{display:block;font-size:12px;color:var(--g5);margin-bottom:4px}
-        .form-input{width:100%;border:1px solid var(--g3);border-radius:6px;padding:6px 10px;font-size:13px;font-family:inherit}
-        .form-input:focus{border-color:var(--primary);outline:none}
+        .form-group { margin-bottom: 12px; }
+        .form-group label { display: block; font-size: 12px; color: var(--g500); margin-bottom: 4px; }
+        .form-input {
+          width: 100%; border: 1px solid var(--g300); border-radius: 6px;
+          padding: 6px 10px; font-size: 13px; font-family: inherit; background: #fff; color: var(--g900);
+        }
+        .dark .form-input { background: var(--g50); }
+        .form-input:focus { border-color: var(--primary); outline: none; }
+        .form-input:disabled { background: var(--g100); cursor: default; color: var(--g400); }
 
-        /* 响应式断点（与 ui-ux-spec.md 第五章对齐） */
-        @media(max-width:500px){
-          .panel{height:100vh;border-radius:0}
-          .bubble.user{max-width:70%}
-          .bubble.agent{max-width:85%}
-          .tab{padding:6px 10px;font-size:11px}
+        /* Session card */
+        .session-card {
+          background: #fff; border: 1px solid var(--g200); border-radius: var(--rc);
+          padding: 12px 16px; cursor: pointer; transition: box-shadow .1s;
         }
-        @media(max-width:350px){
-          body{padding:0}
-          .bubble.user{max-width:90%}
-          .bubble.agent{max-width:95%}
-          .tool-card{max-width:98%}
-          .tab{font-size:0;padding:6px 8px}
-          .tab::first-letter{font-size:13px}
+        .dark .session-card { background: var(--g100); }
+        .session-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+        .session-card .s-title { font-size: 14px; font-weight: 500; margin-bottom: 4px; }
+        .session-card .s-meta { font-size: 11px; color: var(--g400); display: flex; gap: 12px; }
+        .session-card .s-plan-tag { font-size: 10px; background: var(--amber-50); color: var(--amber-700); padding: 1px 6px; border-radius: 4px; }
+        .session-card.sub { margin-left: 24px; border-left: 2px solid var(--primary); }
+
+        /* Feedback buttons */
+        .feedback-row { display: flex; gap: 6px; margin-top: 4px; }
+        .feedback-btn { font-size: 16px; cursor: pointer; opacity: .4; transition: opacity .1s; background: none; border: none; padding: 2px; }
+        .feedback-btn:hover { opacity: 1; }
+        .feedback-btn.active { opacity: 1; }
+
+        /* Table */
+        .tbl { width: 100%; border-collapse: collapse; font-size: 12px; }
+        .tbl th { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--g200); color: var(--g500); font-weight: 500; }
+        .tbl td { padding: 6px 8px; border-bottom: 1px solid var(--g100); color: var(--g700); }
+
+        /* ===== Responsive ===== */
+        @media (max-width: 500px) {
+          .panel { height: 100vh; border-radius: 0; }
+          .bubble.user { max-width: 70%; }
+          .bubble.agent { max-width: 85%; }
+          .tab { padding: 6px 10px; font-size: 11px; }
         }
-        @media(max-width:250px){
-          .tab-bar{overflow-x:auto}
-          .tab{padding:4px 6px}
-          .bubble.user{max-width:95%}
-          .bubble.agent{max-width:95%}
-          .input-tag{font-size:10px;padding:2px 4px}
+        @media (max-width: 350px) {
+          body { padding: 0; }
+          .bubble.user { max-width: 90%; }
+          .bubble.agent { max-width: 95%; }
+          .tool-card { max-width: 98%; }
+          .tab { font-size: 0; padding: 6px 8px; }
         }
-        @media(prefers-reduced-motion:reduce){
-          *{animation-duration:0s!important;transition-duration:0s!important}
+        @media (max-width: 250px) {
+          .tab-bar { overflow-x: auto; }
+          .bubble.user, .bubble.agent { max-width: 95%; }
+          .input-tag { font-size: 10px; padding: 2px 4px; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          * { animation-duration: 0s !important; transition-duration: 0s !important; }
         }
     </style>
 </head>
 <body>
 
+<button class="theme-toggle" onclick="toggleTheme()" title="切换主题">🌓</button>
+
 <div class="panel">
+    <!-- ===== TabBar ===== -->
     <div class="tab-bar">
-        <div class="tab active" data-page="welcome" onclick="switchPage('welcome')">🏠</div>
+        <div class="tab" data-page="welcome" onclick="switchPage('welcome')">🏠</div>
         <div class="tab hidden" data-page="chat" onclick="switchPage('chat')">💬</div>
         <div class="tab hidden" data-page="sessions" onclick="switchPage('sessions')">📁<span
                 class="badge show">2</span></div>
@@ -241,1028 +558,1128 @@
         <div class="tab hidden" data-page="settings" onclick="switchPage('settings')">⚙</div>
     </div>
 
-    <!-- ====== Welcome 页面 ====== -->
+    <!-- ===== Welcome Page ===== -->
     <div class="page active" id="page-welcome">
-        <div class="page-body" style="justify-content:center;align-items:center;text-align:center">
-            <div style="font-size:48px;margin-bottom:16px">🤖</div>
-            <h1 style="font-size:20px;margin-bottom:8px">Welcome to Code Assistant</h1>
-            <p style="color:var(--g5);margin-bottom:24px">免费 AI 编程助手 · 代码补全 + Agent
+        <div class="page-body" style="justify-content:center;align-items:center;text-align:center;">
+            <div style="font-size:48px;margin-bottom:16px;">🤖</div>
+            <h1 class="page-title">Welcome to Code Assistant</h1>
+            <p style="color:var(--g500);margin-bottom:24px;">免费 AI 编程助手 · 代码补全 + Agent
                 对话</p>
-            <div class="card" style="text-align:left;max-width:420px;width:100%">
-                <p style="font-size:13px;margin-bottom:8px">① 获取 DeepSeek API Key</p>
-                <p style="font-size:12px;color:var(--primary);margin-bottom:16px">
-                    platform.deepseek.com/api_keys</p>
+
+            <div class="card" style="text-align:left;max-width:400px;width:100%;">
+                <p style="font-size:13px;color:var(--g700);margin-bottom:12px;">
+                    ① 获取 DeepSeek API Key<br>
+                    <a href="#" style="color:var(--primary);font-size:12px;">https://platform.deepseek.com/api_keys</a>
+                </p>
                 <div class="form-group">
                     <label>② 粘贴 API Key</label>
-                    <input class="form-input" type="password"
-                           value="sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-                           placeholder="sk-...">
+                    <div style="display:flex;gap:8px;">
+                        <input class="form-input" type="password" id="apiKeyInput"
+                               placeholder="sk-••••••••••••••••" style="flex:1;">
+                        <button class="btn btn-secondary btn-xs" onclick="toggleApiKeyVisibility()"
+                                style="flex-shrink:0;">👁
+                        </button>
+                    </div>
                 </div>
-                <p style="font-size:12px;color:var(--g5);margin-bottom:16px">模型:
-                    deepseek-v4-pro（固定）</p>
-                <button class="btn btn-primary" style="width:100%"
-                        onclick="setupApiKey();showToast('success','Key 已保存，正在验证...')">
-                    保存并开始使用 →
+                <div class="form-group">
+                    <label>模型</label>
+                    <select class="form-input" disabled>
+                        <option>deepseek-v4-pro（固定）</option>
+                    </select>
+        </div>
+                <button class="btn btn-primary" style="width:100%;" onclick="saveApiKey()">保存并开始使用
+                    →
                 </button>
             </div>
+
+            <p style="font-size:11px;color:var(--g400);margin-top:16px;">已有 Key？在 Settings
+                页面随时修改</p>
         </div>
     </div>
 
-    <!-- ====== Chat 页面 ====== -->
+    <!-- ===== Chat Page ===== -->
     <div class="page" id="page-chat">
-        <!-- 计划卡片：未开始（可删除） -->
-        <div class="plan-card pinned" id="pinned-plan-unstarted"
-             style="display:none;border-left:3px solid var(--g5)">
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-                <strong style="font-size:13px">📋 执行计划</strong>
-                <span style="font-size:11px;color:var(--g5)">重构 findById | 5 个文件 | 未开始</span>
-                <span style="margin-left:auto;display:flex;gap:4px">
-          <button class="btn btn-danger btn-xs"
-                  style="font-size:10px;padding:2px 6px">✕ 删除计划</button>
-        </span>
-            </div>
-            <div style="display:flex;gap:12px;font-size:11px">
-                <span class="step-pending" style="display:flex;align-items:center;gap:2px"><span
-                        style="color:var(--g5)">⬜</span> Step 1</span>
-                <span class="step-pending" style="display:flex;align-items:center;gap:2px"><span
-                        style="color:var(--g5)">⬜</span> Step 2</span>
-                <span class="step-pending" style="display:flex;align-items:center;gap:2px"><span
-                        style="color:var(--g5)">⬜</span> Step 3</span>
-                <span class="step-pending" style="display:flex;align-items:center;gap:2px"><span
-                        style="color:var(--g5)">⬜</span> Step 4</span>
-                <span class="step-pending" style="display:flex;align-items:center;gap:2px"><span
-                        style="color:var(--g5)">⬜</span> Step 5</span>
+        <!-- Banner: API Key 验证中 -->
+        <div class="banner info" id="chatBanner" style="display:none;">
+            🔄 正在验证 API Key...
+        </div>
+
+        <!-- Title bar -->
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 16px;border-bottom:1px solid var(--g200);flex-shrink:0;background:#fff;">
+            <span style="font-size:14px;font-weight:600;">🤖 重构 UserService — 添加 suspend 支持</span>
+            <div style="display:flex;gap:6px;">
+                <button class="btn btn-secondary btn-xs" title="新建会话">＋ 新建</button>
+                <button class="btn btn-secondary btn-xs" title="清空会话">🗑 清空</button>
             </div>
         </div>
 
-        <!-- 计划卡片：执行中（Agent 暂停→计划自动暂停） -->
-        <div class="plan-card pinned" id="pinned-plan">
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-                <strong style="font-size:13px">📋 执行计划</strong>
-                <span style="font-size:11px;color:var(--g5)">重构 findById | 5 个文件</span>
-                <span style="font-size:10px;color:var(--primary);background:var(--primary-light);padding:1px 6px;border-radius:8px"
-                      title="Agent 结束 → 计划自动暂停，Agent 继续 → 计划自动恢复">⏸ Agent 已暂停</span>
-                <span style="margin-left:auto;display:flex;gap:4px">
-          <button class="btn btn-primary btn-xs"
-                  style="font-size:10px;padding:2px 6px">▶ 继续</button>
-          <button class="btn btn-secondary btn-xs"
-                  style="font-size:10px;padding:2px 6px">↻ 重试</button>
-          <button class="btn btn-secondary btn-xs"
-                  style="font-size:10px;padding:2px 6px">⏭ 跳过</button>
-          <button class="btn btn-danger btn-xs"
-                  style="font-size:10px;padding:2px 6px">✕ 取消</button>
-        </span>
+        <!-- PlanCard (pinned) — 可折叠，暂停/继续跟随全局发送/停止按钮 -->
+        <div class="plan-card pinned" id="planCard">
+            <div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;"
+                 onclick="togglePlanCard()">
+                <div style="display:flex;align-items:center;gap:6px;">
+                    <span id="planArrow"
+                          style="transition:transform .2s;display:inline-block;">▶</span>
+                    <h3 style="margin:0;">📋 执行计划</h3>
+                </div>
+                <span style="font-size:11px;color:var(--g400);">1/4 已完成</span>
             </div>
-            <div style="display:flex;gap:12px;font-size:11px">
-                <span class="step-done" style="display:flex;align-items:center;gap:2px"><span
-                        style="color:var(--success)">✅</span> Step 1</span>
-                <span class="step-done" style="display:flex;align-items:center;gap:2px"><span
-                        style="color:var(--success)">✅</span> Step 2</span>
-                <span class="step-paused"
-                      style="display:flex;align-items:center;gap:2px;background:#FFF8F0;padding:0 4px;border-radius:2px"><span
-                        style="color:var(--warning)">⏸</span> Step 3</span>
-                <span class="step-pending" style="display:flex;align-items:center;gap:2px"><span
-                        style="color:var(--g5)">⬜</span> Step 4</span>
-                <span class="step-pending" style="display:flex;align-items:center;gap:2px"><span
-                        style="color:var(--g5)">⬜</span> Step 5</span>
-            </div>
+            <div id="planBody" style="display:none;">
+                <p class="plan-meta">任务: 将 UserService.findById 改为 suspend 函数 | 涉及: 5 个文件
+                    | 工具: Read, Write, Bash</p>
+
+                <div class="plan-step step-done plan-collapsible">
+                    <span class="status">✅</span>
+                    <div class="info">
+                        <div>读取文件</div>
+                        <div class="files">工具: Read | 文件: UserService.kt (line 40-60),
+                            UserController.kt
+                        </div>
         </div>
-        <div class="page-body">
+                </div>
+                <div class="plan-step step-executing">
+                    <span class="status">🔄</span>
+                    <div class="info">
+                        <div>修改 findById 签名为 suspend fun</div>
+                        <div class="files">工具: Write | 文件: UserService.kt</div>
+                    </div>
+                </div>
+                <div class="plan-step step-pending plan-collapsible">
+                    <span class="status">⬜</span>
+                    <div class="info">
+                        <div>修改调用处为协程</div>
+                        <div class="files">工具: Write | 文件: UserController.kt (line 55, 78),
+                            AuthService.kt (line 102)
+                        </div>
+                    </div>
+                    <span class="step-del" title="删除此步骤"
+                          onclick="deletePlanStep(this)">✕</span>
+                </div>
+                <div class="plan-step step-pending plan-collapsible">
+                    <span class="status">⬜</span>
+                    <div class="info">
+                        <div>运行编译检查</div>
+                        <div class="files">工具: Bash | 命令: ./gradlew compileKotlin</div>
+                    </div>
+                    <span class="step-del" title="删除此步骤"
+                          onclick="deletePlanStep(this)">✕</span>
+                </div>
+            </div><!-- /planBody -->
+        </div>
+
+        <!-- Messages -->
+        <div class="page-body" id="chatMessages" style="background:var(--g50);">
+
+            <!-- System message -->
             <div class="sys-msg">── 14:30 ──</div>
 
+            <!-- User bubble -->
             <div class="msg-row user">
-                <div class="bubble user">帮我把 UserService 里的 findById 方法改成 suspend 函数
+                <div class="bubble user">
+                    <p>帮我重构 UserService，把 findById 改成 suspend 函数</p>
                 </div>
-                <div class="msg-ts">14:32</div>
+                <div class="msg-ts">14:30</div>
             </div>
 
-            <!-- 思考过程：默认展开 -->
+            <!-- Thinking block -->
             <div class="thinking-block">
                 <div class="thinking-header"
-                     onclick="this.classList.toggle('expanded');this.nextElementSibling.classList.toggle('show')">
+                     onclick="this.classList.toggle('expanded');this.nextElementSibling.classList.toggle('show');">
                     <span class="arrow">▶</span> 💭 思考过程 <span
-                        style="margin-left:auto;font-size:11px;opacity:.7">1.2s</span>
+                        style="margin-left:auto;font-size:11px;opacity:.7;">1.2s</span>
                 </div>
-                <div class="thinking-body" style="display:none">
-                    用户要求将 UserService 里的 findById 方法改成 suspend
-                    函数。我需要先读取文件了解当前实现，然后修改方法签名和调用处。考虑到 Kotlin
-                    协程的特性，还需要检查调用链上的所有函数是否都已支持协程上下文。
+                <div class="thinking-body">
+                    需要先读取 UserService.kt 了解当前实现，然后修改方法签名和调用处。考虑到协程上下文，还需要修改
+                    UserController 和 AuthService 中的调用代码...
                 </div>
             </div>
 
+            <!-- Agent bubble -->
             <div class="msg-row agent">
                 <div class="bubble agent">
-                    <p>好的，让我先读取 <code class="inline">UserService.kt</code> 看看当前的实现。
-                    </p>
-                    <div class="tool-card" style="margin-top:8px">
-                        <div class="tool-card-header"><span>🔧</span> Read <span
-                                class="state state-done">✅ 15ms</span></div>
-                        <div class="tool-card-body">
-                            <div class="tool-card-params">filePath: UserService.kt | startLine: 40 |
-                                endLine: 60
-                            </div>
-                            <div class="tool-card-result"><span class="cm">42:</span> <span
-                                    class="kw">fun</span> <span class="fn">findById</span>(id:
-                                Long): User? {<br><span class="cm">43:</span> <span class="kw">return</span>
-                                repository.findById(id)<br><span class="cm">44:</span> }
-                            </div>
-                        </div>
-                        <div class="tool-card-footer"><span>15ms</span><span>1 个文件，3 行</span>
-                        </div>
-                    </div>
-                    <p style="margin-top:8px">需要：</p>
-                    <ol>
-                        <li>加 <code class="inline">suspend</code> 关键字</li>
-                        <li>修改调用处为协程调用</li>
-                    </ol>
-                </div>
-                <div class="msg-ts"><span>14:33</span><span style="color:var(--g5);font-size:11px">↑1.2K ↓0.4K</span>
+                    <p>好的，让我先读取相关文件了解当前实现。</p>
                 </div>
             </div>
 
-            <!-- 选项组件 -->
-            <div class="options-block" id="opt1">
-                <div class="opt-header">选择下一步操作：</div>
-                <div class="opt-item" onclick="selectOption(this,'opt1')">
-                    <span class="opt-letter">A</span>
-                    <div class="opt-text">直接用 Edit 修改<span class="opt-desc">修改 UserService.kt + UserController.kt，不生成计划</span>
-                    </div>
+            <!-- ToolCallCard - DONE -->
+            <div class="tool-card collapsed" id="toolCard1">
+                <div class="tool-card-header" onclick="toggleToolCard(this)">
+                    <span class="arrow">▶</span> 🔧 Read <span class="state state-done">✅ DONE</span>
                 </div>
-                <div class="opt-item" onclick="selectOption(this,'opt1')">
-                    <span class="opt-letter">B</span>
-                    <div class="opt-text">生成 Plan 确认后再执行<span class="opt-desc">列出详细步骤和涉及文件，逐步执行，可随时调整</span>
-                    </div>
-                </div>
-                <div class="opt-item" onclick="selectOption(this,'opt1')">
-                    <span class="opt-letter">C</span>
-                    <div class="opt-text">只改 UserService.kt<span class="opt-desc">其他调用处暂时不动，快速验证方案可行性</span>
-                    </div>
-                </div>
-                <div class="opt-footer">
-                    <button class="btn btn-primary btn-xs" onclick="confirmOption('opt1','B')">
-                        确认选择
-                    </button>
-                    <span style="font-size:11px;color:var(--g5);margin-left:8px">已选: <span
-                            class="selected-label">B</span></span>
-                </div>
-            </div>
-
-            <div class="msg-row user">
-                <div class="bubble user">先生成 Plan，确认后再执行</div>
-                <div class="msg-ts">14:34</div>
-            </div>
-
-            <div class="plan-card">
-                <h3>📋 执行计划</h3>
-                <div class="plan-meta">任务: 重构 findById | 5 个文件 | ~3K tokens</div>
-                <div class="plan-step step-done"><span class="status">✅</span>
-                    <div class="info">读取 UserService.kt
-                        <div class="files">工具: Read | UserService.kt:40-60</div>
-                    </div>
-                </div>
-                <div class="plan-step step-done"><span class="status">✅</span>
-                    <div class="info">修改方法签名
-                        <div class="files">工具: Edit | UserService.kt:42</div>
-                    </div>
-                </div>
-                <div class="plan-step step-paused"><span class="status">⏸</span>
-                    <div class="info">修改调用处
-                        <div class="files">工具: Edit | UserController.kt:55,
-                            AuthService.kt:102
+                <div class="tool-collapsible">
+                    <div class="tool-card-body">
+                        <div class="tool-card-params">filePath: "UserService.kt"</div>
+                        <div class="tool-card-result" style="max-height:120px;">
+                            <span class="kw">class</span> <span class="fn">UserService</span>(<span
+                                class="kw">private val</span> repo: UserRepository) {
+                            <span class="kw">fun</span> <span class="fn">findById</span>(id: Long):
+                            User? {
+                            <span class="kw">return</span> repo.findById(id)
+                            }
+                            }
                         </div>
                     </div>
-                </div>
-                <div class="plan-step step-pending"><span class="status">⬜</span>
-                    <div class="info">编译检查
-                        <div class="files">工具: Bash | ./gradlew compileKotlin</div>
+                    <div class="tool-card-footer">
+                        <span>耗时: 15ms</span>
+                        <span>156 行</span>
                     </div>
-                </div>
-                <div class="plan-step step-pending"><span class="status">⬜</span>
-                    <div class="info">运行测试
-                        <div class="files">工具: Bash | ./gradlew test</div>
-                    </div>
-                </div>
-                <div class="plan-actions">
-                    <button class="btn btn-primary">▶ 继续</button>
-                    <button class="btn btn-secondary">↻ 重试</button>
-                    <button class="btn btn-secondary">⏭ 跳过</button>
-                    <button class="btn btn-danger">✕ 取消计划</button>
-                </div>
+                </div><!-- /tool-collapsible -->
             </div>
 
-            <!-- 多 Agent 调度 -->
-            <div class="multi-agent-block">
-                <div class="ma-header">🤖 多 Agent 协作 — 父 Agent 调度中</div>
-                <div class="ma-sub"><span>🔧</span><span
-                        class="ma-name">Agent-A: 重构 UserService</span><span class="ma-status"
-                                                                              style="color:var(--success)">✅ 完成 (sub-session #42)</span>
+            <!-- ToolCallCard - EXECUTING -->
+            <div class="tool-card" id="toolCardExecuting">
+                <div class="tool-card-header" onclick="toggleToolCard(this)">
+                    <span class="arrow">▾</span> 🔧 Bash <span class="state state-executing">🔄 EXECUTING</span>
                 </div>
-                <div class="ma-sub"><span>🧪</span><span class="ma-name">Agent-B: 生成单元测试</span><span
-                        class="ma-status" style="color:var(--primary)">⏳ 执行中...</span></div>
-                <div class="ma-sub"><span>🔍</span><span
-                        class="ma-name">Agent-C: 代码审查</span><span class="ma-status"
-                                                                      style="color:var(--g5)">⏸ 排队等待</span>
-                </div>
-                <div style="font-size:11px;color:var(--g5);margin-top:4px">并发上限: 3 | 已完成 1/3
-                    | 文件锁: UserService.kt (Agent-A 持有)
-                </div>
-            </div>
-
-            <!-- AWAITING_APPROVAL -->
-            <div class="tool-card">
-                <div class="tool-card-header"><span>🔧</span> Bash <span
-                        class="state state-awaiting">🔒 等待授权</span></div>
-                <div class="tool-card-body">
-                    <div class="tool-card-params">command: ./gradlew compileKotlin | workDir: ./
+                <div class="tool-collapsible">
+                    <div style="height:3px;background:var(--g100);margin:0 12px;border-radius:2px;overflow:hidden;">
+                        <div style="height:100%;width:65%;background:var(--primary);border-radius:2px;animation:progressPulse 1.5s ease-in-out infinite;"></div>
                     </div>
-                    <div class="tool-approval" id="approval1">
-                        <span class="msg">⚠ Agent 请求执行 Shell 命令。是否允许？</span>
-                        <span class="timer">等待用户操作</span>
-                        <button class="btn btn-primary btn-xs" onclick="approve('approval1')">批准
-                        </button>
-                        <button class="btn btn-secondary btn-xs" onclick="reject('approval1')">
-                            拒绝
+                    <div class="tool-card-body">
+                        <div class="tool-card-params">command: "./gradlew build"</div>
+                        <div class="tool-card-result">
+                            <span class="cm">> Task :compileKotlin</span>
+                            <span class="cm">> Task :compileJava</span>
+                            <span class="cm">> Task :processResources</span>
+                            <span class="str">BUILD SUCCESSFUL in 12s</span>
+                        </div>
+                    </div>
+                    <div class="tool-card-footer">
+                        <span>耗时: 12.3s</span>
+                        <button class="btn btn-danger btn-xs"
+                                onclick="this.closest('.tool-card').querySelector('.state').textContent='⛔ CANCELLED';this.closest('.tool-card').querySelector('.state').className='state state-cancelled';">
+                            ⏹ 终止
                         </button>
                     </div>
-                </div>
-                <div class="tool-card-footer"><span>⏳</span><span>等待用户操作</span></div>
+                </div><!-- /tool-collapsible -->
             </div>
 
-            <!-- EXECUTING -->
-            <div class="tool-card">
-                <div class="tool-card-header"><span>🔄</span> Edit <span
-                        class="state state-executing">⏳ 执行中...</span></div>
+            <!-- ToolCallCard - ERROR with retry -->
+            <div class="tool-card collapsed">
+                <div class="tool-card-header" onclick="toggleToolCard(this)">
+                    <span class="arrow">▶</span> 🔧 Bash <span
+                        class="state state-error-s">❌ ERROR</span>
+                </div>
+                <div class="tool-collapsible">
+                    <div class="tool-card-body">
+                        <div class="tool-card-params">command: "./gradlew test"</div>
+                        <div class="tool-card-result" style="color:var(--error);">
+                            ⚠️ 命令执行失败 (退出码: 1)
+                            STDERR: Test failed: UserServiceTest > findById_shouldReturnNull
+                        </div>
+                    </div>
+                    <div class="tool-card-footer">
+                        <span>耗时: 5.2s</span>
+                        <button class="btn btn-primary btn-xs">🔄 重试</button>
+                    </div>
+                </div><!-- /tool-collapsible -->
+            </div>
+
+            <!-- ToolCallCard - AWAITING_APPROVAL — 始终展开，不可折叠 -->
+            <div class="tool-card awaiting" id="toolCardApproval">
+                <div class="tool-card-header" onclick="toggleToolCard(this)">
+                    <span class="arrow">▾</span> 🔧 Bash <span class="state state-awaiting">🔒 AWAITING_APPROVAL</span>
+                </div>
                 <div class="tool-card-body">
-                    <div class="tool-card-params">filePath: UserController.kt | oldString:
-                        "val user = userService.findById(id)" | newString: "val user =
-                        userService.findByIdSuspend(id)"
+                    <div class="tool-card-params">command: "rm -rf ./build/tmp"</div>
+                    <div class="tool-approval">
+                        <span class="msg">⚠️ 危险操作: 此命令将删除文件</span>
+                        <div class="btn-row">
+                            <button class="btn btn-primary btn-xs"
+                                    onclick="approveTool('toolCardApproval')">允许一次
+                            </button>
+                            <button class="btn btn-secondary btn-xs"
+                                    onclick="approveToolSession('toolCardApproval')">允许此会话
+                            </button>
+                            <button class="btn btn-danger btn-xs"
+                                    onclick="rejectTool('toolCardApproval')">拒绝
+                            </button>
+            </div>
                     </div>
                 </div>
-                <div class="tool-card-footer"><span>⏳</span><span>UserController.kt:55</span></div>
             </div>
 
-            <!-- TIMEOUT 工具卡片 -->
-            <div class="tool-card">
-                <div class="tool-card-header"><span>⏰</span> Bash <span class="state"
-                                                                            style="color:#F59E0B">⏰ 超时</span>
+            <!-- ToolCallCard - TIMEOUT -->
+            <div class="tool-card" style="display:none;" id="toolCardTimeout">
+                <div class="tool-card-header" onclick="toggleToolCard(this)">
+                    <span class="arrow">▾</span> 🔧 Bash <span
+                        class="state state-timeout">⏰ TIMEOUT</span>
                 </div>
                 <div class="tool-card-body">
-                    <div class="tool-card-params">command: ./gradlew build | timeout: 120s</div>
-                    <div class="tool-card-result" style="color:#B45309">超时: 命令执行超过
+                    <div class="tool-card-params">command: "./gradlew build"</div>
+                    <div class="tool-card-result" style="color:#F97316;">超时: 命令执行超过
                         120s，已强制终止
                     </div>
                 </div>
-                <div class="tool-card-footer"><span>120s 超时</span><span>[重试]</span></div>
+                <div class="tool-card-footer">
+                    <span>超时阈值: 120s</span>
+                    <button class="btn btn-primary btn-xs">🔄 重试</button>
+                </div>
             </div>
 
-            <!-- REJECTED 工具卡片 -->
-            <div class="tool-card" style="opacity:.8">
-                <div class="tool-card-header"><span>🚫</span> Bash <span class="state"
-                                                                            style="color:var(--g5)">🚫 已拒绝</span>
-                </div>
-                <div class="tool-card-body">
-                    <div class="tool-card-params">command: rm -rf ./build | workDir: ./</div>
-                    <div style="font-size:12px;color:var(--g5);margin-top:4px">用户拒绝了此操作
+            <!-- Options Block -->
+            <div class="options-block">
+                <div class="opt-header">选择下一步操作：</div>
+                <div class="opt-item selected" onclick="selectOption(this, 'A')">
+                    <div class="opt-letter">A</div>
+                    <div class="opt-text">
+                        <div>直接用 Edit 修改</div>
+                        <div class="opt-desc">修改 UserService.kt 和相关调用处</div>
                     </div>
-                    <button class="btn btn-secondary btn-xs" style="margin-top:4px">🔄 重审</button>
                 </div>
-                <div class="tool-card-footer"><span>⏳</span><span>已拒绝</span></div>
+                <div class="opt-item" onclick="selectOption(this, 'B')">
+                    <div class="opt-letter">B</div>
+                    <div class="opt-text">
+                        <div>生成 Plan 确认后再执行</div>
+                        <div class="opt-desc">列出详细步骤，逐步执行，可随时调整</div>
+                    </div>
+                </div>
+                <div class="opt-item" onclick="selectOption(this, 'C')">
+                    <div class="opt-letter">C</div>
+                    <div class="opt-text">
+                        <div>只改 UserService.kt</div>
+                        <div class="opt-desc">其他调用处不动，快速验证方案</div>
+                    </div>
+                </div>
+                <div class="opt-footer">
+                    <button class="btn btn-primary btn-xs">确认选择</button>
+                    <span class="selected-label">已选: A</span>
+                </div>
             </div>
 
-            <!-- CANCELLED 工具卡片 -->
-            <div class="tool-card" style="opacity:.8">
-                <div class="tool-card-header"><span>⛔</span> Edit <span class="state"
-                                                                            style="color:var(--g5)">⛔ 已取消</span>
+            <!-- Agent bubble with code block -->
+            <div class="msg-row agent">
+                <div class="bubble agent">
+                    <p>我已读取 UserService.kt，当前实现如下：</p>
+                    <div class="code-block">
+                        <span class="kw">class</span> <span class="fn">UserService</span>(<span
+                            class="kw">private val</span> repo: UserRepository) {
+                        <span class="kw">fun</span> <span class="fn">findById</span>(id: Long):
+                        User? {
+                        <span class="kw">return</span> repo.findById(id)
+                        }
+                        }
+                    </div>
+                    <p>接下来：</p>
+                    <ol>
+                        <li>加 <code class="inline">suspend</code> 关键字</li>
+                        <li>修改 UserController 中的调用处</li>
+                        <li>修改 AuthService 中的调用处</li>
+                    </ol>
                 </div>
-                <div class="tool-card-body">
-                    <div class="tool-card-params">filePath: AuthService.kt | 操作已取消</div>
+                <div class="msg-ts">
+                    <span>14:33</span>
+                    <span>tokens: 1.2K+0.4K</span>
+                    <div class="feedback-row">
+                        <button class="feedback-btn" onclick="this.classList.toggle('active');">👍
+                        </button>
+                        <button class="feedback-btn" onclick="this.classList.toggle('active');">👎
+                        </button>
+                    </div>
                 </div>
-                <div class="tool-card-footer"><span>⏳</span><span>用户停止生成</span></div>
             </div>
 
-            <!-- 错误气泡 -->
+            <!-- Error bubble -->
             <div class="msg-row error">
                 <div class="bubble error">
-                    <p><strong>❌ 请求失败</strong></p>
-                    <p style="font-size:12px;margin-top:4px">429 Too Many Requests — API 调用频率超限，请等待
-                        10 秒后重试</p>
-                    <div style="display:flex;gap:8px;margin-top:8px">
-                        <button class="btn btn-primary btn-xs">🔄 重试</button>
-                        <button class="btn btn-secondary btn-xs">📋 复制错误</button>
-                    </div>
+                    <p>❌ <strong>错误:</strong> 连接中断，请检查网络后重试。</p>
+                    <button class="btn btn-primary btn-xs" style="margin-top:8px;">🔄 重试</button>
+                    <button class="btn btn-secondary btn-xs" style="margin-top:8px;">📋
+                        复制错误信息
+                    </button>
                 </div>
                 <div class="msg-ts">14:35</div>
             </div>
 
-            <!-- 流式 -->
-            <div class="msg-row agent">
-                <div class="bubble agent"><p>正在分析错误，尝试重新执行 Step 3...<span
-                        style="color:var(--primary);animation:blink .5s infinite">▍</span></p></div>
-                <div class="msg-ts"><span>14:36</span><span style="color:var(--g5);font-size:11px">↑0.8K ↓0.2K</span>
+            <!-- Multi-Agent Block -->
+            <div class="multi-agent-block collapsed">
+                <div class="ma-header"
+                     onclick="toggleMultiAgent(this.closest('.multi-agent-block'))">
+                    <span class="arrow">▶</span> 🤖 多 Agent 调度中 <span
+                        style="font-weight:400;font-size:11px;margin-left:4px;">2/3 运行中</span>
                 </div>
+                <div class="ma-collapsible">
+                    <!-- 子 Agent A: 已完成 -->
+                    <div class="ma-sub" onclick="toggleSubAgent(this)">
+                        <span class="ma-arrow">▶</span> 🔵 子 Agent A: 重构 UserService
+                        <span class="ma-status" style="color:var(--success);">✅ 完成</span>
+                    </div>
+                    <div class="ma-sub-detail">
+                        <div style="color:var(--g700);margin-bottom:6px;">已读取 UserService.kt，修改
+                            findById 为 suspend fun...
+                        </div>
+                        <div class="nested-tool"
+                             style="font-size:11px;padding:4px 8px;background:var(--g50);border-radius:4px;border:1px solid var(--g100);cursor:pointer;"
+                             onclick="event.stopPropagation();this.classList.toggle('expanded');const d=this.nextElementSibling;d.style.display=d.style.display==='none'?'':'none';">
+                            ▶ 🔧 Read <span
+                                style="color:var(--success);margin-left:8px;">✅ DONE</span>
+                        </div>
+                        <div style="display:none;font-family:var(--mono);font-size:11px;padding:4px 8px;color:var(--g500);">
+                            filePath: "UserService.kt"<br>156 行 | 耗时: 15ms
+                        </div>
+                        <div class="nested-tool"
+                             style="font-size:11px;padding:4px 8px;background:var(--g50);border-radius:4px;border:1px solid var(--g100);cursor:pointer;margin-top:4px;"
+                             onclick="event.stopPropagation();this.classList.toggle('expanded');const d=this.nextElementSibling;d.style.display=d.style.display==='none'?'':'none';">
+                            ▶ 🔧 Edit <span
+                                style="color:var(--success);margin-left:8px;">✅ DONE</span>
+                        </div>
+                        <div style="display:none;font-family:var(--mono);font-size:11px;padding:4px 8px;color:var(--g500);">
+                            替换 3 行 → 4 行 | 耗时: 8ms
+                        </div>
+                        <div style="font-size:10px;color:var(--g400);margin-top:6px;">耗时: 2.3s |
+                            详情: sub-session #42
+                        </div>
+                    </div>
+                    <!-- 子 Agent B: 执行中 -->
+                    <div class="ma-sub" onclick="toggleSubAgent(this)">
+                        <span class="ma-arrow">▶</span> 🔵 子 Agent B: 更新 UserController
+                        <span class="ma-status" style="color:var(--primary);">🔄 执行中</span>
+                    </div>
+                    <div class="ma-sub-detail">
+                        <div style="color:var(--g700);margin-bottom:6px;">正在修改 UserController.kt
+                            中的调用处...<span class="stream-cursor"></span></div>
+                        <div style="font-size:10px;color:var(--g400);">进行中...</div>
+        </div>
+                    <!-- 子 Agent C: 排队 -->
+                    <div class="ma-sub queued">
+                        <span class="ma-arrow" style="visibility:hidden;">▶</span> ⏸ 子 Agent C:
+                        运行测试
+                        <span class="ma-status" style="color:var(--g500);">⏸ 排队</span>
+                    </div>
+                    <div style="font-size:10px;color:var(--g400);margin-top:6px;">并发上限: 3 | 文件锁:
+                        UserService.kt (B 持有)
+                    </div>
+                </div><!-- /ma-collapsible -->
+            </div>
+
+            <!-- Streaming Agent bubble -->
+            <div class="msg-row agent">
+                <div class="bubble agent">
+                    <p>好的，我已完成修改。变更摘要：</p>
+                    <p>1. UserService.findById 已改为 <code class="inline">suspend fun</code></p>
+                    <p>2. UserController 调用处已更新为协程<span class="stream-cursor"></span></p>
+                </div>
+                <div class="msg-ts">14:36</div>
             </div>
         </div>
 
-        <div class="input-area">
-            <!-- 文件选择 Popup（从底部弹出，支持子目录文件） -->
-            <div class="file-popup" id="file-popup">
-                <div class="fp-group">📁 src/main/kotlin/service/</div>
-                <div class="fp-item" onclick="pickFile('UserService.kt')"><span class="fp-name">UserService.kt</span><span
-                        class="fp-path">service/</span></div>
-                <div class="fp-item" onclick="pickFile('AuthService.kt')"><span class="fp-name">AuthService.kt</span><span
-                        class="fp-path">service/</span></div>
-                <div class="fp-item" onclick="pickFile('CacheManager.kt')"><span class="fp-name">CacheManager.kt</span><span
-                        class="fp-path">service/</span></div>
-                <div class="fp-group">📁 src/main/kotlin/controller/</div>
-                <div class="fp-item" onclick="pickFile('UserController.kt')"><span class="fp-name">UserController.kt</span><span
-                        class="fp-path">controller/</span></div>
-                <div class="fp-item" onclick="pickFile('AuthController.kt')"><span class="fp-name">AuthController.kt</span><span
-                        class="fp-path">controller/</span></div>
-                <div class="fp-group">📁 src/main/kotlin/repo/</div>
-                <div class="fp-item" onclick="pickFile('UserRepository.kt')"><span class="fp-name">UserRepository.kt</span><span
-                        class="fp-path">repo/</span></div>
-                <div class="fp-group">📁 src/main/java/config/</div>
-                <div class="fp-item" onclick="pickFile('Config.java')"><span class="fp-name">Config.java</span><span
-                        class="fp-path">config/</span></div>
-                <div class="fp-item" onclick="pickFile('DatabaseConfig.java')"><span
-                        class="fp-name">DatabaseConfig.java</span><span
-                        class="fp-path">config/</span></div>
-                <div class="fp-group">📁 项目根目录</div>
-                <div class="fp-item" onclick="pickFile('build.gradle.kts')"><span class="fp-name">build.gradle.kts</span><span
-                        class="fp-path">./</span></div>
-                <div class="fp-item" onclick="pickFile('Application.kt')"><span class="fp-name">Application.kt</span><span
-                        class="fp-path">src/main/kotlin/</span></div>
-            </div>
-            <!-- 指令列表 Popup -->
-            <div class="file-popup" id="cmd-popup">
-                <div class="fp-group">内置指令</div>
-                <div class="fp-item" onclick="pickCmd('/plan ')"><span
-                        class="fp-name">/plan</span><span
-                        class="fp-path">生成执行计划，先分析再逐步执行</span></div>
-                <div class="fp-item" onclick="pickCmd('/clear ')"><span
-                        class="fp-name">/clear</span><span class="fp-path">清除会话上下文</span>
-                </div>
-                <div class="fp-group">Skills</div>
-                <div class="fp-item" onclick="pickCmd('/review ')"><span
-                        class="fp-name">/review</span><span class="fp-path">审查代码质量</span>
-                </div>
-                <div class="fp-item" onclick="pickCmd('/refactor ')"><span
-                        class="fp-name">/refactor</span><span class="fp-path">重构代码</span></div>
-                <div class="fp-item" onclick="pickCmd('/test ')"><span
-                        class="fp-name">/test</span><span class="fp-path">生成单元测试</span></div>
-                <div class="fp-group">其他</div>
-                <div class="fp-item" onclick="pickCmd('/retry ')"><span
-                        class="fp-name">/retry</span><span class="fp-path">重新发送上一条消息</span>
-                </div>
-            </div>
-            <!-- Tags 行（输入框上方） -->
-            <div class="input-tags-row" id="input-tags">
+        <!-- Input Area -->
+        <div class="input-area" id="chatInputArea">
+            <div class="input-tags-row" id="inputTagsRow">
                 <span class="input-tag file">📄 UserService.kt:40-60 <span class="tag-close"
                                                                           onclick="this.parentElement.remove()">✕</span></span>
-                <span class="input-tag file">📄 Config.java <span class="tag-close"
-                                                                 onclick="this.parentElement.remove()">✕</span></span>
-                <span class="input-tag img">🖼 screenshot.png 34KB <span class="tag-close"
-                                                                        onclick="this.parentElement.remove()">✕</span></span>
+                <span class="input-tag img"><span
+                        style="width:24px;height:24px;background:var(--g200);border-radius:3px;display:inline-flex;align-items:center;justify-content:center;font-size:10px;">🖼</span> screenshot.png <span
+                        style="font-size:10px;color:var(--g400);">34KB</span> <span
+                        class="tag-close" onclick="this.parentElement.remove()">✕</span></span>
             </div>
-            <!-- 文本输入 -->
-            <textarea id="chat-input"
-                      placeholder="输入你的问题，@ 选择文件或 Ctrl+V (Mac: Cmd+V) 粘贴图片..."
-                      oninput="handleInput(this)" onkeydown="handleKeyDown(event)"></textarea>
-            <!-- 底部栏：+ 按钮 | 提示 | 发送 -->
+            <textarea placeholder="输入你的问题，@ 选择文件或 Ctrl+V 粘贴图片..." id="chatTextarea"
+                      oninput="handleTextareaInput()"
+                      onkeydown="handleChatKeydown(event)"></textarea>
             <div class="input-bottom-row">
-                <button class="btn-add-file" onclick="toggleFilePopup()" title="添加文件（或输入 @）">
-                    +
-                </button>
-                <button class="btn-send" onclick="showToast('success','消息已发送')"
-                        title="发送 (Enter)">→
-                </button>
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <button class="btn-add-file" onclick="toggleFilePopup()" title="选择文件">+
+                    </button>
+                    <span class="input-hint">@ 选择文件</span>
+                    <span class="input-hint" style="margin-left:8px;color:var(--g400);"
+                          id="tokenCount">0 tokens</span>
+                </div>
+                <div style="display:flex;gap:8px;">
+                    <button class="btn-stop" id="btnStop" style="display:none;"
+                            onclick="stopGeneration()" title="停止生成">⏹
+                    </button>
+                    <button class="btn-send" id="btnSend" onclick="sendMessage()">→</button>
+        </div>
+            </div>
+
+            <!-- File popup -->
+            <div class="file-popup" id="filePopup">
+                <div class="fp-group">📁 src/main/kotlin/service/</div>
+                <div class="fp-item" onclick="addFileTag('UserService.kt')"><span class="fp-name">UserService.kt</span><span
+                        class="fp-path">service/</span></div>
+                <div class="fp-item" onclick="addFileTag('AuthService.kt')"><span class="fp-name">AuthService.kt</span><span
+                        class="fp-path">service/</span></div>
+                <div class="fp-group">📁 src/main/kotlin/controller/</div>
+                <div class="fp-item" onclick="addFileTag('UserController.kt')"><span
+                        class="fp-name">UserController.kt</span><span
+                        class="fp-path">controller/</span></div>
+                <div class="fp-group">📁 项目根目录</div>
+                <div class="fp-item" onclick="addFileTag('build.gradle.kts')"><span class="fp-name">build.gradle.kts</span><span
+                        class="fp-path">./</span></div>
+            </div>
+
+            <!-- Command popup -->
+            <div class="cmd-popup" id="cmdPopup">
+                <div class="cmd-group">内置指令</div>
+                <div class="cmd-item" onclick="selectCommand('/plan')"><span
+                        class="slash">/plan</span><span class="desc">生成执行计划</span></div>
+                <div class="cmd-item" onclick="selectCommand('/clear')"><span
+                        class="slash">/clear</span><span class="desc">清除会话上下文</span></div>
+                <div class="cmd-group">Skills</div>
+                <div class="cmd-item" onclick="selectCommand('/review')"><span
+                        class="slash">/review</span><span class="desc">审查代码质量</span></div>
+                <div class="cmd-item" onclick="selectCommand('/refactor')"><span class="slash">/refactor</span><span
+                        class="desc">重构代码</span></div>
+                <div class="cmd-item" onclick="selectCommand('/test')"><span
+                        class="slash">/test</span><span class="desc">生成单元测试</span></div>
             </div>
         </div>
     </div>
 
-    <!-- ====== Sessions 页面 ====== -->
+    <!-- ===== Sessions Page ===== -->
     <div class="page" id="page-sessions">
         <div class="page-body">
-            <input class="search-box" placeholder="🔍 搜索会话...">
-            <div id="sessions-list">
-                <div class="card" style="margin-bottom:8px">
-                    <div class="card-row" style="cursor:pointer"
-                         onclick="restoreSession('重构 UserService — 添加 suspend 支持')">
-                        <div style="display:flex;align-items:center;gap:8px"><input type="checkbox"
-                                                                                    class="session-cb"
-                                                                                    onchange="updateSelectAll()"
-                                                                                    onclick="event.stopPropagation()"><strong>📝
-                            重构 UserService — 添加 suspend 支持</strong></div>
-                        <div style="text-align:right;font-size:11px;color:var(--g5)">3 小时前 · 8.2K
-                            tokens · 12 次工具
-                        </div>
-                    </div>
-                    <div style="font-size:11px;color:var(--g5);padding:0 0 8px 24px">⏸ 计划暂停中
-                        (Step 3/5)
-                    </div>
+            <h2 class="page-title">📁 会话历史</h2>
+            <input class="search-box" type="text" placeholder="🔍 搜索会话..."
+                   oninput="filterSessions(this.value)">
+
+            <div class="session-card" onclick="alert('恢复会话: 重构 UserService')">
+                <div class="s-title">📝 重构 UserService — 添加 suspend 支持 <span
+                        class="s-plan-tag">⏸ 计划暂停中</span></div>
+                <div class="s-meta">
+                    <span>3 小时前</span>
+                    <span>tokens: 8.2K</span>
+                    <span>12 次工具</span>
                 </div>
-                <div class="card" style="margin-bottom:8px">
-                    <div class="card-row" style="cursor:pointer"
-                         onclick="restoreSession('关于 Kotlin 协程的讨论')">
-                        <div style="display:flex;align-items:center;gap:8px"><input type="checkbox"
-                                                                                    class="session-cb"
-                                                                                    onchange="updateSelectAll()"
-                                                                                    onclick="event.stopPropagation()"><strong>💬
-                            关于 Kotlin 协程的讨论</strong></div>
-                        <div style="text-align:right;font-size:11px;color:var(--g5)">昨天 · 1.5K
-                            tokens · 纯聊天
-                        </div>
-                    </div>
+            </div>
+
+            <div class="session-card sub">
+                <div class="s-title">└─ 🤖 子 Agent: 重构 UserService</div>
+                <div class="s-meta">
+                    <span>3 小时前</span>
+                    <span>tokens: 2.1K</span>
+                    <span>3 次工具</span>
                 </div>
-                <div class="card" style="margin-bottom:8px">
-                    <div class="card-row" style="cursor:pointer"
-                         onclick="restoreSession('分析项目架构')">
-                        <div style="display:flex;align-items:center;gap:8px"><input type="checkbox"
-                                                                                    class="session-cb"
-                                                                                    onchange="updateSelectAll()"
-                                                                                    onclick="event.stopPropagation()"><strong>📝
-                            分析项目架构</strong></div>
-                        <div style="text-align:right;font-size:11px;color:var(--g5)">6 月 22 日 ·
-                            12.3K tokens · 8 次工具
-                        </div>
-                    </div>
+            </div>
+
+            <div class="session-card" onclick="alert('恢复会话: Kotlin 协程讨论')">
+                <div class="s-title">💬 关于 Kotlin 协程的讨论</div>
+                <div class="s-meta">
+                    <span>昨天</span>
+                    <span>tokens: 1.5K</span>
+                    <span>纯聊天</span>
                 </div>
-                <div class="card">
-                    <div class="card-row" style="cursor:pointer"
-                         onclick="restoreSession('修复 NPE bug')">
-                        <div style="display:flex;align-items:center;gap:8px"><input type="checkbox"
-                                                                                    class="session-cb"
-                                                                                    onchange="updateSelectAll()"
-                                                                                    onclick="event.stopPropagation()"><strong>📝
-                            修复 NPE bug</strong></div>
-                        <div style="text-align:right;font-size:11px;color:var(--g5)">6 月 20 日 ·
-                            5.6K tokens · 3 次工具
-                        </div>
-                    </div>
+            </div>
+
+            <div class="session-card" onclick="alert('恢复会话: 分析项目架构')">
+                <div class="s-title">📝 分析项目架构</div>
+                <div class="s-meta">
+                    <span>6 月 22 日</span>
+                    <span>tokens: 12.3K</span>
+                    <span>8 次工具</span>
                 </div>
-                <div style="font-size:11px;color:var(--g5);margin-top:8px">共 24 个会话 · 已选 <span
-                        id="selected-count">0</span> 个
-                </div>
-                <div style="display:flex;gap:8px;margin-top:8px">
-                    <button class="btn btn-secondary btn-xs" onclick="toggleSelectAll()"
-                            id="select-all-btn">全选
-                    </button>
-                    <button class="btn btn-danger btn-xs" onclick="deleteSelected()">删除选中
-                    </button>
-                    <button class="btn btn-secondary btn-xs">导出 JSON</button>
-                </div>
-            </div><!-- end sessions-list -->
-            <!-- 空状态 -->
-            <div id="sessions-empty" class="empty-state" style="display:none">
+            </div>
+
+            <div class="empty-state" id="sessionsEmpty" style="display:none;">
                 <div class="icon">📁</div>
-                <p><strong>还没有会话记录</strong></p>
-                <p style="margin-top:4px">开始一段 Agent 对话，会话将自动保存在这里</p>
-                <button class="btn btn-primary btn-xs" style="margin-top:12px"
-                        onclick="switchPage('chat')">开始新会话 →
-                </button>
+                <p>还没有会话记录</p>
+                <p>开始一段对话，会话将自动保存</p>
+            </div>
+
+            <div style="font-size:12px;color:var(--g500);padding:12px 0;display:flex;gap:12px;">
+                <span>共 24 个会话，总消耗 156K tokens</span>
+                <button class="btn btn-secondary btn-xs">全选</button>
+                <button class="btn btn-danger btn-xs">🗑 删除选中</button>
             </div>
         </div>
     </div>
 
-    <!-- ====== Token Usage 页面 ====== -->
+    <!-- ===== Token Usage Page ===== -->
     <div class="page" id="page-usage">
         <div class="page-body">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-                <span class="page-title" style="margin:0">📊 Token 消耗</span>
-                <span style="font-size:12px;color:var(--g5)">总消耗: 128.5K · ¥0.87</span>
+            <h2 class="page-title">📊 Token 消耗</h2>
+            <div style="display:flex;gap:12px;align-items:center;margin-bottom:12px;font-size:13px;">
+                <span>时间范围:</span>
+                <select class="form-input" style="width:auto;">
+                    <option>本月</option>
+                    <option>上月</option>
+                    <option>全部</option>
+                </select>
+                <span style="margin-left:auto;font-weight:600;">总消耗: 128.5K · ¥0.87</span>
             </div>
-            <div class="card" style="margin-bottom:12px">
-                <div style="font-size:12px;color:var(--g5);margin-bottom:8px">📈
-                    消耗趋势（本月，按日）
+
+            <div class="card" style="margin-bottom:12px;">
+                <div style="font-size:12px;color:var(--g500);margin-bottom:4px;">📈 消耗趋势（30
+                    天，按日）
                 </div>
-                <div class="sparkline" id="spark"></div>
-                <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--g5)">
-                    <span>1日</span><span>15日</span><span>30日</span></div>
+                <div class="sparkline" id="sparkline"></div>
+                <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--g400);">
+                    <span>1日</span><span>30日</span>
+                </div>
+                <div style="font-size:11px;color:var(--g400);margin-top:4px;">hover 任意点 →
+                    显示当日具体数值
+                </div>
             </div>
-            <div class="section-title">按会话</div>
+
             <div class="card">
-                <div class="card-row"><span>📝 重构 UserService ⏸</span><span style="font-size:12px">45K · ¥0.32</span>
+                <div style="font-size:13px;font-weight:500;margin-bottom:8px;">按会话</div>
+                <table class="tbl">
+                    <thead>
+                    <tr>
+                        <th>会话</th>
+                        <th>Tokens</th>
+                        <th>费用</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    <tr>
+                        <td>📝 重构 UserService ⏸</td>
+                        <td>45K</td>
+                        <td>¥0.32</td>
+                    </tr>
+                    <tr>
+                        <td>💬 Kotlin 协程讨论</td>
+                        <td>3K</td>
+                        <td>¥0.01</td>
+                    </tr>
+                    <tr>
+                        <td>📝 分析项目架构</td>
+                        <td>32K</td>
+                        <td>¥0.21</td>
+                    </tr>
+                    <tr>
+                        <td>📝 修复 NPE bug</td>
+                        <td>18K</td>
+                        <td>¥0.12</td>
+                    </tr>
+                    </tbody>
+                </table>
+                <div style="font-size:11px;color:var(--g400);margin-top:8px;">模型:
+                    deepseek-v4-pro（固定）
                 </div>
             </div>
-            <div class="card" style="margin-top:4px">
-                <div class="card-row"><span>📝 分析项目架构</span><span style="font-size:12px">32K · ¥0.21</span>
-                </div>
-            </div>
-            <div class="card" style="margin-top:4px">
-                <div class="card-row"><span>📝 修复 NPE bug</span><span style="font-size:12px">18K · ¥0.12</span>
-                </div>
-            </div>
-            <div class="card" style="margin-top:4px">
-                <div class="card-row"><span>💬 Kotlin 协程讨论</span><span style="font-size:12px">3K · ¥0.01</span>
-                </div>
-            </div>
-            <div class="section-title">模型: deepseek-v4-pro（固定）</div>
-            <!-- Token Usage 空状态 -->
-            <div id="usage-empty" class="empty-state" style="display:none">
+
+            <div class="empty-state" id="usageEmpty" style="display:none;">
                 <div class="icon">📊</div>
-                <p><strong>还没有 token 消耗</strong></p>
-                <p style="margin-top:4px">使用 Agent 后这里会显示消耗统计</p>
+                <p>还没有 token 消耗</p>
+                <p>使用 Agent 后这里会显示消耗统计</p>
             </div>
         </div>
     </div>
 
-    <!-- ====== MCP 页面 ====== -->
+    <!-- ===== MCP Page ===== -->
     <div class="page" id="page-mcp">
         <div class="page-body">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-                <span class="page-title" style="margin:0">🔌 MCP Servers</span>
-                <button class="btn btn-primary btn-xs"
-                        onclick="document.getElementById('mcp-add-form').style.display='block'">➕ 添加
-                </button>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                <h2 class="page-title" style="margin:0;">🔌 MCP Servers</h2>
+                <button class="btn btn-primary btn-xs">➕ 添加</button>
             </div>
-            <!-- 添加表单 -->
-            <div class="card" id="mcp-add-form" style="margin-bottom:12px;display:none">
-                <div class="section-title" style="margin-top:0">添加 MCP Server</div>
-                <div class="form-group"><label>名称</label><input class="form-input"
-                                                                  placeholder="my-server"></div>
-                <div class="form-group"><label>命令</label><input class="form-input"
-                                                                  placeholder="npx -y @anthropic/mcp-server-xxx">
+
+            <!-- RUNNING -->
+            <div class="card" style="margin-bottom:8px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <span><span class="status-dot dot-green"></span><strong>mysql</strong></span>
+                    <button class="btn btn-secondary btn-xs">断开</button>
                 </div>
-                <div class="form-group"><label>参数（可选，空格分隔）</label><input class="form-input"
-                                                                                 placeholder="--port 8080">
+                <div style="font-size:12px;color:var(--g500);margin-top:4px;">
+                    command: npx -y @anthropic/mcp-server-mysql<br>
+                    tools: 5 (query, list_tables, describe, insert, update)
                 </div>
-                <div class="form-group"><label>环境变量（可选，KEY=VALUE 每行一个）</label><textarea
-                        class="form-input" style="height:60px;resize:vertical"
-                        placeholder="DB_HOST=localhost&#10;DB_PORT=3306"></textarea></div>
-                <div style="display:flex;gap:8px">
-                    <button class="btn btn-primary btn-xs"
-                            onclick="addMcpServer();document.getElementById('mcp-add-form').style.display='none'">
-                        保存并连接
-                    </button>
-                    <button class="btn btn-secondary btn-xs"
-                            onclick="document.getElementById('mcp-add-form').style.display='none'">
-                        取消
-                    </button>
-                </div>
-            </div>
-            <div class="card" style="margin-bottom:8px">
-                <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span
-                        class="status-dot dot-green"></span><strong>mysql</strong><span
-                        style="margin-left:auto;font-size:12px;color:var(--g5)">RUNNING</span></div>
-                <div style="font-size:12px;color:var(--g5)">command: npx -y
-                    @anthropic/mcp-server-mysql
-                </div>
-                <div style="font-size:12px;color:var(--g5);margin-top:4px">tools: query,
-                    list_tables, describe, insert, update (5)
-                </div>
-                <div style="display:flex;gap:8px;margin-top:8px">
+                <div style="display:flex;gap:6px;margin-top:8px;">
                     <button class="btn btn-secondary btn-xs">▶ 测试连接</button>
                     <button class="btn btn-secondary btn-xs">✏ 编辑</button>
-                    <button class="btn btn-secondary btn-xs">🔌 断开</button>
-                    <button class="btn btn-danger btn-xs" onclick="deleteMcpServer(this)">🗑 删除
+                    <button class="btn btn-xs" style="color:var(--error);background:transparent;">🗑
+                        删除
                     </button>
                 </div>
             </div>
-            <div class="card" style="margin-bottom:8px">
-                <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span
-                        class="status-dot dot-yellow"></span><strong>filesystem</strong><span
-                        style="margin-left:auto;font-size:12px;color:var(--warning)">INITIALIZING</span>
+
+            <!-- INITIALIZING -->
+            <div class="card" style="margin-bottom:8px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <span><span
+                            class="status-dot dot-yellow"></span><strong>filesystem</strong></span>
+                    <button class="btn btn-secondary btn-xs" style="color:var(--error);">✕</button>
                 </div>
-                <div style="font-size:12px;color:var(--g5)">command: npx -y
-                    @anthropic/mcp-server-filesystem
-                </div>
-                <div style="font-size:12px;color:var(--warning);margin-top:4px">正在安装依赖 (npm
-                    install)... 最多等待 3 分钟
+                <div style="font-size:12px;color:var(--g500);margin-top:4px;">
+                    command: npx -y @anthropic/mcp-server-filesystem<br>
+                    <span style="color:var(--warning);">正在安装依赖 (npm install)... 最多等待 3 分钟</span>
                 </div>
             </div>
-            <div class="card" style="margin-bottom:8px">
-                <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span
-                        class="status-dot dot-red"></span><strong>custom-server</strong><span
-                        style="margin-left:auto;font-size:12px;color:var(--error)">CRASHED</span>
+
+            <!-- CRASHED -->
+            <div class="card" style="margin-bottom:8px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <span><span
+                            class="status-dot dot-red"></span><strong>custom-server</strong></span>
+                    <button class="btn btn-primary btn-xs">重连</button>
                 </div>
-                <div style="font-size:12px;color:var(--g5)">command: python my_server.py</div>
-                <div style="font-size:12px;color:var(--error);margin-top:4px">错误: Process exited
-                    with code 1
+                <div style="font-size:12px;color:var(--g500);margin-top:4px;">
+                    command: python my_server.py<br>
+                    <span style="color:var(--error);">错误: Process exited with code 1</span>
                 </div>
-                <div style="display:flex;gap:8px;margin-top:8px">
-                    <button class="btn btn-primary btn-xs">🔄 重连</button>
+                <div style="display:flex;gap:6px;margin-top:8px;">
+                    <button class="btn btn-secondary btn-xs">▶ 测试连接</button>
                     <button class="btn btn-secondary btn-xs">📋 查看日志</button>
                     <button class="btn btn-secondary btn-xs">✏ 编辑</button>
-                    <button class="btn btn-danger btn-xs" onclick="deleteMcpServer(this)">🗑 删除
-                    </button>
                 </div>
             </div>
-            <div style="font-size:11px;color:var(--g5);margin-top:8px">配置文件:
-                .code-assistant/mcp-config.json · .mcp.json · ~/.claude/.mcp.json<br><span
-                        style="font-size:11px;color:var(--g5)">兼容 Claude Code / Codex MCP 配置格式</span>
-            </div>
-            <!-- MCP 空状态 -->
-            <div id="mcp-empty" class="empty-state" style="display:none">
+
+            <div class="empty-state" id="mcpEmpty" style="display:none;">
                 <div class="icon">🔌</div>
-                <p><strong>还没有 MCP Server</strong></p>
-                <p style="margin-top:4px">添加 MCP Server 连接外部工具服务（数据库、API、文件系统）</p>
-                <button class="btn btn-primary btn-xs" style="margin-top:12px"
-                        onclick="document.getElementById('mcp-add-form').style.display='block'">➕ 添加
-                    Server
+                <p>还没有 MCP Server</p>
+                <p>
+                    <button class="btn btn-primary btn-xs" style="margin-top:8px;">➕ 添加 Server
+                    </button>
+                    连接外部工具服务
+                </p>
+            </div>
+
+            <div style="font-size:11px;color:var(--g400);padding:8px 0;">
+                配置文件: .code-assistant/mcp-config.json
+                <button class="btn btn-secondary btn-xs" style="margin-left:8px;">📂 打开文件
                 </button>
             </div>
         </div>
     </div>
 
-    <!-- ====== Skills 页面 ====== -->
+    <!-- ===== Skills Page ===== -->
     <div class="page" id="page-skills">
         <div class="page-body">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-                <span class="page-title" style="margin:0">🎯 Skills</span>
-                <button class="btn btn-primary btn-xs"
-                        onclick="document.getElementById('skill-add-form').style.display='block'">➕
-                    新建
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                <h2 class="page-title" style="margin:0;">🎯 Skills</h2>
+                <button class="btn btn-primary btn-xs">➕ 新建 Skill</button>
+            </div>
+            <div style="font-size:11px;color:var(--g400);margin-bottom:12px;">
+                目录: .code-assistant/skills/
+                <button class="btn btn-secondary btn-xs" style="margin-left:8px;">📂 打开目录
                 </button>
             </div>
-            <!-- 添加表单 -->
-            <div class="card" id="skill-add-form" style="margin-bottom:12px;display:none">
-                <div class="section-title" style="margin-top:0">新建 Skill</div>
-                <div class="form-group"><label>名称</label><input class="form-input"
-                                                                  placeholder="my-skill"></div>
-                <div class="form-group"><label>描述</label><input class="form-input"
-                                                                  placeholder="Skill 的功能描述">
-                </div>
-                <div class="form-group"><label>调用命令（/xxx）</label><input class="form-input"
-                                                                            placeholder="my-skill">
-                </div>
-                <div class="form-group"><label>依赖工具（逗号分隔）</label><input class="form-input"
-                                                                                placeholder="Read, Bash">
-                </div>
-                <div class="form-group"><label>正文（Markdown）</label><textarea class="form-input"
-                                                                               style="height:80px;resize:vertical"
-                                                                               placeholder="# My Skill&#10;&#10;执行以下步骤：&#10;1. 读取目标文件&#10;2. ..."></textarea>
-                </div>
-                <div style="display:flex;gap:8px">
-                    <button class="btn btn-primary btn-xs"
-                            onclick="addSkill();document.getElementById('skill-add-form').style.display='none'">
-                        创建
-                    </button>
-                    <button class="btn btn-secondary btn-xs"
-                            onclick="document.getElementById('skill-add-form').style.display='none'">
-                        取消
-                    </button>
-                </div>
-            </div>
-            <div class="card" style="margin-bottom:8px">
+
+            <div class="card" style="margin-bottom:8px;">
                 <div class="card-row">
-                    <div style="display:flex;align-items:center;gap:8px">
-                        <div class="switch on" onclick="this.classList.toggle('on')"></div>
-                        <strong>code-review</strong></div>
-                    <span style="font-size:12px;color:var(--g5)">调用: /review 或 /code-review</span>
-                </div>
-                <div style="font-size:12px;color:var(--g5);padding:0 0 8px">审查代码质量，查找 bug
-                    和安全问题 · 工具: Read, Bash
+                    <span><span class="switch on"
+                                onclick="this.classList.toggle('on')"></span></span>
+                    <span style="flex:1;margin-left:10px;"><strong>code-review</strong><br><span
+                            style="font-size:11px;color:var(--g500);">审查代码质量，查找 bug 和安全问题<br>触发词: review, 审查, 检查代码</span></span>
+                    <button class="btn btn-secondary btn-xs">详情</button>
                 </div>
             </div>
-            <div class="card" style="margin-bottom:8px">
+            <div class="card" style="margin-bottom:8px;">
                 <div class="card-row">
-                    <div style="display:flex;align-items:center;gap:8px">
-                        <div class="switch on" onclick="this.classList.toggle('on')"></div>
-                        <strong>refactor</strong></div>
-                    <span style="font-size:12px;color:var(--g5)">调用: /refactor</span></div>
-                <div style="font-size:12px;color:var(--g5);padding:0 0 8px">重构代码结构，改进可读性
-                    · 工具: Read, Edit, Write
+                    <span><span class="switch on"
+                                onclick="this.classList.toggle('on')"></span></span>
+                    <span style="flex:1;margin-left:10px;"><strong>refactor</strong><br><span
+                            style="font-size:11px;color:var(--g500);">重构代码结构，改进可读性<br>触发词: 重构, refactor</span></span>
+                    <button class="btn btn-secondary btn-xs">详情</button>
                 </div>
             </div>
-            <div class="card" style="margin-bottom:8px">
+            <div class="card" style="margin-bottom:8px;">
                 <div class="card-row">
-                    <div style="display:flex;align-items:center;gap:8px">
-                        <div class="switch"
-                             onclick="showToast('error','该 Skill 声明的工具不存在，无法启用')"></div>
-                        <strong>docker-helper</strong></div>
-                    <span style="font-size:12px;color:var(--error)">⚠ 工具缺失</span></div>
-                <div style="font-size:12px;color:var(--g5);padding:0 0 8px">Docker 容器管理 · <span
-                        style="color:var(--error)">声明了不存在的工具: docker-compose</span></div>
+                    <span><span class="switch" onclick="this.classList.toggle('on')"></span></span>
+                    <span style="flex:1;margin-left:10px;"><strong>docker-helper</strong> ⚠️ <span
+                            style="color:var(--warning);font-size:11px;">工具缺失</span><br><span
+                            style="font-size:11px;color:var(--g500);">Docker 容器管理和编排<br>⚠️ 声明了不存在的工具: docker-compose</span></span>
+                    <button class="btn btn-secondary btn-xs">详情</button>
+                </div>
             </div>
-            <div class="card">
+            <div class="card" style="margin-bottom:8px;">
                 <div class="card-row">
-                    <div style="display:flex;align-items:center;gap:8px">
-                        <div class="switch on" onclick="this.classList.toggle('on')"></div>
-                        <strong>test-generator</strong></div>
-                    <span style="font-size:12px;color:var(--g5)">调用: /test 或 /generate-test</span>
-                </div>
-                <div style="font-size:12px;color:var(--g5);padding:0 0 8px">根据源代码自动生成单元测试
-                    · 工具: Read, Write
+                    <span><span class="switch on"
+                                onclick="this.classList.toggle('on')"></span></span>
+                    <span style="flex:1;margin-left:10px;"><strong>test-generator</strong><br><span
+                            style="font-size:11px;color:var(--g500);">根据源代码自动生成单元测试<br>触发词: 测试, test, generate test</span></span>
+                    <button class="btn btn-secondary btn-xs">详情</button>
                 </div>
             </div>
-            <div style="font-size:11px;color:var(--g5);margin-top:8px">目录: .code-assistant/skills/
-                <span style="color:var(--primary);cursor:pointer">📂 打开</span></div>
-            <!-- Skills 空状态 -->
-            <div id="skills-empty" class="empty-state" style="display:none">
+
+            <div class="empty-state" id="skillsEmpty" style="display:none;">
                 <div class="icon">🎯</div>
-                <p><strong>还没有安装 Skill</strong></p>
-                <p style="margin-top:4px">在 .code-assistant/skills/ 下创建 SKILL.md 来自定义 Agent
-                    能力</p>
-                <button class="btn btn-primary btn-xs" style="margin-top:12px"
-                        onclick="document.getElementById('skill-add-form').style.display='block'">➕
-                    新建 Skill
-                </button>
+                <p>还没有安装 Skill</p>
+                <p>在 .code-assistant/skills/ 下创建 SKILL.md 来自定义 Agent 能力</p>
             </div>
         </div>
     </div>
 
-    <!-- ====== Settings 页面（关于 + 快捷键参考，Agent 设置已迁移到 IDE Settings） ====== -->
+    <!-- ===== Settings Page ===== -->
     <div class="page" id="page-settings">
         <div class="page-body">
-            <span class="page-title">⚙ Settings</span>
-            <div class="card" style="margin-bottom:12px">
-                <div class="section-title" style="margin-top:0">关于</div>
-                <div class="card-row"><span>版本</span><span style="font-size:12px;color:var(--g5)">v2.0.0 Alpha</span>
+            <h2 class="page-title">⚙ 关于 & 设置</h2>
+
+            <div class="card" style="margin-bottom:12px;">
+                <h3 style="font-size:14px;margin-bottom:8px;">关于</h3>
+                <div class="card-row">
+                    <span>版本</span>
+                    <span style="font-family:var(--mono);font-size:12px;">Code Assistant v2.0.0</span>
                 </div>
-                <div class="card-row"><span>GitHub</span><span
-                        style="font-size:12px;color:var(--primary);cursor:pointer">github.com/jin123456bat/code-assistant</span>
+                <div class="card-row">
+                    <span>仓库</span>
+                    <span style="font-size:12px;">github.com/jin123456bat/code-assistant</span>
+                </div>
+                <div class="card-row">
+                    <span>平台</span>
+                    <span style="font-size:12px;">JetBrains IDE 2024.3+</span>
+                </div>
+                <div class="card-row">
+                    <span>LLM</span>
+                    <span style="font-size:12px;">DeepSeek V4 Pro</span>
                 </div>
             </div>
-            <div class="card" style="margin-bottom:12px">
-                <div class="section-title" style="margin-top:0">快捷键参考</div>
-                <div class="card-row"><span>打开面板</span><span
-                        style="font-size:12px;color:var(--g5)">Ctrl+Shift+K / Cmd+Shift+K</span>
-                </div>
-                <div class="card-row"><span>发送消息</span><span
-                        style="font-size:12px;color:var(--g5)">Enter（换行: Shift+Enter）</span></div>
-                <div class="card-row"><span>停止生成</span><span
-                        style="font-size:12px;color:var(--g5)">Escape</span></div>
-                <div class="card-row"><span>新建会话</span><span
-                        style="font-size:12px;color:var(--g5)">Ctrl+Shift+N / Cmd+Shift+N</span>
-                </div>
+
+            <div class="card" style="margin-bottom:12px;">
+                <h3 style="font-size:14px;margin-bottom:8px;">快捷键参考</h3>
+                <table class="tbl">
+                    <tr>
+                        <td>打开/关闭聊天面板</td>
+                        <td style="font-family:var(--mono);">Ctrl+Shift+K / Cmd+Shift+K</td>
+                    </tr>
+                    <tr>
+                        <td>发送消息</td>
+                        <td style="font-family:var(--mono);">Enter</td>
+                    </tr>
+                    <tr>
+                        <td>输入框换行</td>
+                        <td style="font-family:var(--mono);">Shift+Enter</td>
+                    </tr>
+                    <tr>
+                        <td>关闭弹窗</td>
+                        <td style="font-family:var(--mono);">Escape</td>
+                    </tr>
+                    <tr>
+                        <td>新建会话</td>
+                        <td style="font-family:var(--mono);">Ctrl+Shift+N / Cmd+Shift+N</td>
+                    </tr>
+                    <tr>
+                        <td>填充上一条消息</td>
+                        <td style="font-family:var(--mono);">↑（空输入框）</td>
+                    </tr>
+                </table>
             </div>
+
             <div class="card">
-                <div class="section-title" style="margin-top:0">设置</div>
-                <p style="font-size:13px;color:var(--g7);margin-bottom:8px">所有配置项（API
-                    Key、模型、代码补全、Commit 模板、Agent 最大轮次、并发上限）统一在 IDE 设置中管理。</p>
-                <button class="btn btn-primary btn-xs"
-                        onclick="showToast('success','打开 IDE Settings > Tools > Code Assistant')">
-                    ⚙ 打开 IDE 设置
+                <h3 style="font-size:14px;margin-bottom:8px;">设置</h3>
+                <p style="font-size:13px;color:var(--g500);margin-bottom:12px;">
+                    所有配置项（API Key、模型、Agent 最大轮次、并发上限、代码补全等）已迁移到 IDE 设置面板。
+                </p>
+                <button class="btn btn-primary"
+                        onclick="alert('打开 IDE Settings > Tools > Code Assistant')">⚙ 打开 IDE 设置
                 </button>
             </div>
         </div>
     </div>
 </div>
 
-<div id="toast" class="toast success"></div>
+<!-- ===== Approval Dialog (Modal) ===== -->
+<div class="dialog-overlay" id="approvalDialog">
+    <div class="dialog">
+        <div class="dialog-title warn">⚠️ 危险操作确认</div>
+        <div class="dialog-body">
+            <p>Code Assistant 将执行以下命令：</p>
+            <pre>rm -rf ./build/tmp</pre>
+            <p style="font-size:12px;color:var(--error);margin-top:8px;">该命令将不可逆删除文件。</p>
+        </div>
+        <div class="dialog-footer">
+            <button class="btn btn-primary btn-xs" onclick="closeDialog('approvalDialog', true)">
+                允许一次
+            </button>
+            <button class="btn btn-secondary btn-xs" onclick="closeDialog('approvalDialog', true)">
+                允许此会话
+            </button>
+            <button class="btn btn-danger btn-xs" onclick="closeDialog('approvalDialog', false)">
+                拒绝
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- ===== Toast ===== -->
+<div class="toast success" id="toast">✅ API Key 验证成功</div>
 
 <script>
-    let hasApiKey = false;
-
-    function setupApiKey() {
-      hasApiKey = true;
-      // 隐藏 Welcome tab，显示其他 tabs
-      document.querySelector('[data-page="welcome"]').classList.add('hidden');
-      document.querySelectorAll('[data-page]').forEach(t => {
-        if (t.dataset.page !== 'welcome') t.classList.remove('hidden');
-      });
-      switchPage('chat');
-    }
-
-    function switchPage(name) {
-      document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-      document.getElementById('page-'+name).classList.add('active');
-      document.querySelectorAll('.tab').forEach(t => {
-        t.classList.remove('active');
-        if (t.dataset.page === name) t.classList.add('active');
-      });
-    }
-    function showToast(type,msg){
-      const t=document.getElementById('toast');
-      t.className='toast '+(type==='error'?'error-t':type);
-      t.textContent=msg;t.style.display='block';
-      setTimeout(()=>t.style.display='none',3000);
-    }
-    function approve(id){
-      const el=document.getElementById(id);
-      el.innerHTML='<span style=font-size:13px;color:var(--success)>✅ 已批准 · 执行中...</span>';
-    }
-    function reject(id){
-      const el=document.getElementById(id);
-      el.innerHTML='<span style=font-size:13px;color:var(--error)>🚫 已拒绝</span>';
-    }
-
-    // Sessions 恢复/全选/删除
-    function restoreSession(title){
-      showToast('success','已恢复会话: ' + title);
-      switchPage('chat');
-    }
-    // Sessions 全选/删除
-    let selectAll = false;
-    function toggleSelectAll(){
-      selectAll = !selectAll;
-      document.querySelectorAll('.session-cb').forEach(cb => { cb.checked = selectAll; });
-      updateSelectAll();
-    }
-    function updateSelectAll(){
-      const cbs = document.querySelectorAll('.session-cb');
-      const checked = document.querySelectorAll('.session-cb:checked').length;
-      document.getElementById('selected-count').textContent = checked;
-      selectAll = checked === cbs.length && cbs.length > 0;
-      document.getElementById('select-all-btn').textContent = selectAll ? '取消全选' : '全选';
-    }
-    // 键盘导航
-    function handleKeyDown(e){
-      const cmdP = document.getElementById('cmd-popup');
-      const fileP = document.getElementById('file-popup');
-      const activePopup = cmdP.classList.contains('show') ? cmdP : (fileP.classList.contains('show') ? fileP : null);
-      if(!activePopup) return;
-      const items = activePopup.querySelectorAll('.fp-item');
-      const visibleItems = Array.from(items).filter(i => i.style.display !== 'none');
-      if(visibleItems.length === 0) return;
-      const activeIdx = visibleItems.findIndex(i => i.classList.contains('active'));
-
-      if(e.key === 'ArrowDown'){
-        e.preventDefault();
-        visibleItems.forEach(i => i.classList.remove('active'));
-        const next = (activeIdx + 1) % visibleItems.length;
-        visibleItems[next].classList.add('active');
-        visibleItems[next].scrollIntoView({block:'nearest'});
-      } else if(e.key === 'ArrowUp'){
-        e.preventDefault();
-        visibleItems.forEach(i => i.classList.remove('active'));
-        const prev = activeIdx <= 0 ? visibleItems.length - 1 : activeIdx - 1;
-        visibleItems[prev].classList.add('active');
-        visibleItems[prev].scrollIntoView({block:'nearest'});
-      } else if(e.key === 'Enter' && activeIdx >= 0){
-        e.preventDefault();
-        visibleItems[activeIdx].click();
-      } else if(e.key === 'Escape'){
-        cmdP.classList.remove('show');
-        fileP.classList.remove('show');
-      }
-    }
-    // @file 文件引用
-    const mockFiles = ['UserService.kt','UserController.kt','AuthService.kt','Config.java','build.gradle.kts','Application.kt','UserRepository.kt','AuthInterceptor.kt','CacheManager.kt','DatabaseConfig.java'];
-    function toggleFilePopup(){
-      const fp = document.getElementById('file-popup');
-      fp.classList.toggle('show');
-      if(fp.classList.contains('show')) document.getElementById('cmd-popup').classList.remove('show');
-    }
-    function getFilePopup(){ return document.getElementById('file-popup'); }
-    // 指令列表 / @file
-    function handleInput(el){
-      const cmdPopup = document.getElementById('cmd-popup');
-      const filePopup = document.getElementById('file-popup');
-      const val = el.value;
-      const cursorPos = el.selectionStart;
-      const beforeCursor = val.substring(0, cursorPos);
-
-      // 检测 @ 文件引用
-      const fileMatch = beforeCursor.match(/(?:^|\s)@(\S*)$/);
-      if(fileMatch){
-        cmdPopup.classList.remove('show');
-        filePopup.classList.add('show');
-        const filter = fileMatch[1].toLowerCase();
-        let first = null;
-        filePopup.querySelectorAll('.fp-item').forEach(item => {
-          const name = item.querySelector('.fp-name').textContent;
-          const visible = !filter || name.toLowerCase().includes(filter);
-          item.style.display = visible ? 'flex' : 'none';
-          if(visible && !first) first = item;
-        });
-        filePopup.querySelectorAll('.fp-item').forEach(i => i.classList.remove('active'));
-        if(first) first.classList.add('active');
-        return;
-      }
-      filePopup.classList.remove('show');
-
-      // 检测 / 指令
-      const cmdMatch = beforeCursor.match(/(?:^|\s)\/(\S*)$/);
-      if(cmdMatch){
-        cmdPopup.classList.add('show');
-        const filter = cmdMatch[1].toLowerCase();
-        let first = null;
-        cmdPopup.querySelectorAll('.fp-item').forEach(item => {
-          const cmd = item.querySelector('.fp-name').textContent;
-          const visible = !filter || cmd.includes(filter);
-          item.style.display = visible ? 'flex' : 'none';
-          if(visible && !first) first = item;
-        });
-        cmdPopup.querySelectorAll('.fp-item').forEach(i => i.classList.remove('active'));
-        if(first) first.classList.add('active');
-      } else {
-        cmdPopup.classList.remove('show');
-      }
-    }
-    function pickFile(file){
-      const el = document.getElementById('chat-input');
-      const val = el.value; const cursorPos = el.selectionStart;
-      const beforeCursor = val.substring(0, cursorPos);
-      const afterCursor = val.substring(cursorPos);
-      const newBefore = beforeCursor.replace(/@(\S*)$/, '');
-      el.value = newBefore + afterCursor;
-      el.focus(); el.selectionStart = el.selectionEnd = newBefore.length;
-      document.getElementById('file-popup').classList.remove('show');
-      // 添加 tag
-      const tagsRow = document.getElementById('input-tags');
-      const existing = tagsRow.querySelectorAll('.input-tag');
-      if(existing.length < 8){
-        const tag = document.createElement('span');
-        tag.className='input-tag file';
-        tag.innerHTML='📄 '+file+' <span class="tag-close">✕</span>';
-        tag.querySelector('.tag-close').onclick = () => tag.remove();
-        tagsRow.appendChild(tag);
-      }
-    }
-    function pickCmd(cmd){
-      const el = document.getElementById('chat-input');
-      const val = el.value;
-      const cursorPos = el.selectionStart;
-      const beforeCursor = val.substring(0, cursorPos);
-      const afterCursor = val.substring(cursorPos);
-      // 替换 /xxx 为选中的指令
-      const newBefore = beforeCursor.replace(/\/(\S*)$/, cmd);
-      el.value = newBefore + afterCursor;
-      el.focus();
-      el.selectionStart = el.selectionEnd = (newBefore).length;
-      document.getElementById('cmd-popup').classList.remove('show');
-    }
-    // 点击空白关闭 popup
-    document.addEventListener('click', function(e){
-      if(!e.target.closest('#cmd-popup') && !e.target.closest('#file-popup') && !e.target.closest('#chat-input') && !e.target.closest('.btn-add-file')){
-        document.getElementById('cmd-popup').classList.remove('show');
-        document.getElementById('file-popup').classList.remove('show');
-      }
-    });
-    // 选项组件
-    function selectOption(el, blockId){
-      const block = document.getElementById(blockId);
-      block.querySelectorAll('.opt-item').forEach(i => i.classList.remove('selected'));
-      el.classList.add('selected');
-      const letter = el.querySelector('.opt-letter').textContent;
-      block.querySelector('.selected-label').textContent = letter;
-    }
-    function confirmOption(blockId, defaultOpt){
-      const block = document.getElementById(blockId);
-      const selected = block.querySelector('.opt-item.selected');
-      const letter = selected ? selected.querySelector('.opt-letter').textContent : defaultOpt;
-      showToast('success','已选择: ' + letter);
-    }
-    // MCP 添加/删除
-    function addMcpServer(){
-      showToast('success','MCP Server 已添加，正在连接...');
-    }
-    function deleteMcpServer(btn){
-      const card = btn.closest('.card');
-      const name = card.querySelector('strong').textContent;
-      card.remove();
-      showToast('success','已删除 ' + name);
-    }
-    // Skills 添加
-    function addSkill(){
-      showToast('success','Skill 已创建');
-    }
-    function deleteSelected(){
-      const checked = document.querySelectorAll('.session-cb:checked');
-      if(checked.length === 0) return showToast('error','请先选择会话');
-      checked.forEach(cb => cb.closest('.card').remove());
-      updateSelectAll();
-      showToast('success','已删除 ' + checked.length + ' 个会话');
-    }
-    // 剪贴板图片粘贴处理
-    document.getElementById('chat-input').addEventListener('paste', function(e){
-      const items = e.clipboardData?.items;
-      if(!items) return;
-      for(let i=0;i<items.length;i++){
-        if(items[i].type.startsWith('image/')){
-          e.preventDefault();
-          const file = items[i].getAsFile();
-          if(!file) continue;
-          if(file.size > 5*1024*1024){ showToast('error','图片不能超过 5MB'); continue; }
-          const tagsRow = document.getElementById('input-tags');
-          const imgTags = tagsRow.querySelectorAll('.input-tag.img');
-          if(imgTags.length >= 5){ showToast('error','单次最多粘贴 5 张图片'); break; }
-          const reader = new FileReader();
-          reader.onload = function(ev){
-            const sizeKB = Math.round(file.size/1024);
-            const tag = document.createElement('span');
-            tag.className='input-tag img';
-            tag.innerHTML='🖼 '+(file.name||'clipboard.png')+' '+sizeKB+'KB <span class="tag-close">✕</span>';
-            tag.querySelector('.tag-close').onclick = ()=>tag.remove();
-            tagsRow.appendChild(tag);
-            showToast('success','图片已添加');
-          };
-          reader.readAsDataURL(file);
-        }
-      }
-    });
-
-    // 默认滚动到顶部（确保思考过程和工具调用可见）
-    document.querySelector('#page-chat .page-body').scrollTop = 0;
-
-    // sparkline 渲染
-    (function(){
-      const data=[3,5,2,8,12,7,4,6,15,10,8,3,9,14,11,6,4,2,7,13,8,5,3,9,16,11,7,4,6,8];
-      const max=Math.max(...data);
-      const spark=document.getElementById('spark');
-      data.forEach(v=>{
-        const bar=document.createElement('div');
-        bar.className='bar';
-        bar.style.height=(v/max*80)+'px';
-        bar.title=v+'K tokens';
-        spark.appendChild(bar);
-      });
+    // ===== Theme =====
+    (function() {
+      const saved = localStorage.getItem('ca-theme');
+      if (saved === 'dark') document.body.classList.add('dark');
     })();
 
-    const style=document.createElement('style');
-    style.textContent='@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}';
-    document.head.appendChild(style);
+    function toggleTheme() {
+      document.body.classList.toggle('dark');
+      localStorage.setItem('ca-theme', document.body.classList.contains('dark') ? 'dark' : 'light');
+    }
+
+    // ===== Page Navigation =====
+    let currentPage = 'welcome';
+    let apiKeySet = false;
+
+    function switchPage(page) {
+      if (!apiKeySet && page !== 'welcome') return;
+
+      document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+      const target = document.getElementById('page-' + page);
+      if (target) target.classList.add('active');
+
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      const tab = document.querySelector(`.tab[data-page="${page}"]`);
+      if (tab) tab.classList.add('active');
+
+      currentPage = page;
+    }
+
+    function saveApiKey() {
+      apiKeySet = true;
+      document.querySelectorAll('.tab').forEach(t => {
+        if (t.dataset.page === 'welcome') t.classList.add('hidden');
+        else t.classList.remove('hidden');
+      });
+      // Show validating banner
+      const banner = document.getElementById('chatBanner');
+      banner.style.display = 'flex';
+      banner.className = 'banner info';
+      banner.innerHTML = '🔄 正在验证 API Key...';
+
+      switchPage('chat');
+
+      // Simulate validation after 1.5s
+      setTimeout(() => {
+        banner.className = 'banner info';
+        banner.innerHTML = '✅ API Key 验证成功';
+        banner.style.display = 'none';
+        const toast = document.getElementById('toast');
+        toast.classList.add('success');
+        toast.style.display = 'block';
+        toast.textContent = '✅ API Key 验证成功';
+        setTimeout(() => { toast.style.display = 'none'; }, 3000);
+      }, 1500);
+    }
+
+    function toggleApiKeyVisibility() {
+      const input = document.getElementById('apiKeyInput');
+      input.type = input.type === 'password' ? 'text' : 'password';
+    }
+
+    // ===== Chat Input =====
+    function handleChatKeydown(e) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    }
+
+    function handleTextareaInput() {
+      const ta = document.getElementById('chatTextarea');
+      // 自适应 2-10 行
+      ta.style.height = 'auto';
+      ta.style.height = Math.min(ta.scrollHeight, 220) + 'px';
+      const text = ta.value;
+
+      // Show command popup on /
+      const cmdPopup = document.getElementById('cmdPopup');
+      const filePopup = document.getElementById('filePopup');
+      if (text.startsWith('/')) {
+        cmdPopup.classList.add('show');
+        filePopup.classList.remove('show');
+      } else if (text.startsWith('@')) {
+        filePopup.classList.add('show');
+        cmdPopup.classList.remove('show');
+      } else {
+        cmdPopup.classList.remove('show');
+        filePopup.classList.remove('show');
+      }
+
+      // Token estimate
+      const tokens = Math.max(1, Math.round(new Blob([text]).size / 4));
+      document.getElementById('tokenCount').textContent = '~' + tokens + ' tokens';
+    }
+
+    function sendMessage() {
+      const ta = document.getElementById('chatTextarea');
+      const text = ta.value.trim();
+      if (!text) return;
+
+      // Add user bubble
+      const container = document.getElementById('chatMessages');
+      const row = document.createElement('div');
+      row.className = 'msg-row user';
+      row.innerHTML = '<div class="bubble user"><p>' + escapeHtml(text) + '</p></div><div class="msg-ts">' + now() + '</div>';
+      container.appendChild(row);
+
+      ta.value = '';
+      document.getElementById('tokenCount').textContent = '0 tokens';
+      document.getElementById('cmdPopup').classList.remove('show');
+      document.getElementById('filePopup').classList.remove('show');
+
+      // Simulate agent response
+      document.getElementById('btnSend').style.display = 'none';
+      document.getElementById('btnStop').style.display = 'flex';
+      document.getElementById('btnStop').onclick = stopGeneration;
+
+      container.scrollTop = container.scrollHeight;
+    }
+
+    function stopGeneration() {
+      document.getElementById('btnStop').style.display = 'none';
+      document.getElementById('btnSend').style.display = 'flex';
+    }
+
+    function toggleFilePopup() {
+      document.getElementById('filePopup').classList.toggle('show');
+    }
+
+    function addFileTag(name) {
+      const row = document.getElementById('inputTagsRow');
+      const tag = document.createElement('span');
+      tag.className = 'input-tag file';
+      tag.innerHTML = '📄 ' + name + ' <span class="tag-close" onclick="this.parentElement.remove()">✕</span>';
+      row.appendChild(tag);
+      document.getElementById('filePopup').classList.remove('show');
+    }
+
+    function selectCommand(cmd) {
+      const ta = document.getElementById('chatTextarea');
+      ta.value = cmd + ' ';
+      ta.focus();
+      document.getElementById('cmdPopup').classList.remove('show');
+      handleTextareaInput();
+    }
+
+    // ===== Multi-Agent Block =====
+    function toggleMultiAgent(block) {
+      block.classList.toggle('collapsed');
+      const arrow = block.querySelector('.ma-header .arrow');
+      arrow.textContent = block.classList.contains('collapsed') ? '▶' : '▾';
+    }
+    function toggleSubAgent(row) {
+      if (row.classList.contains('queued')) return; // 排队中不可展开
+      const detail = row.nextElementSibling;
+      const arrow = row.querySelector('.ma-arrow');
+      if (!detail || !detail.classList.contains('ma-sub-detail')) return;
+      const show = detail.style.display !== 'block';
+      detail.style.display = show ? 'block' : 'none';
+      detail.classList.toggle('show', show);
+      arrow.textContent = show ? '▾' : '▶';
+    }
+
+    // ===== Tool Card Collapse =====
+    function toggleToolCard(header) {
+      const card = header.closest('.tool-card');
+      // AWAITING_APPROVAL 始终展开，不可折叠
+      if (card.classList.contains('awaiting')) return;
+      card.classList.toggle('collapsed');
+      const arrow = header.querySelector('.arrow');
+      if (arrow) arrow.textContent = card.classList.contains('collapsed') ? '▶' : '▾';
+    }
+
+    // ===== Tool Approval =====
+    function approveTool(cardId) {
+      const card = document.getElementById(cardId);
+      card.querySelector('.tool-approval').style.display = 'none';
+      card.querySelector('.state').textContent = '🔄 EXECUTING';
+      card.querySelector('.state').className = 'state state-executing';
+      setTimeout(() => {
+        card.querySelector('.state').textContent = '✅ DONE';
+        card.querySelector('.state').className = 'state state-done';
+      }, 2000);
+    }
+
+    function approveToolSession(cardId) {
+      approveTool(cardId);
+    }
+
+    function rejectTool(cardId) {
+      const card = document.getElementById(cardId);
+      card.querySelector('.tool-approval').style.display = 'none';
+      card.querySelector('.state').textContent = '🚫 REJECTED';
+      card.querySelector('.state').className = 'state state-rejected';
+    }
+
+    // ===== Options =====
+    function selectOption(el, letter) {
+      el.parentElement.querySelectorAll('.opt-item').forEach(i => i.classList.remove('selected'));
+      el.classList.add('selected');
+      el.closest('.options-block').querySelector('.selected-label').textContent = '已选: ' + letter;
+    }
+
+    // ===== Plan Card =====
+    // 暂停/继续跟随全局发送/停止按钮，PlanCard 仅展示步骤进度
+    function togglePlanCard() {
+      // EXECUTING 状态下不可折叠
+      if (document.getElementById('planStepExecuting')) return;
+      const arrow = document.getElementById('planArrow');
+      const body = document.getElementById('planBody');
+      const collapsed = body.style.display === 'none';
+      if (collapsed) {
+        body.style.display = '';
+        arrow.textContent = '▾';
+      } else {
+        body.style.display = 'none';
+        arrow.textContent = '▶';
+      }
+    }
+    function deletePlanStep(el) {
+      const step = el.closest('.plan-step');
+      step.classList.remove('step-pending');
+      step.classList.add('step-deleted');
+      step.querySelector('.status').textContent = '🗑';
+      el.remove();
+    }
+
+    // ===== Approval Dialog =====
+    function closeDialog(id, approved) {
+      document.getElementById(id).classList.remove('show');
+    }
+
+    // ===== Sessions =====
+    function filterSessions(query) {
+      // Simulated search
+    }
+
+    // ===== Sparkline =====
+    (function drawSparkline() {
+      const el = document.getElementById('sparkline');
+      if (!el) return;
+      const data = [5,8,12,7,15,10,18,20,25,22,30,28,35,32,40,38,45,42,50,48,55,52,58,60,62,65,63,68,70,72];
+      const max = Math.max(...data);
+      el.innerHTML = data.map(v => {
+        const h = Math.max(2, (v / max) * 76);
+        return '<div class="bar" style="height:' + h + 'px;" title="' + v + 'K tokens"></div>';
+      }).join('');
+    })();
+
+    // ===== Sessions Search =====
+    let searchTimer = null;
+    function filterSessions(query) {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => {
+        const cards = document.querySelectorAll('#page-sessions .session-card');
+        let visible = 0;
+        cards.forEach(card => {
+          const title = card.querySelector('.s-title')?.textContent || '';
+          const match = !query || title.toLowerCase().includes(query.toLowerCase());
+          card.style.display = match ? '' : 'none';
+          if (match) visible++;
+        });
+        const emptyEl = document.getElementById('sessionsEmpty');
+        if (emptyEl) emptyEl.style.display = visible === 0 ? '' : 'none';
+      }, 300);
+    }
+    function now() {
+      const d = new Date();
+      return d.getHours().toString().padStart(2,'0') + ':' + d.getMinutes().toString().padStart(2,'0');
+    }
+
+    function escapeHtml(s) {
+      const div = document.createElement('div');
+      div.textContent = s;
+      return div.innerHTML;
+    }
+
+    // ===== Keyboard =====
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') {
+        document.getElementById('cmdPopup').classList.remove('show');
+        document.getElementById('filePopup').classList.remove('show');
+        document.getElementById('approvalDialog').classList.remove('show');
+      }
+    });
+
+    // ===== Click outside to close popups =====
+    document.addEventListener('click', function(e) {
+      if (!e.target.closest('.input-area')) {
+        document.getElementById('cmdPopup').classList.remove('show');
+        document.getElementById('filePopup').classList.remove('show');
+      }
+    });
 </script>
+
 </body>
 </html>

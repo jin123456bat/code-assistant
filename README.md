@@ -18,7 +18,7 @@
 
 - 9 个内置工具（读文件/写文件/编辑文件/执行 Shell/列目录/搜索内容/读诊断/调用 Skill/派生子 Agent）和 5
   个计划任务管理工具（创建计划/查看步骤/删除步骤/重排步骤/标记完成）
-- Plan Mode：`/plan` 命令生成可审查的执行计划，逐步确认后执行
+- Plan Mode：`/plan` 命令生成执行计划，自动连续执行，用户可随时暂停干预
 - **LLM 自动规划（规划中）**：System Prompt 复杂度预判 + 轮次预警 + `createPlan` 工具让 LLM 主动拆分超长任务
 - MCP 支持：连接外部工具服务（数据库、文件系统、API）
 - Skill 系统：兼容 Claude Code SKILL.md 格式，自定义 Agent 能力

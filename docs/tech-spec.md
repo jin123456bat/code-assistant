@@ -150,7 +150,7 @@ AgentSession
 ├── rollbackTo(messageId: String)         // 回退：标记 messageId 之后的消息 deleted=true，保留之前历史
 └── totalTokens: TokenUsage                // 输入/输出 token 累计
 
-AgentState = IDLE | PROCESSING | AWAITING_APPROVAL | EXECUTING | CANCELLED | ERROR | PAUSED
+AgentState = IDLE | PROCESSING | AWAITING_APPROVAL | EXECUTING | CANCELLED | ERROR
 
 Message:
 ├── id: String
@@ -191,7 +191,7 @@ ToolInfo (ToolRegistry 内部类):
 └── usage: String                      // 使用示例
 
 工具数据类 (ToolModels.kt):
-  9 个内置工具 @JsonClassDescription 注解的 data class + 5 个计划任务管理工具（createPlan/listTasks/deleteTask/reorderTasks/markTaskDone），通过 SDK toolFromClass() 生成 JSON Schema。
+  9 个内置工具 @JsonClassDescription 注解的 data class + 5 个计划任务管理工具（createPlan/listSteps/deleteStep/reorderSteps/markStepDone），通过 SDK toolFromClass() 生成 JSON Schema。
   工具执行分发 → ToolExecutor.kt 通过 when(toolName) 路由。
 
 ToolInput.kt:
@@ -217,11 +217,11 @@ description 应包含的上限声明：
 | `Write`        | `内容最多 3000 行。超过此限制的操作会被拒绝。`                                                                                  |
 | `Skill`        | `执行指定 Skill。LLM 根据用户需求自主判断触发时机，将 SKILL.md 内容作为消息注入 conversation。`                                            |
 | `Task`         | `子 Agent 结果摘要最多 2000 tokens。完整执行过程保存为独立 Session。`                                                            |
-| `createPlan`   | `创建执行计划，最多 20 步。计划创建后自动开始执行，LLM 可用 listTasks/deleteTask/reorderTasks 管理。`                                    |
-| `listTasks`    | `查看当前计划的所有步骤及状态，无参数。`                                                                                        |
-| `deleteTask`   | `删除指定步骤（仅 PENDING/ERROR 状态可删）。`                                                                              |
-| `reorderTasks` | `重排剩余 PENDING 步骤的执行顺序，传入新的 stepId 序列。`                                                                       |
-| `markTaskDone` | `将指定步骤标记为 DONE（PENDING/EXECUTING/ERROR 状态均可标记）。LLM 确认步骤已通过其他方式完成时调用。`                                        |
+| `createPlan`   | `创建执行计划，最多 20 步。计划创建后自动开始执行，LLM 可用 listSteps/deleteStep/reorderSteps 管理。`                                    |
+| `listSteps`    | `查看当前计划的所有步骤及状态，无参数。`                                                                                        |
+| `deleteStep`   | `删除指定步骤（仅 PENDING 状态可删）。`                                                                                    |
+| `reorderSteps` | `重排剩余 PENDING 步骤的执行顺序，传入新的 stepId 序列。`                                                                       |
+| `markStepDone` | `将指定步骤标记为 DONE（PENDING/EXECUTING 状态均可标记）。LLM 确认步骤已通过其他方式完成时调用。`                                              |
 
 > **双重告知原则：** 上限同时存在于工具描述（事前，LLM 调用前就知道）和返回值截断标注（事后，LLM
 > 拿到结果后确认）。两者不可互相替代——事前告知防止误判，事后标注确保发现遗漏。
@@ -442,28 +442,32 @@ ToolCallCard
 ├── setState(state: ToolCallState, result: String?, durationMs: Long?)
 ├── setRejected()                          // 用户拒绝审批
 ├── setCancelled()                         // 用户取消
-├── isExpanded: Boolean                    // 折叠/展开
+├── isExpanded: Boolean = false            // 折叠/展开，默认折叠。AWAITING_APPROVAL 始终 true（不可折叠）；EXECUTING 始终 true（不可折叠）
+├── toggleExpanded()                       // 切换折叠/展开。头部点击触发，箭头 ▾/▶ 切换。AWAITING_APPROVAL/EXECUTING 状态下忽略操作
 ├── renderDiff(oldText: String, newText: String)  // ⏳ 规划中：Edit 成功后渲染可视化 Diff
 │                                               //   用 SimpleDiff（LCS 算法），ADD 绿色/DEL 红色/CTX 灰色
-└── 渲染: JPanel (带状态图标 + 参数折叠 + 结果滚动区 + 可视化 Diff + 底部耗时)
+└── 渲染: JPanel (带箭头 + 状态图标 + 参数区 + 结果滚动区(max-height=240px) + 可视化 Diff + 底部耗时。折叠态仅显示头部)
 
 PlanCard
 ├── 构造: PlanCard(plan: Plan)
 ├── setStepState(stepId: String, state: StepState)   // 更新单步状态
 ├── setCurrentStepIndex(index: Int)                  // 高亮当前步骤
-├── onTaskDeleted: ((stepId: String) -> Unit)?       // 用户删除单步回调 → PlanExecutor.deleteTask()
+├── isExpanded: Boolean = false                      // 折叠/展开，默认折叠。EXECUTING 状态下自动展开且忽略折叠操作（强制展开）
+├── toggleExpanded()                                 // 切换折叠/展开。折叠态显示标题行+任务摘要+当前执行中步骤（EXECUTING），无执行中步骤时仅显示标题+摘要+进度
+├── onStepDeleted: ((stepId: String) -> Unit)?       // 用户删除单步回调 → PlanExecutor.deleteStep()
 └── 渲染: JPanel (计划摘要 + 步骤列表，单步行末 [✕] 仅 PENDING 和 ERROR 状态可见)
-// PlanCard 仅负责 UI 展示和单步删除入口。不提供继续/重试/跳过/取消等全局按钮。
-// 计划任务管理由 LLM 通过 listTasks/deleteTask/reorderTasks 工具自主完成。
+// PlanCard 仅负责 UI 展示步骤列表和 PENDING 步骤行末的单步删除入口。不提供暂停/继续/删除计划等全局按钮——暂停/继续跟随全局发送/停止按钮（用户点发送按钮后变为停止按钮 ⏹，点击停止即暂停）。
+// 计划任务管理由 LLM 通过 listSteps/deleteStep/reorderSteps/markStepDone 工具自主完成。
+// 头部可点击折叠/展开步骤列表。EXECUTING 状态下不可折叠（确保用户可见当前执行步骤）。全部步骤 DONE/DELETED 后 PlanCard 消失。
 ```
 
 ---
 
 ### 2.7 PlanExecutor
 
-**职责：** 计划执行器——生成计划、自动执行步骤、持久化。所有步骤自动连续执行，无需用户手动推进。
+**职责：** 计划执行器——生成计划、自动执行步骤、持久化。默认自动连续执行，用户可随时暂停干预。
 
-**生命周期：** 创建计划后自动开始，逐步执行直到全部完成或全部步骤被删除。
+**生命周期：** 创建计划后自动开始，逐步执行直到全部 DONE 或被用户终止（DELETED）。
 
 **入口：** 用户 `/plan` 命令 或 LLM 通过 `createPlan` 工具主动创建。两者触发 `generatePlan()` 流程一致。
 
@@ -473,10 +477,14 @@ PlanExecutor
 ├── generatePlan(task: String): Plan       // /plan 或 createPlan → LLM 输出 → 4 层解析 → Plan
 ├── createPlanFromTool(task: String, steps: List<PlanStepInput>): Plan  // LLM 通过 createPlan 工具主动创建
 ├── executeNextStep(): StepResult          // 自动执行下一步，完成后自动继续
-├── deleteTask(stepId: String)             // 用户或 LLM 删除单步（仅 PENDING/ERROR），剩余步骤自动继续
-├── reorderTasks(stepIds: List<String>)    // LLM 重排剩余 PENDING 步骤顺序
-├── listTasks(): List<PlanStep>            // LLM 查看当前计划状态
+├── pause()                                // 暂停（内部 API，触发入口为全局停止按钮 ⏹，非 PlanCard 独立按钮）→ 完成当前 Step 后停止自动推进，Plan 保持 EXECUTING
+├── resume()                               // 继续（内部 API，触发入口为全局发送按钮，非 PlanCard 独立按钮）→ 恢复自动连续执行
+├── deletePlan()                           // 终止（内部 API，由 LLM 通过工具自主调用）→ 所有剩余步骤标记 DELETED，Plan 标记 DELETED
+├── deleteStep(stepId: String)             // 用户或 LLM 删除单步（仅 PENDING），剩余步骤自动继续
+├── reorderSteps(stepIds: List<String>)    // LLM 重排剩余 PENDING 步骤顺序
+├── listSteps(): List<PlanStep>            // LLM 查看当前计划状态
 ├── currentPlan: Plan?                     // 当前计划
+├── isPaused: Boolean                      // 是否处于暂停状态（非 Plan 状态，Plan 保持 EXECUTING）
 │
 └── Plan 解析流程 (4 层):
     1. 提取 ```json``` → Gson → Plan
@@ -486,7 +494,7 @@ PlanExecutor
 
 Plan:
 ├── id: String
-├── status: EXECUTING | COMPLETED | CANCELLED
+├── status: PENDING | EXECUTING | DONE | DELETED
 ├── summary: String                        // 一句话描述
 ├── steps: List<PlanStep>
 ├── currentStepIndex: Int                  // 当前执行到第几步 (0-based)
@@ -498,14 +506,13 @@ PlanStep:
 ├── description: String                    // 步骤描述
 ├── tool: String                           // 建议工具名。LLM 应优先使用但不强制
 ├── files: List<String>                    // 涉及文件（含行号 "UserService.kt:40-60"）
-├── status: PENDING | EXECUTING | DONE | ERROR | DELETED
+├── status: PENDING | EXECUTING | DONE | DELETED
 ├── result: String?                        // 执行结果
-├── retryCount: Int
-└── deletedBy: USER | LLM?                 // 谁删的，null 表示未删除
+└── retryCount: Int
 
 StepResult:
 ├── stepId: String
-├── status: DONE | ERROR
+├── status: DONE | DELETED
 ├── output: String                         // LLM 输出
 └── toolCalls: List<ToolCallRecord>        // 该步骤使用的工具调用记录
 ```
@@ -901,18 +908,25 @@ ChatViewModel.sendMessage("/plan 重构 UserService", ...)
     → 自动开始执行
 
 PlanExecutor.executeNextStep() 自动循环:
+  → 检查 isPaused，若 true 则跳过本次执行
   → 获取 nextStep (currentStepIndex 对应的 PENDING step)
   → 构建 stepPrompt: "执行步骤: {step.description}。文件: {step.files}。工具: {step.tool}"
   → AgentLoop.run(stepPrompt)
   → 更新 step.status + step.result
   → currentStepIndex++
-  → 自动继续执行下一步（无暂停）
-  → 全部完成 → PlanCard 消失
+  → 自动继续执行下一步
+  → 全部 DONE → PlanCard 消失
+
+用户暂停:
+  → 点全局停止按钮(⏹) → PlanExecutor.pause() → isPaused = true
+  → PlanExecutor 完成当前 Step 后停止
+  → 点全局发送按钮 → PlanExecutor.resume() → isPaused = false → 恢复自动循环
+  → LLM 调用 deleteStep 删除所有步骤 → PlanExecutor.deletePlan() → 剩余步骤 DELETED，Plan DELETED
 
 LLM 通过工具管理计划:
-  listTasks()    → 查看步骤状态
-  deleteTask(id) → 删除 PENDING/ERROR 步骤，执行时自动跳过
-  reorderTasks([id...]) → 重排 PENDING 步骤顺序
+  listSteps()    → 查看步骤状态
+  deleteStep(id) → 删除 PENDING 步骤，执行时自动跳过
+  reorderSteps([id...]) → 重排 PENDING 步骤顺序
 ```
 
 ---
@@ -975,8 +989,7 @@ LLM 通过工具管理计划:
         ],
         "status": "DONE",
         "result": "成功读取 156 行",
-        "retryCount": 0,
-        "deletedBy": null
+        "retryCount": 0
       },
       {
         "id": "step-2",
@@ -986,8 +999,7 @@ LLM 通过工具管理计划:
           "UserService.kt"
         ],
         "status": "PENDING",
-        "retryCount": 0,
-        "deletedBy": null
+        "retryCount": 0
       }
     ],
     "createdAt": "2026-06-24T14:30:00Z",
@@ -1451,7 +1463,7 @@ STDOUT:
 计划已持久化，自动开始执行。
 ```
 
-### listTasks
+### listSteps
 
 ```
 当前计划: {summary}
@@ -1461,21 +1473,20 @@ STDOUT:
 1. ✅ {step1.description} — DONE
 2. 🔄 {step2.description} — EXECUTING
 3. ⬜ {step3.description} — PENDING
-4. ❌ {step4.description} — ERROR
-5. 🗑 {step5.description} — DELETED (by: {deletedBy})
+4. 🗑 {step4.description} — DELETED
 ```
 
-### deleteTask
+### deleteStep
 
 ```
 ✅ 已删除步骤: {stepId} — "{description}"
 剩余步骤: {remainingCount} 步，继续自动执行。
 
-拒绝（步骤非 PENDING/ERROR 状态）:
-❌ 无法删除步骤 {stepId}：当前状态为 {status}，仅 PENDING/ERROR 状态的步骤可删除。
+拒绝（步骤非 PENDING 状态）:
+❌ 无法删除步骤 {stepId}：当前状态为 {status}，仅 PENDING 状态的步骤可删除。
 ```
 
-### reorderTasks
+### reorderSteps
 
 ```
 ✅ 已重排剩余步骤:
@@ -1491,7 +1502,7 @@ STDOUT:
 提供的: step-1, step-5
 ```
 
-### markTaskDone
+### markStepDone
 
 ```
 ✅ 已将步骤 {stepId} — "{description}" 标记为 DONE。
