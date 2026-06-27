@@ -232,7 +232,7 @@ description 应包含的上限声明：
 - Write / Edit → `invokeAndWait { WriteCommandAction }`
 - Bash → Background Thread（`ProcessHandler` + 实时 `onOutput` 回调）
 - Task → `MultiAgentManager.spawn()`
-- CreatePlan / ListTasks / DeleteTask / ReorderTasks / MarkTaskDone → `PlanExecutor`（计划任务管理）
+- createPlan / listSteps / deleteStep / reorderSteps / markStepDone → `PlanExecutor`（计划任务管理）
 
 **超时机制：** 每个工具都包含必填的 `timeout` 参数（秒），由 LLM 在 tool call 时传入。
 0=不限。Bash 超时时强制 `destroyForcibly()` 终止进程。其他 I/O 工具的 timeout
@@ -1066,10 +1066,10 @@ Agent 设置已迁移到 IDE SettingsConfigurable（Settings > Tools > Code Assi
 ```
 AppSettingsService（SettingsConfigurable 读写）
 ├── apiKey: String                               // PasswordSafe 存储
-├── model: String = "deepseek-v4-pro"            // 下拉选择（V4 Flash / V4 Pro）
+├── model: String = "deepseek-v4-pro"            // 固定
 ├── completionEnabled: Boolean = true             // 代码补全开关
 ├── commitPrompt: String                          // Commit 消息模板（{diff} 占位）
-├── maxAgentTurns: Int                      // 最大轮次，默认 20。每轮 = 一次 API 调用（含续写）。0 时内部转为 Int.MAX_VALUE（不限轮次）
+├── maxAgentTurns: Int                      // 最大轮次，默认 20。每轮 = 一次用户消息触发的 API 调用。0 时内部转为 Int.MAX_VALUE（不限轮次）
 └── maxConcurrentAgents: Int (default 3)          // 多 Agent 并发上限
 ```
 

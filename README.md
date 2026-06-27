@@ -94,7 +94,7 @@ Platform Plugin 2.2.1
 | `↑` / `↓`          | `↑` / `↓`     | 补全候选切换         |
 | `Enter`            | `Enter`       | 发送消息           |
 | `Shift+Enter`      | `Shift+Enter` | 输入框换行          |
-| `Escape`           | `Escape`      | 关闭 Popup       |
+| `Escape`           | `Escape`      | 关闭 Popup（详见 [agent.md](docs/agent.md#快捷键)） |
 | `Ctrl+Shift+N`     | `Cmd+Shift+N` | 新建会话           |
 | `↑`（空输入框）          | `↑`（空输入框）     | 填充上一条消息        |
 
@@ -117,7 +117,7 @@ Platform Plugin 2.2.1
 | 配置项           | 默认值               | 说明                  |
 |---------------|-------------------|---------------------|
 | API Key       | —                 | 从 PasswordSafe 安全存储 |
-| Model         | `deepseek-v4-pro` | V4 Flash / V4 Pro   |
+| Model         | `deepseek-v4-pro` | 固定 |
 | 代码补全          | 启用                | 开关                  |
 | 补全 max_tokens | 256               | 范围 1-1024           |
 | Commit Prompt | 默认模板              | 自定义模板，`{diff}` 占位   |
