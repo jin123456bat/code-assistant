@@ -236,6 +236,7 @@ SessionIndex:
 ├── updatedAt: Instant
 ├── messageCount: Int
 ├── totalTokens: Long                         // inputTokens + outputTokens 累加值，从 API usage 返回值获取
+├── parentTotalTokens: Long?                   // 聚合所有子 session 的 totalTokens（父 session 专用），null 表示无子 session
 ├── toolCallCount: Int
 ├── parentId: String?                          // 子会话关联父会话 ID
 └── hasActivePlan: Boolean

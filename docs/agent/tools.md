@@ -166,3 +166,57 @@ ToolInfo (ToolRegistry 内部类):
 
 工具数据类定义在 `ToolModels.kt`，使用 `@JsonClassDescription` 注解的 data class + `ToolInput.kt`
 中的参数类，通过 Anthropic SDK 的 `toolFromClass()` 生成 JSON Schema。所有工具共享 `timeout` 公共字段。
+
+## 九、ToolResult 数据结构
+
+每次工具执行后返回统一的 `ToolResult`，由 `ToolExecutor` 构造，写入 `params.messages` 回传 LLM。
+
+### 接口定义
+
+```
+ToolResult:
+├── toolUseId: String            // 对应的 tool_use id
+├── toolName: String             // 工具名（Read, Write, Edit, ...）
+├── content: String              // 返回给 LLM 的内容，截断策略见 §四
+├── isError: Boolean = false     // true 时 content 为错误信息
+├── success: Boolean             // 工具执行是否成功
+├── durationMs: Long             // 执行耗时
+└── state: ToolResultState       // DONE | CANCELLED | ERROR
+
+ToolResultState = DONE | CANCELLED | ERROR
+```
+
+### 字段说明
+
+| 字段           | 类型      | 说明                                                                                      |
+|--------------|---------|-----------------------------------------------------------------------------------------|
+| `toolUseId`  | String  | 对应 LLM 请求中的 `tool_use.id`，用于匹配请求和响应                                                     |
+| `toolName`   | String  | 工具名称，与 ToolRegistry 注册名一致                                                               |
+| `content`    | String  | 返回内容，经过截断处理（各行/字数限制见 §四）。格式遵循 [tool-return-formats.md](../specs/tool-return-formats.md) |
+| `isError`    | Boolean | 是否应作为错误呈现给 LLM。`true` 时 content 包含错误描述和恢复提示                                             |
+| `success`    | Boolean | 执行是否成功。被拒绝/取消时也为 `false`                                                                |
+| `durationMs` | Long    | 执行耗时（毫秒），用于 ToolCallCard 展示                                                             |
+
+### 各工具的结果特征
+
+| 工具        | content 特征                   | isError=true 的触发条件          |
+|-----------|------------------------------|-----------------------------|
+| Read      | 文件内容 + 头部/尾部标注               | 文件不存在、读取失败                  |
+| Write     | 写入成功确认 + 行数/字节数              | 内容过长、写入异常                   |
+| Edit      | 修改前后 3 行对比 + 自动 readLints 结果 | oldString 未找到、匹配多处、stamp 冲突 |
+| Bash      | 退出码 + stdout/stderr，错误优先格式   | 退出码非零、超时                    |
+| Glob      | 目录树 + 条目统计                   | 目录不存在                       |
+| Grep      | 匹配行列表 + 文件:行号                | 无（0 条匹配不算错误）                |
+| readLints | 诊断列表（按 severity 排序）          | 索引未就绪                       |
+| Task      | 子任务摘要 + sub-session ID       | 子 Agent 崩溃、超时               |
+| Skill     | SKILL.md 正文                  | Skill 不存在                   |
+| MCP 工具    | MCP Server 返回的原始内容           | MCP 调用失败、Server 断连          |
+
+### 在 Agent Loop 中的流转
+
+```
+ToolExecutor.execute(toolUse)
+  → 构造 ToolResult(content = ..., isError = ..., success = ...)
+  → AgentLoop 将 ToolResult 追加到 params.messages 作为 tool_result 角色
+  → LLM 在下一轮 API 调用中看到 tool_result，根据 content/isError 决定下一步
+```

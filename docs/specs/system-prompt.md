@@ -107,7 +107,7 @@ systemContent = [
   // 上限声明规则见 2.3 ToolRegistry > 工具描述中的上限声明。
 
   SkillManager.getSystemPromptExtension(),
-  // "## 可用 Skills\n- code-review: 审查代码质量 (触发词: review, 审查)\n- refactor: 重构代码 (触发词: 重构, refactor)"
+  // "## 可用 Skills\n- code-review: 审查代码质量 (命令: /review)\n- refactor: 重构代码 (命令: /refactor)"
 
   SkillManager.getByCommand(command)?.content,
   // 仅当用户输入 /command 时注入对应的 SKILL.md 正文。

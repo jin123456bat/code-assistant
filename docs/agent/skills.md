@@ -69,8 +69,10 @@ tools:
 
 ### LLM 自动触发
 
-LLM 调用 `Skill` 工具（参数：skill 名称）→ `SkillManager` 加载 SKILL.md → 正文作为消息注入
-conversation → LLM 下一轮按指令执行。后续不再重复注入（避免 context 膨胀），compact 时被调用过的 skill
+LLM 根据 System Prompt 末尾注入的 Skill 列表（`name` + 截断 `description`）**自主判断**触发时机，调用
+`Skill` 工具（参数：skill 名称）→ `SkillManager` 加载 SKILL.md → 正文作为消息注入
+conversation → LLM 下一轮按指令执行。不存在单独的"触发词"字段——LLM 通过语义匹配 `name` 和
+`description` 决定何时调用。后续不再重复注入（避免 context 膨胀），compact 时被调用过的 skill
 重新注入。
 
 ### 用户手动调用
@@ -95,12 +97,12 @@ Skills 页面提供 Skill 列表管理界面：
 │  ┌──────────────────────────────────────────────┐│
 │  │ [✅] code-review                      [详情] ││ ← 启用/禁用开关
 │  │      审查代码质量，查找 bug 和安全问题        ││
-│  │      触发词: review, 审查, 检查代码          ││
+│  │      命令: /review                         ││
 │  │      所需工具: Read, Bash            ││
 │  │                                               ││
 │  │ [✅] refactor                         [详情] ││
 │  │      重构代码结构，改进可读性                 ││
-│  │      触发词: 重构, refactor                  ││
+│  │      命令: /refactor                       ││
 │  │      所需工具: Read, Edit, Write  ││
 │  │                                               ││
 │  │ [❌] docker-helper              ⚠ 工具缺失   ││ ← 禁用+警告

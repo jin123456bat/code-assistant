@@ -12,20 +12,7 @@
 
 三层环环相扣：**预防**最优（不产生问题），**预警**次之（问题刚出现就提醒），**兜底**保底（问题已发生但自动修复）。
 
-## 二、Token 预算感知
-
-System Prompt 中动态追加一行 Token 使用情况，让 LLM 主动控制输出长度：
-
-```
-当前上下文: 已用 ~N% (约 X / Y tokens)。如接近上限，请精简输出、减少不必要的 tool call。
-```
-
-- **显示阈值**：实际 token > 模型上限的 **50%** 时开始显示
-- **超过 70%** 时措辞升级为"⚠️ 上下文即将耗尽，请立即收尾"（compact 阈值为 70%，此警告在 compact 触发边缘提醒
-  LLM 主动收尾）
-- 不阻断 Agent Loop，仅作为上下文提示
-
-## 三、Auto-Compact
+## 二、Auto-Compact
 
 对齐 Claude Code：当会话消息历史接近模型上下文上限时，自动将旧消息压缩为摘要，避免消息被粗暴截断导致
 LLM 丢失关键上下文。
@@ -97,7 +84,7 @@ compact 后从头重建上下文时：
 | Tools 定义           | 不会             | 是，每次从 `ToolRegistry.generateToolDescriptions()` | 每个工具的 JSON Schema + 上限声明                           |
 | Skill 注入正文         | 会参与压缩          | compact 后从磁盘重新注入（对齐 Claude Code）                | 确保关键约束不因摘要质量丢失。正文 ≤ 2000 tokens 以减少重新注入开销          |
 
-## 四、max_tokens 自动续写
+## 三、max_tokens 自动续写
 
 当 LLM 在输出中途达到 `max_tokens` 限制时，Agent 自动发送一条 `role=USER, content="继续"` 消息，让 LLM
 从中断处继续输出。
@@ -116,11 +103,11 @@ while (turn < maxTurns && !cancelled):
 | 规则       | 说明                                                                    |
 |----------|-----------------------------------------------------------------------|
 | 不持久化     | "继续"消息不持久化到 `session.messages`（避免污染会话历史），仅在当前 `params.messages` 中临时追加 |
-| 不增加 turn | 自动续写不增加 `turn` 计数，不计入 `maxAgentTurns` 限制                              |
+| 不增加 turn | 自动续写不增加 `turn` 计数，不计入 `maxTurns` 限制                                   |
 | 上限 5 次   | 最多连续续写 5 次，防止 LLM 陷入无限输出循环。`end_turn` 后 `continueStreak` 计数器重置        |
 | 生命周期     | 仅在当前会话生命周期内有效。重启 IDE 后不自动续写，被截断消息保持原样                                 |
 
-## 五、/clear 和 /new
+## 四、/clear 和 /new
 
 `/clear` 和 `/new` 行为完全一致——重置当前会话。对齐 Claude Code 的 `/clear` 语义。
 
@@ -135,7 +122,7 @@ while (turn < maxTurns && !cancelled):
 
 **为什么复用 session 而不是新建：** 用户通常只是想让上下文干净一点，频繁新建 session 文件会堆积。
 
-## 六、Token 估算
+## 五、Token 估算
 
 整个项目使用统一的 Token 估算方法，避免各处用法不一致。
 

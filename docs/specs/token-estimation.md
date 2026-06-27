@@ -41,14 +41,3 @@ fun estimateTokens(text: String): Int {
 `compactThreshold = 0.7`（即 1M x 0.7 = 700K tokens）：token 估算误差 ±20%，最坏低估时 0.7/0.8 = 87.5%
 仍在 1M 窗口内；若设 0.8 则最坏已达 100%。
 
-## 上下文 Token 预算提示
-
-System Prompt 中动态追加一行 Token 使用情况，让 LLM 主动控制输出长度：
-
-```
-当前上下文: 已用 ~N% (约 X / Y tokens)。如接近上限，请精简输出、减少不必要的 tool call。
-```
-
-- 显示阈值：实际 token > 模型上限的 50% 时开始显示
-- 超过 70% 时措辞升级为"⚠️ 上下文即将耗尽，请立即收尾"
-- 不阻断 Agent Loop，仅作为上下文提示

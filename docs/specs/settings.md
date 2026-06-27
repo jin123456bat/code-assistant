@@ -16,7 +16,7 @@ AppSettingsService（SettingsConfigurable 读写）
 ├── model: String = "deepseek-v4-pro"            // 固定
 ├── completionEnabled: Boolean = true             // 代码补全开关
 ├── commitPrompt: String                          // Commit 消息模板（{diff} 占位）
-├── maxAgentTurns: Int                      // 最大轮次，默认 20。每轮 = 一次用户消息触发的 API 调用。0 时内部转为 Int.MAX_VALUE（不限轮次）
+├── maxTurns: Int                      // 最大轮次，默认 20。每轮 = 一次用户消息触发的 API 调用。0 时内部转为 Int.MAX_VALUE（不限轮次）
 └── maxConcurrentAgents: Int (default 3)          // 多 Agent 并发上限
 ```
 
@@ -28,7 +28,7 @@ AppSettingsService（SettingsConfigurable 读写）
 | `model`               | String  | `deepseek-v4-pro` | `PropertiesComponent` | 当前固定为 DeepSeek V4 Pro，不可修改                                      |
 | `completionEnabled`   | Boolean | `true`            | `PropertiesComponent` | 代码补全总开关                                                         |
 | `commitPrompt`        | String  | —                 | `PropertiesComponent` | Commit 消息生成模板，`{diff}` 为 diff 内容占位符                             |
-| `maxAgentTurns`       | Int     | `20`              | `PropertiesComponent` | Agent 每轮最大 API 调用次数。每轮 = 一次用户消息触发的 API 调用（续写不计数）。设为 0 时内部转为不限轮次 |
+| `maxTurns`            | Int     | `20`              | `PropertiesComponent` | Agent 每轮最大 API 调用次数。每轮 = 一次用户消息触发的 API 调用（续写不计数）。设为 0 时内部转为不限轮次 |
 | `maxConcurrentAgents` | Int     | `3`               | `PropertiesComponent` | 多 Agent 模式下的并发上限                                                |
 
 ## 存储方式
