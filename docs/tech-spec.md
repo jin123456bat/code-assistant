@@ -836,7 +836,7 @@ ChatInputArea.enterPressed()
     → AgentSession.setState(PROCESSING)
     → AgentLoop.run(userContent)
         → while (turn < maxTurns && !cancelled):
-            → turn++  // 所有 API 调用统一计数（含续写），在循环顶部执行
+            → if (stopReason != "max_tokens") turn++  // 仅用户消息触发的正常 API 调用计数，续写不增加 turn
             → 构建 params：
                 system = SystemPromptBuilder.build(toolRegistry, skillManager)
                 messages = session.messages       // 每轮从 session.messages 重建
@@ -861,8 +861,8 @@ ChatInputArea.enterPressed()
                                            emit Error + 退出 while
                                          else:
                                            params.messages += UserMessage("继续") → continue while
-                                         （续写计入 turn：turn++ 在 while 顶部统一执行，对所有请求一视同仁。
-                                         "继续"不持久化，仅当前会话生命周期内有效，重启 IDE 后不自动续写）
+                                         （续写不增加 turn：while 顶部跳过 turn++。"继续"不持久化，
+                                         仅当前会话生命周期内有效，重启 IDE 后不自动续写）
                       "stop_sequence"  → emit(TurnCompleted(usage)) → 退出 while（尾部标注）
               }
             → for each toolUse:
