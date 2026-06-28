@@ -241,10 +241,15 @@ STDOUT:
 
 ---
 
-## Task
+## Agent
 
 ```
-子任务: {taskSummary}
+启动成功:
+✅ 已启动子 Agent: {prompt}
+结果将通过 sub-session #{sessionId} 返回。
+
+完成后回调:
+🔧 Agent 完成: {prompt}
 状态: {completed | failed | cancelled}
 结果摘要:
 {summary (≤ 2000 tokens)}
@@ -334,3 +339,202 @@ STDOUT:
 ```
 
 PAUSED/EXECUTING 状态均可标记。
+
+---
+
+## WebSearch
+
+```
+找到 {matchCount} 条搜索结果:
+1. {title1}
+   {url1}
+2. {title2}
+   {url2}
+...
+
+无结果:
+未找到与 "{query}" 相关的结果。请尝试:
+- 使用更通用的搜索词
+- 检查搜索词拼写
+- 尝试不同的表述方式
+```
+
+上限：无硬性上限，服务器端控制返回数量。15 分钟内相同查询返回缓存结果。
+
+---
+
+## WebFetch
+
+```
+成功:
+{基于 prompt 从页面提取的信息}
+
+HTTP 错误:
+错误: 无法获取 "{url}" (HTTP {statusCode})。页面可能不存在或需要认证。
+
+重定向:
+重定向: {url} → {redirectUrl}
+请使用重定向后的 URL 重新调用 WebFetch。
+
+内容无法提取:
+错误: 无法从 "{url}" 提取内容。页面可能为 PDF、二进制文件或需要 JavaScript 渲染。
+```
+
+限制：HTTP 自动升级为 HTTPS。跨主机重定向返回给 LLM 而非自动跟随。15 分钟内相同 URL 返回缓存结果。
+
+---
+
+## AskUserQuestion
+
+无独立返回值格式——用户的选择结果直接追加到 `params.messages` 中，作为 tool_result 的 content 字段：
+
+```
+用户回答:
+1. {question1.header}: {selectedOption1.label} — {selectedOption1.description}
+   {userNotes1?}
+2. {question2.header}: {selectedOption2.label} — {selectedOption2.description}
+...
+```
+
+用户拒绝回答或关闭 dialog 时：
+
+```
+用户未回答: 对话框已关闭
+```
+
+上限：一次最多 4 个问题。每个问题 2-4 个选项。多选时返回数组。
+
+---
+
+## Symbol
+
+基于 IntelliJ PSI，无需外部 LSP Server。所有 operation 共用参数 `filePath` + `line` + `character`
+（1-based）。
+
+```
+goToDefinition 成功:
+📍 {symbolName} 定义于 {filePath}:{line}
+```kotlin
+{definitionSnippet}  // 定义行 + 前后各 3 行
+```
+
+所在: {className}.{methodName}
+
+goToDefinition 无结果:
+未找到 "{symbolName}" 的定义。该符号可能为外部依赖或动态引用。
+
+---
+
+findReferences 成功:
+🔍 {symbolName} 在 {totalCount} 处被引用:
+
+1. {filePath1}:{line1}: {sourceLine1} // {context1}
+2. {filePath2}:{line2}: {sourceLine2} // {context2}
+   ...
+
+findReferences 截断（> 50 条）:
+🔍 {symbolName} 在 {totalCount} 处被引用，已截断到 50 条:
+{results}
+还有 {remaining} 处未显示。请缩小搜索范围或指定文件。
+
+findReferences 无结果:
+未找到 "{symbolName}" 的引用。该符号可能未被使用或为私有引用。
+
+---
+
+hover 成功:
+ℹ️ {symbolName}: {typeName}
+{KDoc/JavaDoc 第一行}
+{完整签名}
+位置: {filePath}:{line}
+
+hover 无文档:
+ℹ️ {symbolName}: {typeName}
+位置: {filePath}:{line}
+
+hover 无结果:
+未找到位于 {filePath}:{line}:{character} 的符号。
+
+---
+
+documentSymbol 成功:
+📄 {fileName} ({symbolCount} 个符号):
+├── class {ClassName1} ({line1})
+│ ├── fun {methodName1}() ({line2})
+│ └── val {fieldName1}: {Type} ({line3})
+├── fun {topLevelFun}() ({line4})
+└── interface {InterfaceName} ({line5})
+
+documentSymbol 截断（> 100）:
+📄 {fileName} ({symbolCount} 个符号，已截断到 100):
+{results}
+
+documentSymbol 空文件:
+📄 {fileName}: 无符号（空文件或仅含注释）
+
+---
+
+上限：引用/调用数 ≤ 50，符号数 ≤ 100，workspaceSymbol ≤ 20。operation 参数无效时返回错误提示。
+
+---
+
+### goToImplementation
+
+```
+goToImplementation 成功:
+🔍 {symbolName} 有 {count} 个实现:
+1. {className1} 位于 {filePath1}:{line1}
+   {implementationSnippet1}
+2. {className2} 位于 {filePath2}:{line2}
+   {implementationSnippet2}
+
+goToImplementation 无结果:
+未找到 "{symbolName}" 的实现。该符号可能为具体类或非虚方法。
+```
+
+---
+
+### workspaceSymbol
+
+```
+workspaceSymbol 成功:
+🔍 搜索 "{query}" 找到 {count} 个匹配:
+1. class {ClassName1} — {filePath1}:{line1}
+2. interface {InterfaceName} — {filePath2}:{line2}
+3. fun {functionName}() — {filePath3}:{line3}
+
+workspaceSymbol 截断（> 20）:
+🔍 搜索 "{query}" 找到 {count} 个匹配，已截断到 20:
+{results}
+请使用更精确的符号名缩小范围。
+
+workspaceSymbol 无结果:
+未找到匹配 "{query}" 的符号。请检查名称拼写。
+```
+
+---
+
+### incomingCalls / outgoingCalls
+
+```
+incomingCalls 成功:
+📞 {symbolName} 被 {count} 处调用:
+1. {callerFunction1}() — {filePath1}:{line1}
+2. {callerFunction2}() — {filePath2}:{line2}
+
+incomingCalls 无结果:
+{符号为入口函数或未被直接调用}
+
+outgoingCalls 成功:
+📞 {symbolName} 调用了 {count} 个方法:
+1. {callee1}() — {filePath1}:{line1}
+2. {callee2}() — {filePath2}:{line2}
+
+outgoingCalls 无结果:
+{函数体为空或仅含简单表达式}
+
+截断（> 50）:
+📞 {symbolName} 被调用/调用了 {totalCount} 处，已截断到 50:
+{results}
+还有 {remaining} 处未显示。
+```

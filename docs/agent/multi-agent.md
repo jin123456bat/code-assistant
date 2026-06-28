@@ -4,14 +4,17 @@
 
 ## 一、架构
 
-父 Agent 通过 `Task` 工具启动子代理处理子任务，由 `MultiAgentManager` 统一调度。
+父 Agent 通过 `Agent` 工具启动子代理处理子任务，由 `MultiAgentManager` 统一调度。
 
 **MultiAgentManager 职责：**
 
 - 并发控制：`Semaphore(maxConcurrentAgents)` 限制全局最大并发 Agent 数（父 + 子总计），上限由 Settings 的
   `maxConcurrentAgents` 配置（默认 3）
-- 子 Agent 创建：`Task(task, parentSession)` → 新建 `AgentLoop` 实例 → 提交到线程池
-- 结果收集：`CompletableFuture<ToolResult>` 回调，子完成 → 父的 toolResult 写入子任务摘要
+- 子 Agent 创建：LLM 调用 `Agent(prompt)` → `ToolExecutor` 从当前 Session 获取父上下文 → 新建
+  `AgentLoop` 实例 → 提交到线程池
+- **异步执行**：父 Agent 调用 `Agent` 后不阻塞，立即继续执行后续任务。子 Agent 完成后通过回调通知父
+  Agent
+- 结果收集：子 Agent 完成 → 父 Agent 收到通知，toolResult 写入子任务摘要
 - 文件写锁：`ConcurrentHashMap<VirtualFile, ReentrantLock>`（所有 Agent 共享同一份锁表）
 - crash 清理：子 Agent 异常退出时自动释放信号量、释放文件写锁、销毁 Shell 进程
 - 文件变更通知：子 Agent 完成后，父 Agent 的 `fileStamps` 中被修改的文件自动失效，下次 Edit 前强制重新
@@ -36,7 +39,7 @@
 
 原因：
 
-- 父 Agent 调用 `Task` 工具 spawn 子代理时已经过审批（首次使用时弹窗确认），信任已建立
+- 父 Agent 调用 `Agent` 工具 spawn 子代理时已经过审批（首次使用时弹窗确认），信任已建立
 - 子代理的工具范围受白名单/黑名单限制，不会越权操作
 - 对齐 Claude Code：子代理继承父会话的权限模式，父 Agent 处于高权限模式时子代理强制继承
 
@@ -62,13 +65,12 @@
 
 ### 工具白名单
 
-参考 Claude Code，子代理不拥有父 Agent 的全部工具。工具范围通过白名单限制：
+子代理的工具范围由系统预配置，LLM 调用 `Agent` 时无需传类型参数。
 
-| 子代理类型           | 可用工具                   | 说明             |
-|-----------------|------------------------|----------------|
-| Explore（只读搜索）   | `Read`, `Grep`, `Glob` | 纯只读，不允许修改文件    |
-| Plan（方案设计）      | `Read`, `Grep`, `Glob` | 架构探索阶段，不允许修改文件 |
-| General-purpose | 全部工具（可配置排除项）           | 通用任务执行，默认全部可用  |
+| 系统预配置           | 可用工具                   | 说明            |
+|-----------------|------------------------|---------------|
+| Explore（只读搜索）   | `Read`, `Grep`, `Glob` | 纯只读，不允许修改文件   |
+| General-purpose | 全部工具（可配置排除项）           | 通用任务执行，默认全部可用 |
 
 ### 工具限制规则
 
@@ -81,19 +83,19 @@
 
 **始终不可用的工具：**
 
-| 工具               | 原因                               |
-|------------------|----------------------------------|
-| `Task` / `Agent` | 当前仅支持 1 层嵌套（子不可 spawn 孙）         |
-| `Skill`          | Skill 注入由父 Agent 管理，子代理不加载 Skill |
+| 工具      | 原因                               |
+|---------|----------------------------------|
+| `Agent` | 当前仅支持 1 层嵌套（子不可 spawn 孙）         |
+| `Skill` | Skill 注入由父 Agent 管理，子代理不加载 Skill |
 
 > 对齐 Claude Code：`AskUserQuestion`、`EnterPlanMode` 等依赖父会话状态的工具在子代理中不可用。当前项目因嵌套上限为
-> 1 层，`Task` 工具在子代理中同样不可用。
+> 1 层，`Agent` 工具在子代理中同样不可用。
 
 ### 与父 Agent 审批的区别
 
 | 对比维度             | 父 Agent        | 子 Agent         |
 |------------------|----------------|-----------------|
-| Task 工具首次使用      | 弹窗确认           | 不可用（禁止嵌套）       |
+| Agent 工具首次使用     | 弹窗确认           | 不可用（禁止嵌套）       |
 | 文件读写             | 首次需审批          | 一律放行            |
 | Shell 执行         | 首次需审批，危险命令二次确认 | 一律放行（工具范围已限制）   |
 | MCP 工具           | 首次需审批          | 一律放行（可整体禁用）     |
@@ -104,25 +106,33 @@
 ## 四、父子通信
 
 ```
+父 Agent 调用 Agent(prompt="重构 UserService")
+  → 子 Agent 在线程池中异步执行
+  → 父 Agent 立即收到确认，继续执行后续任务
+  → ...（父 Agent 同时处理其他工作）...
+  → 子 Agent 完成 → MultiAgentManager 回调父 Agent
+  → toolResult 写入子任务摘要
+
+并行模式（任务完全独立时）:
 父 Agent
-  ├─ Task(taskA) → 子 Agent A
-  │     └─ 返回 resultA → 父 Agent
-  ├─ Task(taskB) → 子 Agent B
-  │     └─ 返回 resultB → 父 Agent
-  └─ 父 Agent 汇总 resultA + resultB → 继续执行
+  ├─ Agent(prompt="重构 UserService") → 子 Agent A（后台运行）
+  ├─ Agent(prompt="写单元测试")       → 子 Agent B（后台运行）
+  ├─ 父 Agent 继续执行，可响应新消息
+  └─ 子 Agent A、B 完成后分别回调 → 父 Agent 汇总结果
 ```
 
 **通信规则：**
 
 - **v1 规则**：子 Agent 之间**禁止直接通信**。所有协调通过父 Agent——父 Agent spawn 子 Agent →
-  收集结果 → 决定是否 spawn 更多子 Agent。
-- **并发建议**：默认串行（一次只 spawn 一个子 Agent，等结果回来后决定下一个）。LLM 在确定任务完全独立时才并行
-  spawn（最多 3 个）。
-- **结果传递**：子 Agent 完成后，结果摘要（≤ 2000 tokens）写入父的 toolResult。子 Agent 的完整执行过程作为一个独立
+  接收回调 → 决定是否 spawn 更多子 Agent。
+- **异步非阻塞**：父 Agent 调用 `Agent` 后不等待，立即继续执行。子 Agent 完成后通过回调通知父 Agent。
+- **并发建议**：LLM 在确定任务完全独立时可并行 spawn 多个子 Agent（最多 3 个并发）。
+- **结果传递**：子 Agent 完成后，结果摘要（≤ 2000 tokens）通过回调写入父的 toolResult。子 Agent
+  的完整执行过程作为一个独立
   Session 持久化（`session.parentId` 关联）。
 - **文件修改通知**：子 Agent 完成时，`MultiAgentManager` 自动清除父 Agent 的 `fileStamps` 中被子 Agent
-  修改过的文件，迫使父 Agent 下次 `Edit` 前必须重新 `Read`。对齐 Claude Code 的 `readFileState` 失效机制。
-- **Chat 页面展示**：仅显示 `🔧 Task: 重构 UserService → 已完成 (sub-session #42)，摘要: ...`。子 Agent
+  修改过的文件，迫使父 Agent 下次 `Edit` 前必须重新 `Read`。
+- **Chat 页面展示**：仅显示 `🤖 Agent: 重构 UserService → 已完成 (sub-session #42)，摘要: ...`。子 Agent
   的 ToolCallCard 出现在自己的 Session 视图中，不嵌入父的 ChatPage。
 
 ## 五、子 Agent UI

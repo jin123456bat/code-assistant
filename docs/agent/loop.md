@@ -23,7 +23,7 @@ while (turn < effectiveMaxTurns && !cancelled):
   │    ├─ 审批检查（首次弹确认）
   │    │    CountDownLatch ← 等待用户操作（无超时，Agent Loop 在后台线程池而非 EDT，阻塞不影响 UI 响应；审批弹窗是模态的，用户必然处理）
   │    │
-  │    ├─ 执行（14 个工具）:
+  │    ├─ 执行（18 个工具）:
   │    │    Read      → VFS (bg)
   │    │    Write     → invokeAndWait { WriteCommandAction }
   │    │    Edit      → invokeAndWait { WriteCommandAction }
@@ -32,7 +32,11 @@ while (turn < effectiveMaxTurns && !cancelled):
   │    │    Grep → 文件遍历 + 正则 (bg)
   │    │    readLints     → IDE Inspection (bg)
   │    │    Skill    → SkillManager 注入 SKILL.md 内容
-  │    │    Task    → 新 AgentLoop (bg)
+  │    │    Agent   → 新 AgentLoop (bg)
+  │    │    WebSearch → HTTP API (bg)
+  │    │    WebFetch  → HTTP API (bg)
+  │    │    AskUserQuestion → MODAL Dialog (EDT)
+  │    │    Symbol  → PSI + StubIndex (bg)
   │    │    createPlan / listPlans / removePlan / reorderPlans / markPlanDone
   │    │              → PlanExecutor (计划任务管理)
   │    │

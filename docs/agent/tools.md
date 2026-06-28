@@ -2,19 +2,23 @@
 
 > 关联文档：[Agent Loop](./loop.md)、[Plan Mode](./plan.md)
 
-## 一、9 个内置工具
+## 一、13 个内置工具
 
-| 工具          | 参数                                              | 对应 Claude | 实现                  | 上限                    |
-|-------------|-------------------------------------------------|-----------|---------------------|-----------------------|
-| `Read`      | `filePath`, `startLine?`, `endLine?`, `timeout` | Read      | PSI/VFS             | 单次 ≤ 500 行，超出需分页      |
-| `Write`     | `filePath`, `content`, `timeout`                | Write     | WriteCommandAction  | 内容 ≤ 3000 行           |
-| `Edit`      | `filePath`, `oldString`, `newString`, `timeout` | Edit      | WriteCommandAction  | newString ≤ 3000 行    |
-| `Bash`      | `command`, `workDir?`, `timeout`                | Bash      | GeneralCommandLine  | 输出 ≤ 200 行，timeout 必填 |
-| `Glob`      | `dirPath`, `maxDepth?`, `offset?`, `timeout`    | Glob      | VFS + FilenameIndex | ≤ 50 条目，超出需翻页         |
-| `Grep`      | `query`, `filePattern?`, `timeout`              | Grep      | 文件遍历 + 正则           | ≤ 50 条匹配              |
-| `readLints` | `filePath`, `timeout`                           | —（扩展工具）   | IDE Inspections     | ≤ 50 条诊断              |
-| `Task`      | `task`, `timeout`                               | Task      | AgentLoop 复用        | 结果摘要 ≤ 2000 tokens    |
-| `Skill`     | `skill`, `args?`                                | Skill     | SkillManager        | LLM 自主判断触发时机          |
+| 工具                | 参数                                                     | 对应 Claude | 实现                  | 上限                                       |
+|-------------------|--------------------------------------------------------|-----------|---------------------|------------------------------------------|
+| `Read`            | `filePath`, `startLine?`, `endLine?`, `timeout`        | Read      | PSI/VFS             | 单次 ≤ 500 行，超出需分页                         |
+| `Write`           | `filePath`, `content`, `timeout`                       | Write     | WriteCommandAction  | 内容 ≤ 3000 行                              |
+| `Edit`            | `filePath`, `oldString`, `newString`, `timeout`        | Edit      | WriteCommandAction  | newString ≤ 3000 行                       |
+| `Bash`            | `command`, `workDir?`, `timeout`                       | Bash      | GeneralCommandLine  | 输出 ≤ 200 行，timeout 必填                    |
+| `Glob`            | `dirPath`, `maxDepth?`, `offset?`, `timeout`           | Glob      | VFS + FilenameIndex | ≤ 50 条目，超出需翻页                            |
+| `Grep`            | `query`, `filePattern?`, `timeout`                     | Grep      | 文件遍历 + 正则           | ≤ 50 条匹配                                 |
+| `readLints`       | `filePath`, `timeout`                                  | —（扩展工具）   | IDE Inspections     | ≤ 50 条诊断                                 |
+| `Agent`           | `prompt`（必填，任务描述）                                      | Agent     | AgentLoop 复用        | 结果摘要 ≤ 2000 tokens                       |
+| `Skill`           | `skill`, `args?`                                       | Skill     | SkillManager        | LLM 自主判断触发时机                             |
+| `WebSearch`       | `query`, `allowedDomains?`, `blockedDomains?`          | —（扩展工具）   | HTTP API            | 搜索网页，返回标题+URL 列表                         |
+| `WebFetch`        | `url`, `prompt`                                        | —（扩展工具）   | HTTP API            | 抓取 URL 内容并提取信息                           |
+| `AskUserQuestion` | `questions[]`（1-4 个，含 options/multiSelect）             | —（扩展工具）   | IDE Dialog          | 向用户发起多选/单选问题以澄清需求                        |
+| `Symbol`          | `operation`, `filePath`, `line`, `character`, `query?` | —（扩展工具）   | PSI + StubIndex     | 代码导航（8 种操作）：跳转定义/实现、查引用、类型提示、文件/全局符号、调用链 |
 
 **关键工具行为补充：**
 
@@ -26,6 +30,112 @@
   目录。
 - **readLints**：必填参数 `filePath`（项目内相对路径），返回指定文件的 IDE 诊断。项目未索引完成 →
   返回带进度提示的部分结果。最多返回 50 条，按 severity 排序（ERROR > WARNING > INFO）。
+
+### WebSearch
+
+搜索网页，返回匹配结果的标题和 URL 列表。当前仅支持美国区域搜索。
+
+| 特性       | 说明                                                                |
+|----------|-------------------------------------------------------------------|
+| **参数**   | `query`（必填，≥2 字符）、`allowedDomains?`（限定域名）、`blockedDomains?`（排除域名） |
+| **返回**   | 结果块列表，每个含 `title` + `url`。无结果时返回空列表                               |
+| **上限**   | 无硬性上限，服务器端控制返回数量                                                  |
+| **缓存**   | 15 分钟内相同查询返回缓存结果                                                  |
+| **工作目录** | 不适用（纯网络操作）                                                        |
+| **适用场景** | 查找最新技术文档、API 参考、开源库用法；不适合查询实时数据或需要登录的页面                           |
+
+### WebFetch
+
+抓取指定 URL 的网页内容，转为 Markdown 后按 prompt 提取信息。
+
+| 特性       | 说明                                          |
+|----------|---------------------------------------------|
+| **参数**   | `url`（必填）、`prompt`（必填，描述要提取的内容）             |
+| **返回**   | 基于 prompt 从页面内容中提取的信息摘要                     |
+| **重定向**  | 跨主机重定向返回给 LLM 而非自动跟随，由 LLM 决定是否用新 URL 重新调用  |
+| **缓存**   | 15 分钟内相同 URL 返回缓存结果                         |
+| **限制**   | HTTP 自动升级为 HTTPS；不支持需认证/登录的页面；不支持 PDF/二进制文件 |
+| **适用场景** | 阅读官方文档页面、查看 GitHub README、获取技术博客内容          |
+
+### AskUserQuestion
+
+在任务执行过程中向用户发起多选或单选问题，澄清需求或确认方案。
+
+| 特性        | 说明                                                                                                          |
+|-----------|-------------------------------------------------------------------------------------------------------------|
+| **参数**    | `questions[]`（必填，1-4 个问题），每个问题含 `question`（标题）、`header`（标签 ≤12 字符）、`options[]`（2-4 个选项）、`multiSelect`（是否多选） |
+| **选项结构**  | 每选项含 `label`（展示文本 1-5 词）、`description`（说明）                                                                  |
+| **返回**    | 用户选择的答案 + 可选备注                                                                                              |
+| **UI 行为** | MODAL dialog，阻塞 Agent Loop 等待用户操作                                                                           |
+| **适用场景**  | 多个可行方案需要用户选择、需求不明确需要澄清、确认高风险操作前征求同意                                                                         |
+| **禁止场景**  | 不要用来问"是否继续"（纯确认）——此类问题 LLM 应自行判断；不要用来逃避决策——技术细节 LLM 应主动选择                                                   |
+
+### Agent
+
+启动子代理异步执行子任务。父 Agent 不阻塞，子 Agent 完成后通过回调通知。
+
+| 特性       | 说明                                                         |
+|----------|------------------------------------------------------------|
+| **参数**   | `prompt`（必填，任务描述）                                          |
+| **异步**   | 父 Agent 调用后立即返回，子 Agent 在线程池中后台执行                          |
+| **回调**   | 子 Agent 完成 → MultiAgentManager 通知父 Agent → toolResult 写入摘要 |
+| **返回**   | 启动时返回确认；完成后返回 `状态 + 结果摘要（≤2000 tokens）+ sub-session #ID`   |
+| **并发**   | 父 Agent 可同时 spawn 多个子 Agent（上限 3），任务独立时建议并行                |
+| **嵌套**   | 当前仅 1 层（子不可 spawn 孙）                                       |
+| **适用场景** | 独立子任务可并行执行时（如"重构 A"+"写 B 测试"）、任务可委派不需父 Agent 逐步控制时         |
+
+### Symbol
+
+基于 IntelliJ PSI（Program Structure Interface）提供代码语义导航。无需外部 LSP Server——直接读取 IDE
+内存中的语法树和索引。
+
+| 特性       | 说明                                                                                                                                                         |
+|----------|------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **参数**   | `operation`（必选，见下表）、`filePath`（必填）、`line`（必填，1-based）、`character`（必填，1-based）。`workspaceSymbol` 额外需要 `query`（必填，符号名或部分名），不依赖 `filePath`/`line`/`character` |
+| **返回**   | 取决于 operation，见下表                                                                                                                                          |
+| **上限**   | 引用/调用数 ≤ 50、符号数 ≤ 100、workspaceSymbol 结果 ≤ 20                                                                                                              |
+| **工作目录** | 不适用（纯 PSI 内存操作）                                                                                                                                            |
+
+**八种操作：**
+
+| operation            | PSI 实现                                                                     | 返回内容                                              | Agent 何时用                 |
+|----------------------|----------------------------------------------------------------------------|---------------------------------------------------|---------------------------|
+| `goToDefinition`     | `PsiElement.navigationElement` → 目标文件+行号                                   | 定义位置：文件路径、行号、所在函数/类名、定义源码片段（前后 3 行）               | "这个方法在哪定义的？"              |
+| `goToImplementation` | `ClassInheritorsSearch.search()` / `OverridingMethodsSearch.search()`      | 实现类/方法列表：每项含文件路径、行号、实现源码片段                        | "这个接口/抽象方法有哪些实现？"         |
+| `findReferences`     | `ReferencesSearch.search(element, scope)`                                  | 引用列表：每项含文件路径、行号、引用行源码、引用上下文（所在函数/类名）              | "改了这里会影响多少调用者？"           |
+| `hover`              | `PsiElement.getReference()?.resolve()` → 类型推断                              | 符号类型、文档注释（KDoc/JavaDoc）、所在函数签名                    | "这个变量是什么类型？"              |
+| `documentSymbol`     | `PsiTreeUtil.getChildrenOfType(file, CLASS, FUNCTION, VARIABLE)`           | 文件符号树：类→方法→字段的层级列表，每项含名称、类型、行号                    | "这个文件有哪些函数/类？"            |
+| `workspaceSymbol`    | `PsiShortNamesCache.getClassesByName()` + `FilenameIndex.getFilesByName()` | 匹配的符号列表：每项含名称、类型（class/interface/fun/val）、文件路径、行号 | "项目中哪里定义了 `UserService`？" |
+| `incomingCalls`      | `CallHierarchyProvider.getCallHierarchyItems()` → 入向                       | 调用者列表：谁调用了这个函数，每项含文件路径、行号、调用上下文                   | "这个函数被哪些地方调用？调用链是什么？"     |
+| `outgoingCalls`      | `CallHierarchyProvider.getCallHierarchyItems()` → 出向                       | 被调用者列表：这个函数调用了谁，每项含文件路径、行号、调用上下文                  | "这个函数内部调用了哪些方法？"          |
+
+**operation 参数差异：**
+
+| operation                                                                                                | 需要 filePath/line/character | 需要额外参数                |
+|----------------------------------------------------------------------------------------------------------|----------------------------|-----------------------|
+| `goToDefinition` / `goToImplementation` / `findReferences` / `hover` / `incomingCalls` / `outgoingCalls` | ✅ 定位光标处的符号                 | 无                     |
+| `documentSymbol`                                                                                         | ✅ 只需 `filePath`            | `line`/`character` 忽略 |
+| `workspaceSymbol`                                                                                        | ❌ 不需要                      | `query`（必填，符号名）       |
+
+**与 readLints 的分工：**
+
+|      | readLints            | Symbol                                     |
+|------|----------------------|--------------------------------------------|
+| 做什么  | 代码哪里**报错**了          | 代码**是什么**——定义在哪、谁在用、类型是什么                  |
+| 改代码前 | ❌ 不适用（还没改）           | ✅ 先用 `findReferences` 评估影响范围               |
+| 改代码后 | ✅ `readLints` 验证编译通过 | ❌ 语义验证不如直接编译                               |
+| 探索项目 | ❌ 只看到错误              | ✅ `documentSymbol` + `goToDefinition` 建立理解 |
+
+**典型使用场景：**
+
+1. **改函数签名前**：`findReferences` 看所有调用者 → `incomingCalls` 确认调用链 → 评估联动修改范围
+2. **排查编译错误**：`readLints` 发现 `Unresolved reference` → `workspaceSymbol` 搜索符号是否存在 →
+   `goToDefinition` 确认定义
+3. **新接手项目**：`documentSymbol` 了解文件结构 → `goToDefinition` 深入关键函数 → `outgoingCalls`
+   理解调用关系
+4. **代码审查**：`hover` 查看 KDoc/JavaDoc → `goToImplementation` 检查实现是否符合接口约定
+5. **重构前评估**：`findReferences` 查引用 + `incomingCalls` 查调用链 + `goToImplementation`
+   查所有实现 → 完整影响面
 
 ## 二、5 个计划管理工具
 
@@ -46,7 +156,11 @@
 | Read / Glob / Grep / ReadLints                                    | Background Thread                      | I/O 操作，不阻塞 EDT                         |
 | Write / Edit                                                      | `invokeAndWait { WriteCommandAction }` | 文件写入必须在 EDT 上通过 WriteCommandAction     |
 | Bash                                                              | Background Thread                      | 通过 `ProcessHandler` + 实时 `onOutput` 回调 |
-| Task                                                              | `MultiAgentManager.spawn()`            | 子 Agent 在线程池中运行                        |
+| Agent                                                             | `MultiAgentManager.spawn()`            | 子 Agent 在线程池中异步运行，父 Agent 不阻塞          |
+| Skill                                                             | Background Thread                      | SKILL.md 正文注入，不涉及文件 I/O                |
+| WebSearch / WebFetch                                              | Background Thread                      | HTTP API 调用，不阻塞 EDT                    |
+| AskUserQuestion                                                   | `invokeAndWait { Dialog }`             | MODAL dialog 必须在 EDT 上弹出               |
+| Symbol                                                            | Background Thread                      | PSI 只读操作，基于 StubIndex 索引               |
 | createPlan / listPlans / removePlan / reorderPlans / markPlanDone | PlanExecutor（Agent 线程）                 | 计划任务管理                                 |
 
 **超时机制：** 每个工具都包含必填的 `timeout` 参数（秒），由 LLM 在 tool call 时传入。0=不限。Bash 超时时强制
@@ -57,16 +171,20 @@
 > **双重告知：** 每个工具的上限同时在工具描述中声明（事前，LLM 调用前通过 JSON Schema 的 description
 > 字段知晓）和返回值截断标注中体现（事后）。两者不可互相替代——事前防止误判，事后确保发现遗漏。
 
-| 工具             | 最大返回行数                | 截断后行为                                                                   |
-|----------------|-----------------------|-------------------------------------------------------------------------|
-| `Read`         | 500 行                 | 尾部注 `... (共 N 行，已截断到 500 行，如需查看剩余内容请用 startLine 参数分页读取)`                |
-| `Grep`         | 50 条匹配                | 尾部注 `... (共 N 条，已截断到 50 条。如有必要，请使用更精确的搜索词缩小范围)`                         |
-| `Glob`         | 50 条目                 | 尾部注 `... (共 N 条目，已截断到 50。用 dirPath/maxDepth 缩小范围，或用 offset={N} 翻页获取更多)` |
-| `Bash`         | 200 行 (stdout+stderr) | 中段截断：保留头部 30 行 + 尾部 30 行，中间标注 `... (省略 N 行)`。Bash 不支持翻页（重新执行有副作用）       |
-| `readLints`    | 50 条诊断                | 按 severity 排序（error > warning > info），截断后注 `还有 N 条未显示，优先展示 error 级别`    |
-| `Edit`/`Write` | 写入 ≤ 3000 行           | 超过拒绝并返回错误 `内容过长 (N 行, 上限 3000 行)`                                       |
-| `Task`         | 返回 ≤ 2000 tokens 摘要   | 完整结果保存到子 session，LLM 看到摘要 + `详情见 sub-session #N`                        |
-| MCP 工具         | 200 行                 | 尾部注 `... (共 N 行，已截断到 200 行)`。MCP 工具不支持翻页（重新调用有副作用）                      |
+| 工具                | 最大返回行数                        | 截断后行为                                                                   |
+|-------------------|-------------------------------|-------------------------------------------------------------------------|
+| `Read`            | 500 行                         | 尾部注 `... (共 N 行，已截断到 500 行，如需查看剩余内容请用 startLine 参数分页读取)`                |
+| `Grep`            | 50 条匹配                        | 尾部注 `... (共 N 条，已截断到 50 条。如有必要，请使用更精确的搜索词缩小范围)`                         |
+| `Glob`            | 50 条目                         | 尾部注 `... (共 N 条目，已截断到 50。用 dirPath/maxDepth 缩小范围，或用 offset={N} 翻页获取更多)` |
+| `Bash`            | 200 行 (stdout+stderr)         | 中段截断：保留头部 30 行 + 尾部 30 行，中间标注 `... (省略 N 行)`。Bash 不支持翻页（重新执行有副作用）       |
+| `readLints`       | 50 条诊断                        | 按 severity 排序（error > warning > info），截断后注 `还有 N 条未显示，优先展示 error 级别`    |
+| `Edit`/`Write`    | 写入 ≤ 3000 行                   | 超过拒绝并返回错误 `内容过长 (N 行, 上限 3000 行)`                                       |
+| `Agent`           | 返回 ≤ 2000 tokens 摘要           | 完整结果保存到子 session，LLM 看到摘要 + `详情见 sub-session #N`                        |
+| `WebSearch`       | 10 条结果（服务端控制）                 | 超出时服务端截断，不额外标注                                                          |
+| `WebFetch`        | 无硬性上限（prompt 提取）              | 大页面自动截断，不额外标注                                                           |
+| `AskUserQuestion` | 无上限（用户输入）                     | 不适用                                                                     |
+| `Symbol`          | 引用/调用 ≤ 50，符号 ≤ 100，全局搜索 ≤ 20 | 尾部注 `还有 N 处未显示`。缩小范围请用更精确的查询参数                                          |
+| MCP 工具            | 200 行                         | 尾部注 `... (共 N 行，已截断到 200 行)`。MCP 工具不支持翻页（重新调用有副作用）                      |
 
 ## 五、Shell 安全
 
@@ -89,7 +207,7 @@
 | 大范围修改      | 同一 turn 修改 ≥5 个文件                                   | 关键操作确认         |
 | 文件删除       | Bash 含 `rm ` 且目标在项目内                                | 关键操作确认         |
 
-**Task 工具特殊规则：** Task 工具本身首次使用时需审批（与普通工具一致），但 **Task
+**Agent 工具特殊规则：** Agent 工具本身首次使用时需审批（与普通工具一致），但 **Agent
 spawn 的子代理内部所有工具调用一律放行，无需审批**。子代理的工具范围受白名单/黑名单限制，详见 [多 Agent
 协作 §三](./multi-agent.md#三子代理审批与工具限制)。
 
@@ -100,6 +218,47 @@ spawn 的子代理内部所有工具调用一律放行，无需审批**。子代
 - **超时**：无超时（`CountDownLatch` 永久等待）。Agent Loop 在后台线程池，阻塞不占 EDT；审批弹窗是模态
   Dialog，用户离开前必须处理
 - **被拒绝后**：ToolCallCard 保留 [重审] 按钮，用户点击后从 IDLE 重新进入 AWAITING_APPROVAL，无需重新发送消息
+
+### 审批白名单
+
+用户点击 **[允许此会话]** 后，工具名被加入当前 Session 的内存白名单。后续同一工具调用跳过审批。
+
+**数据结构：**
+
+```
+AgentSession:
+└── approvedTools: Set<String> = emptySet()   // 已批准的工具名集合，仅内存不持久化
+```
+
+**生命周期：**
+
+| 事件           | 白名单行为                                          |
+|--------------|------------------------------------------------|
+| 用户点击 [允许此会话] | `approvedTools.add(toolName)`                  |
+| 后续同工具调用      | 检查 `approvedTools.contains(toolName)` → 跳过审批弹窗 |
+| 用户点击 [允许一次]  | 仅本次放行，不加入白名单                                   |
+| `/clear`     | `approvedTools.clear()`，重置为全新会话                |
+| IDE 重启       | 白名单丢失（不持久化），下次使用重新审批                           |
+| 危险命令         | **无视白名单**，始终弹窗二次确认                             |
+
+**审批判定流程：**
+
+```
+工具调用到达 ToolExecutor
+  ├─ 危险命令检测（rm -rf、git push --force、sudo、chmod 777）
+  │     → 始终弹窗，不检查白名单
+  │
+  ├─ approvedTools.contains(toolName)?
+  │     → 是：跳过审批，直接执行
+  │
+  └─ 否：弹出审批 dialog
+        ├─ [允许一次]   → 执行，不修改白名单
+        ├─ [允许此会话] → approvedTools.add(toolName)，执行
+        └─ [拒绝]       → 返回 IDLE，ToolCallCard 保留 [重审]
+```
+
+**为什么仅内存不持久化：** 审批信任是用户当下的意图表达。IDE 重启后信任关系重置，避免过时的信任被滥用。对齐
+Claude Code 的会话级权限继承机制。
 
 ## 七、前置校验
 
@@ -145,22 +304,26 @@ ToolInfo (ToolRegistry 内部类):
 
 每个工具的 `description` 字段必须包含返回值上限，让 LLM **事前知道**限制：
 
-| 工具             | description 中应包含的上限声明                                                                                                         |
-|----------------|-------------------------------------------------------------------------------------------------------------------------------|
-| `Read`         | `单次最多返回 500 行。如果文件行数超过此限制，返回内容会被截断，请使用 startLine 参数分页读取剩余内容。`                                                                 |
-| `Grep`         | `最多返回 50 条匹配。如果匹配数超过此限制，结果会被截断，请使用更精确的搜索词缩小范围。`                                                                               |
-| `Glob`         | `最多返回 50 个条目（文件+目录）。如果超出此限制，结果会被截断并在返回值中标注。请用 dirPath/maxDepth 缩小范围，或用 offset 参数翻页获取更多条目。`                                    |
-| `Bash`         | `最多返回 200 行输出（stdout+stderr）。超出时中段截断：保留头部 30 行 + 尾部 30 行，中间标注省略行数。Bash 不支持翻页（重新执行有副作用）。timeout 参数由 LLM 根据命令类型自行判断传入（秒），0=不限。` |
-| `readLints`    | `最多返回 50 条诊断，按 severity 排序（ERROR > WARNING > INFO）。如果超出此限制，低严重度诊断可能不显示。`                                                      |
-| `Edit`         | `newString 最多 3000 行。超过此限制的操作会被拒绝。`                                                                                           |
-| `Write`        | `内容最多 3000 行。超过此限制的操作会被拒绝。`                                                                                                   |
-| `Skill`        | `执行指定 Skill。LLM 根据用户需求自主判断触发时机，将 SKILL.md 内容作为消息注入 conversation。`                                                             |
-| `Task`         | `子 Agent 结果摘要最多 2000 tokens。完整执行过程保存为独立 Session。`                                                                             |
-| `createPlan`   | `创建执行计划，最多 20 项。计划创建后自动开始执行，LLM 可用 listPlans/removePlan/reorderPlans 管理。`                                                     |
-| `listPlans`    | `查看当前计划的所有计划项及状态，无参数。`                                                                                                        |
-| `removePlan`   | `删除指定计划项（仅 PAUSED 状态可删）。`                                                                                                     |
-| `reorderPlans` | `重排剩余 PAUSED 计划项的执行顺序，传入新的 planId 序列。`                                                                                        |
-| `markPlanDone` | `将指定计划项标记为 COMPLETED。`                                                                                                        |
+| 工具                | description 中应包含的上限声明                                                                                                                                                                                     |
+|-------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `Read`            | `单次最多返回 500 行。如果文件行数超过此限制，返回内容会被截断，请使用 startLine 参数分页读取剩余内容。`                                                                                                                                             |
+| `Grep`            | `最多返回 50 条匹配。如果匹配数超过此限制，结果会被截断，请使用更精确的搜索词缩小范围。`                                                                                                                                                           |
+| `Glob`            | `最多返回 50 个条目（文件+目录）。如果超出此限制，结果会被截断并在返回值中标注。请用 dirPath/maxDepth 缩小范围，或用 offset 参数翻页获取更多条目。`                                                                                                                |
+| `Bash`            | `最多返回 200 行输出（stdout+stderr）。超出时中段截断：保留头部 30 行 + 尾部 30 行，中间标注省略行数。Bash 不支持翻页（重新执行有副作用）。timeout 参数由 LLM 根据命令类型自行判断传入（秒），0=不限。`                                                                             |
+| `readLints`       | `最多返回 50 条诊断，按 severity 排序（ERROR > WARNING > INFO）。如果超出此限制，低严重度诊断可能不显示。`                                                                                                                                  |
+| `Edit`            | `newString 最多 3000 行。超过此限制的操作会被拒绝。`                                                                                                                                                                       |
+| `Write`           | `内容最多 3000 行。超过此限制的操作会被拒绝。`                                                                                                                                                                               |
+| `Skill`           | `执行指定 Skill。LLM 根据用户需求自主判断触发时机，将 SKILL.md 内容作为消息注入 conversation。`                                                                                                                                         |
+| `Agent`           | `启动子代理异步执行子任务。prompt 描述任务内容。结果摘要最多 2000 tokens。完整执行过程保存为独立 Session。`                                                                                                                                      |
+| `WebSearch`       | `搜索网页，返回标题和 URL 列表。最多返回 10 条结果。15 分钟内相同查询返回缓存结果。`                                                                                                                                                         |
+| `WebFetch`        | `抓取 URL 内容并按提示提取信息。HTTP 自动升级为 HTTPS。不支持需认证的页面。15 分钟内相同 URL 返回缓存结果。`                                                                                                                                       |
+| `AskUserQuestion` | `向用户发起问题以澄清需求。一次 1-4 个问题，每题 2-4 个选项。支持多选。`                                                                                                                                                                |
+| `Symbol`          | `基于 IDE PSI 的语义导航（8 种操作）。goToDefinition 跳转定义、goToImplementation 查实现、findReferences 查引用（≤50）、hover 类型提示、documentSymbol 文件结构（≤100）、workspaceSymbol 全局搜索（≤20，需 query）、incomingCalls/outgoingCalls 调用链（≤50）。` |
+| `createPlan`      | `创建执行计划，最多 20 项。计划创建后自动开始执行，LLM 可用 listPlans/removePlan/reorderPlans 管理。`                                                                                                                                 |
+| `listPlans`       | `查看当前计划的所有计划项及状态，无参数。`                                                                                                                                                                                    |
+| `removePlan`      | `删除指定计划项（仅 PAUSED 状态可删）。`                                                                                                                                                                                 |
+| `reorderPlans`    | `重排剩余 PAUSED 计划项的执行顺序，传入新的 planId 序列。`                                                                                                                                                                    |
+| `markPlanDone`    | `将指定计划项标记为 COMPLETED。`                                                                                                                                                                                    |
 
 ### 工具模型
 
@@ -208,7 +371,7 @@ ToolResultState = DONE | CANCELLED | ERROR
 | Glob      | 目录树 + 条目统计                   | 目录不存在                       |
 | Grep      | 匹配行列表 + 文件:行号                | 无（0 条匹配不算错误）                |
 | readLints | 诊断列表（按 severity 排序）          | 索引未就绪                       |
-| Task      | 子任务摘要 + sub-session ID       | 子 Agent 崩溃、超时               |
+| Agent     | 子任务摘要 + sub-session ID       | 子 Agent 崩溃、超时               |
 | Skill     | SKILL.md 正文                  | Skill 不存在                   |
 | MCP 工具    | MCP Server 返回的原始内容           | MCP 调用失败、Server 断连          |
 
