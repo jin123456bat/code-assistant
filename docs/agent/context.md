@@ -124,30 +124,5 @@ while (turn < maxTurns && !cancelled):
 
 ## 五、Token 估算
 
-整个项目使用统一的 Token 估算方法，避免各处用法不一致。
-
-### 公式
-
-```kotlin
-fun estimateTokens(text: String): Int {
-    if (text.isEmpty()) return 0
-    val bytes = text.encodeToByteArray().size
-    val asciiOnly = text.count { it.code <= 127 }
-    val nonAscii = text.length - asciiOnly
-    // 英文/代码 ~4 字节/token，中文 ~0.67 token/字符（即 1.5 字符/token）
-    return max(bytes / 4, asciiOnly / 4 + (nonAscii * 3) / 2)
-}
-```
-
-**精度说明：** 启发式估算，误差 ±20%。API 返回的 `usage` 字段为精确值，优先使用。估算仅用于"写入前"
-的场景（compact 阈值判定、输入框预览），持久化时使用 API 返回的精确值。
-
-### 适用场景及上限
-
-| 场景                        | 上限                     | 方法                         |
-|---------------------------|------------------------|----------------------------|
-| Auto-Compact 触发判定         | 1M × 0.7 = 700K tokens | `estimateTokens()` 估算      |
-| 输入框实时 token 预览            | 无上限（仅展示）               | `estimateTokens()` 估算      |
-| `session.totalTokens` 持久化 | 精确值                    | API `usage` 字段，fallback 估算 |
-| 子 Agent 结果摘要截断            | 2000 tokens            | `estimateTokens()` 估算截断点   |
-| 工具返回值截断                   | 见工具截断表（按行）             | 不依赖 token 估算               |
+项目使用统一的 Token
+估算方法，完整公式、精度说明和适用场景见 [token-estimation.md](../specs/token-estimation.md)。

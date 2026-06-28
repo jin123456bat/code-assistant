@@ -244,16 +244,29 @@ STDOUT:
 ## Agent
 
 ```
-启动成功:
-✅ 已启动子 Agent: {prompt}
-结果将通过 sub-session #{sessionId} 返回。
-
-完成后回调:
+同步模式（run_in_background=false）:
 🔧 Agent 完成: {prompt}
-状态: {completed | failed | cancelled}
+状态: {completed | failed | cancelled | timeout}
 结果摘要:
 {summary (≤ 2000 tokens)}
 详情: sub-session #{sessionId}
+
+异步模式（run_in_background=true）:
+✅ 已启动子 Agent: {prompt}
+超时: {timeout}s
+结果将通过 sub-session #{sessionId} 返回。
+
+异步完成后回调:
+🔧 Agent 完成: {prompt}
+状态: {completed | failed | cancelled | timeout}
+结果摘要:
+{summary (≤ 2000 tokens)}
+详情: sub-session #{sessionId}
+
+超时:
+⏰ Agent 超时: {prompt}
+超时限制: {timeout}s
+子 Agent 已强制终止。
 ```
 
 上限：子 Agent 结果摘要最多 2000 tokens。完整执行过程保存为独立 Session。

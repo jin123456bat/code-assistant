@@ -8,28 +8,24 @@
 
 **MultiAgentManager 职责：**
 
-- 并发控制：`Semaphore(maxConcurrentAgents)` 限制全局最大并发 Agent 数（父 + 子总计），上限由 Settings 的
-  `maxConcurrentAgents` 配置（默认 3）
-- 子 Agent 创建：LLM 调用 `Agent(prompt)` → `ToolExecutor` 从当前 Session 获取父上下文 → 新建
-  `AgentLoop` 实例 → 提交到线程池
-- **异步执行**：父 Agent 调用 `Agent` 后不阻塞，立即继续执行后续任务。子 Agent 完成后通过回调通知父
-  Agent
-- 结果收集：子 Agent 完成 → 父 Agent 收到通知，toolResult 写入子任务摘要
+- 并发控制：`Semaphore(maxConcurrentAgents)` 限制全局 Agent 并发总数（父 + 子总计）。默认 3（1 父 + 最多
+  2 子），可在 Settings 中修改 `maxConcurrentAgents`（0=不限）
+- 子 Agent 创建：详见 [Agent 工具参数](../agent/tools.md#agent)
 - 文件写锁：`ConcurrentHashMap<VirtualFile, ReentrantLock>`（所有 Agent 共享同一份锁表）
 - crash 清理：子 Agent 异常退出时自动释放信号量、释放文件写锁、销毁 Shell 进程
-- 文件变更通知：子 Agent 完成后，父 Agent 的 `fileStamps` 中被修改的文件自动失效，下次 Edit 前强制重新
-  Read
+- 文件变更通知：子 Agent 完成后，父 Agent 缓存的文件 `modificationStamp` 自动失效，下次 Edit 前强制重新
+  Read。参见 [前置校验 § modificationStamp](../agent/tools.md#七前置校验)
 
 ## 二、关键约束
 
-| 约束项        | 规则                                                                                                                     |
-|------------|------------------------------------------------------------------------------------------------------------------------|
-| 并发控制       | `Semaphore(maxConcurrentAgents)` 限制全局最大并发 Agent 数（父 + 子总计），默认 3，0=不限                                                   |
-| 文件写锁       | `ConcurrentHashMap<VirtualFile, ReentrantLock>`（所有 Agent 共享）                                                           |
-| 递归限制       | 最多 1 层嵌套（子不可再 spawn 孙）。Phase 5 后可评估是否放宽                                                                                |
-| 结果摘要       | ≤ 2000 tokens 写入父的 toolResult。摘要 = 子 Agent 最后一轮 assistant 消息 + 所有 tool call 结果原文拼接，截断到 2000 tokens。不额外调用 LLM 生成摘要      |
-| 子 Session  | 独立持久化（`session.parentId` 关联）                                                                                           |
-| 子 Agent 失败 | 子 Agent crash 或超时 → toolResult 返回 `"Sub-agent failed: <error>"`，父 LLM 自行决定重试或调整策略。crash 后自动清理：释放信号量、释放文件写锁、销毁 Shell 进程 |
+| 约束项        | 规则                                                                                                                                            |
+|------------|-----------------------------------------------------------------------------------------------------------------------------------------------|
+| 并发控制       | `Semaphore(maxConcurrentAgents)` 限制全局 Agent 并发总数（父 + 子总计）。默认 3（1 父 + 最多 2 子），0=不限，可在 Settings 中修改                                             |
+| 文件写锁       | `ConcurrentHashMap<VirtualFile, ReentrantLock>`（所有 Agent 共享）                                                                                  |
+| 递归限制       | 最多 1 层嵌套（子不可再 spawn 孙）。Phase 5 后可评估是否放宽                                                                                                       |
+| 结果摘要       | ≤ 2000 tokens 写入父的 toolResult。摘要 = 子 Agent 最后一轮 assistant 消息 + 所有 tool call 结果原文拼接，截断到 2000 tokens。不额外调用 LLM 生成摘要                             |
+| 子 Session  | 独立持久化（`session.parentId` 关联）                                                                                                                  |
+| 子 Agent 失败 | 子 Agent crash → `"Sub-agent failed: <error>"`；超时 → `"Sub-agent timeout: {timeout}s"`。父 LLM 自行决定重试或调整策略。crash/超时后自动清理：释放信号量、释放文件写锁、销毁 Shell 进程 |
 
 ## 三、子代理审批与工具限制
 
@@ -93,13 +89,13 @@
 
 ### 与父 Agent 审批的区别
 
-| 对比维度             | 父 Agent        | 子 Agent         |
-|------------------|----------------|-----------------|
-| Agent 工具首次使用     | 弹窗确认           | 不可用（禁止嵌套）       |
-| 文件读写             | 首次需审批          | 一律放行            |
-| Shell 执行         | 首次需审批，危险命令二次确认 | 一律放行（工具范围已限制）   |
-| MCP 工具           | 首次需审批          | 一律放行（可整体禁用）     |
-| 危险命令（`rm -rf` 等） | 强制二次确认         | 一律放行（白名单内无危险命令） |
+| 对比维度             | 父 Agent（详见 [审批机制](../agent/tools.md#六审批机制)） | 子 Agent                            |
+|------------------|---------------------------------------------|------------------------------------|
+| Agent 工具首次使用     | 弹窗确认                                        | 不可用（禁止嵌套）                          |
+| 文件读写             | 首次需审批                                       | 一律放行                               |
+| Shell 执行         | 首次需审批，危险命令二次确认                              | 一律放行（工具范围已限制）                      |
+| MCP 工具           | 首次需审批                                       | 一律放行（可整体禁用）                        |
+| 危险命令（`rm -rf` 等） | 强制二次确认                                      | 一律放行（父 Agent 已建立信任，子 Agent 工具范围受限） |
 
 ---
 
@@ -125,13 +121,14 @@
 
 - **v1 规则**：子 Agent 之间**禁止直接通信**。所有协调通过父 Agent——父 Agent spawn 子 Agent →
   接收回调 → 决定是否 spawn 更多子 Agent。
-- **异步非阻塞**：父 Agent 调用 `Agent` 后不等待，立即继续执行。子 Agent 完成后通过回调通知父 Agent。
-- **并发建议**：LLM 在确定任务完全独立时可并行 spawn 多个子 Agent（最多 3 个并发）。
+- **同步/异步**：见 [Agent 工具参数](../agent/tools.md#agent)
+- **并发上限**：见 [关键约束](#二关键约束) 中的并发控制
 - **结果传递**：子 Agent 完成后，结果摘要（≤ 2000 tokens）通过回调写入父的 toolResult。子 Agent
   的完整执行过程作为一个独立
   Session 持久化（`session.parentId` 关联）。
-- **文件修改通知**：子 Agent 完成时，`MultiAgentManager` 自动清除父 Agent 的 `fileStamps` 中被子 Agent
-  修改过的文件，迫使父 Agent 下次 `Edit` 前必须重新 `Read`。
+- **文件修改通知**：子 Agent 完成时，`MultiAgentManager` 自动失效父 Agent 中被子 Agent 修改过的文件的
+  `modificationStamp`，迫使父 Agent 下次 `Edit` 前必须重新 `Read`
+  。参见 [前置校验](../agent/tools.md#七前置校验)
 - **Chat 页面展示**：仅显示 `🤖 Agent: 重构 UserService → 已完成 (sub-session #42)，摘要: ...`。子 Agent
   的 ToolCallCard 出现在自己的 Session 视图中，不嵌入父的 ChatPage。
 
@@ -155,7 +152,7 @@
 **实时渲染：**
 
 - 子 Agent 流式输出追加到父面板，不新建独立面板
-- 父 Agent 暂停等待子 Agent 结果（子 Agent 完成前父 Agent 不再发起新请求）
+- 子 Agent 异步执行中，父 Agent 可继续处理其他任务。子 Agent 完成后通过回调通知父 Agent
 
 ## 六、SessionsPage 关联
 

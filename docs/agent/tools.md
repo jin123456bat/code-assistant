@@ -4,21 +4,21 @@
 
 ## 一、13 个内置工具
 
-| 工具                | 参数                                                     | 对应 Claude | 实现                  | 上限                                       |
-|-------------------|--------------------------------------------------------|-----------|---------------------|------------------------------------------|
-| `Read`            | `filePath`, `startLine?`, `endLine?`, `timeout`        | Read      | PSI/VFS             | 单次 ≤ 500 行，超出需分页                         |
-| `Write`           | `filePath`, `content`, `timeout`                       | Write     | WriteCommandAction  | 内容 ≤ 3000 行                              |
-| `Edit`            | `filePath`, `oldString`, `newString`, `timeout`        | Edit      | WriteCommandAction  | newString ≤ 3000 行                       |
-| `Bash`            | `command`, `workDir?`, `timeout`                       | Bash      | GeneralCommandLine  | 输出 ≤ 200 行，timeout 必填                    |
-| `Glob`            | `dirPath`, `maxDepth?`, `offset?`, `timeout`           | Glob      | VFS + FilenameIndex | ≤ 50 条目，超出需翻页                            |
-| `Grep`            | `query`, `filePattern?`, `timeout`                     | Grep      | 文件遍历 + 正则           | ≤ 50 条匹配                                 |
-| `readLints`       | `filePath`, `timeout`                                  | —（扩展工具）   | IDE Inspections     | ≤ 50 条诊断                                 |
-| `Agent`           | `prompt`（必填，任务描述）                                      | Agent     | AgentLoop 复用        | 结果摘要 ≤ 2000 tokens                       |
-| `Skill`           | `skill`, `args?`                                       | Skill     | SkillManager        | LLM 自主判断触发时机                             |
-| `WebSearch`       | `query`, `allowedDomains?`, `blockedDomains?`          | —（扩展工具）   | HTTP API            | 搜索网页，返回标题+URL 列表                         |
-| `WebFetch`        | `url`, `prompt`                                        | —（扩展工具）   | HTTP API            | 抓取 URL 内容并提取信息                           |
-| `AskUserQuestion` | `questions[]`（1-4 个，含 options/multiSelect）             | —（扩展工具）   | IDE Dialog          | 向用户发起多选/单选问题以澄清需求                        |
-| `Symbol`          | `operation`, `filePath`, `line`, `character`, `query?` | —（扩展工具）   | PSI + StubIndex     | 代码导航（8 种操作）：跳转定义/实现、查引用、类型提示、文件/全局符号、调用链 |
+| 工具                | 参数                                                                                           | 对应 Claude | 实现                  | 上限                                       |
+|-------------------|----------------------------------------------------------------------------------------------|-----------|---------------------|------------------------------------------|
+| `Read`            | `filePath`, `startLine?`, `endLine?`, `timeout`                                              | Read      | PSI/VFS             | 单次 ≤ 500 行，超出需分页                         |
+| `Write`           | `filePath`, `content`, `timeout`                                                             | Write     | WriteCommandAction  | 内容 ≤ 3000 行                              |
+| `Edit`            | `filePath`, `oldString`, `newString`, `timeout`                                              | Edit      | WriteCommandAction  | newString ≤ 3000 行                       |
+| `Bash`            | `command`, `workDir?`, `timeout`                                                             | Bash      | GeneralCommandLine  | 输出 ≤ 200 行，timeout 必填                    |
+| `Glob`            | `dirPath`, `maxDepth?`, `offset?`, `timeout`                                                 | Glob      | VFS + FilenameIndex | ≤ 50 条目，超出需翻页                            |
+| `Grep`            | `query`, `filePattern?`, `timeout`                                                           | Grep      | 文件遍历 + 正则           | ≤ 50 条匹配                                 |
+| `readLints`       | `filePath`, `timeout`                                                                        | —（扩展工具）   | IDE Inspections     | ≤ 50 条诊断                                 |
+| `Agent`           | `prompt`（必填，任务描述）, `timeout`（必填，int，子 Agent 超时秒数，0=不限）, `run_in_background`（必填，bool，true=异步） | Agent     | AgentLoop 复用        | 结果摘要 ≤ 2000 tokens                       |
+| `Skill`           | `skill`, `args?`                                                                             | Skill     | SkillManager        | LLM 自主判断触发时机                             |
+| `WebSearch`       | `query`, `allowedDomains?`, `blockedDomains?`                                                | —（扩展工具）   | HTTP API            | 搜索网页，返回标题+URL 列表                         |
+| `WebFetch`        | `url`, `prompt`                                                                              | —（扩展工具）   | HTTP API            | 抓取 URL 内容并提取信息                           |
+| `AskUserQuestion` | `questions[]`（1-4 个，含 options/multiSelect）                                                   | —（扩展工具）   | IDE Dialog          | 向用户发起多选/单选问题以澄清需求                        |
+| `Symbol`          | `operation`, `filePath`, `line`, `character`, `query?`                                       | —（扩展工具）   | PSI + StubIndex     | 代码导航（8 种操作）：跳转定义/实现、查引用、类型提示、文件/全局符号、调用链 |
 
 **关键工具行为补充：**
 
@@ -72,17 +72,18 @@
 
 ### Agent
 
-启动子代理异步执行子任务。父 Agent 不阻塞，子 Agent 完成后通过回调通知。
+启动子代理执行子任务。通过 `run_in_background` 控制同步/异步模式。
 
-| 特性       | 说明                                                         |
-|----------|------------------------------------------------------------|
-| **参数**   | `prompt`（必填，任务描述）                                          |
-| **异步**   | 父 Agent 调用后立即返回，子 Agent 在线程池中后台执行                          |
-| **回调**   | 子 Agent 完成 → MultiAgentManager 通知父 Agent → toolResult 写入摘要 |
-| **返回**   | 启动时返回确认；完成后返回 `状态 + 结果摘要（≤2000 tokens）+ sub-session #ID`   |
-| **并发**   | 父 Agent 可同时 spawn 多个子 Agent（上限 3），任务独立时建议并行                |
-| **嵌套**   | 当前仅 1 层（子不可 spawn 孙）                                       |
-| **适用场景** | 独立子任务可并行执行时（如"重构 A"+"写 B 测试"）、任务可委派不需父 Agent 逐步控制时         |
+| 特性       | 说明                                                                 |
+|----------|--------------------------------------------------------------------|
+| **参数**   | `prompt`（必填）、`timeout`（必填，int，秒，0=不限）、`run_in_background`（必填，bool） |
+| **同步模式** | `run_in_background=false`，父 Agent 阻塞等待子完成，拿到结果后继续                  |
+| **异步模式** | `run_in_background=true`，父 Agent 立即返回，子后台执行，完成后回调通知                |
+| **返回**   | 同步：直接返回结果摘要；异步：先返回确认，完成后回调写入结果                                     |
+| **超时**   | 超过 `timeout` 秒 → 强制终止 → toolResult 返回 `"Sub-agent timeout"`        |
+| **并发**   | 见 [多 Agent 协作 §二](../agent/multi-agent.md#二关键约束)                   |
+| **嵌套**   | 当前仅 1 层（子不可 spawn 孙）                                               |
+| **适用场景** | 同步：需立即用子结果；异步：独立子任务可并行执行                                           |
 
 ### Symbol
 
@@ -314,7 +315,7 @@ ToolInfo (ToolRegistry 内部类):
 | `Edit`            | `newString 最多 3000 行。超过此限制的操作会被拒绝。`                                                                                                                                                                       |
 | `Write`           | `内容最多 3000 行。超过此限制的操作会被拒绝。`                                                                                                                                                                               |
 | `Skill`           | `执行指定 Skill。LLM 根据用户需求自主判断触发时机，将 SKILL.md 内容作为消息注入 conversation。`                                                                                                                                         |
-| `Agent`           | `启动子代理异步执行子任务。prompt 描述任务内容。结果摘要最多 2000 tokens。完整执行过程保存为独立 Session。`                                                                                                                                      |
+| `Agent`           | `启动子代理执行子任务。prompt 描述任务，timeout 子 Agent 超时秒数（必填，0=不限），run_in_background 是否异步（必填）。结果摘要最多 2000 tokens。完整执行过程保存为独立 Session。`                                                                                 |
 | `WebSearch`       | `搜索网页，返回标题和 URL 列表。最多返回 10 条结果。15 分钟内相同查询返回缓存结果。`                                                                                                                                                         |
 | `WebFetch`        | `抓取 URL 内容并按提示提取信息。HTTP 自动升级为 HTTPS。不支持需认证的页面。15 分钟内相同 URL 返回缓存结果。`                                                                                                                                       |
 | `AskUserQuestion` | `向用户发起问题以澄清需求。一次 1-4 个问题，每题 2-4 个选项。支持多选。`                                                                                                                                                                |

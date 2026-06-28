@@ -36,26 +36,7 @@ Model Context Protocol (MCP) 支持——通过 JSON-RPC 协议与外部 MCP Ser
 
 ### mcp-config.json 示例
 
-```json
-{
-  "servers": [
-    {
-      "id": "mysql",
-      "command": "npx",
-      "args": [
-        "-y",
-        "@anthropic/mcp-server-mysql",
-        "--db",
-        "mydb"
-      ],
-      "env": {
-        "DB_HOST": "localhost"
-      },
-      "enabled": true
-    }
-  ]
-}
-```
+JSON Schema 和字段说明见 [persistence.md §6.3](../specs/persistence.md#63-mcp-config)。
 
 ---
 
@@ -192,12 +173,7 @@ McpConfigStore
 McpConfig:
 └── servers: List<McpServerConfig>
 
-McpServerConfig:
-├── id: String
-├── command: String
-├── args: List<String>
-├── env: Map<String, String>            // 敏感值建议环境变量注入
-└── enabled: Boolean
+McpServerConfig: 见 [persistence.md §6.3](../specs/persistence.md#63-mcp-config)
 ```
 
 ---

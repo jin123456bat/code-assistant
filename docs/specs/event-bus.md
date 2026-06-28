@@ -21,20 +21,12 @@
 
 ## AgentState 枚举
 
-```
-AgentState = IDLE | PROCESSING | PAUSED | AWAITING_APPROVAL | EXECUTING | CANCELLED | ERROR
-```
+见 [AgentSession 状态机](../agent/loop.md#二agentsession-状态机)。
 
 ## McpServerState 枚举
 
-```
-McpServerState = CONFIGURED | INITIALIZING | RUNNING | CRASHED | STOPPED | DISCONNECTED | ERROR | INIT_ERROR
-```
-
-- `INIT_ERROR`：初始化握手超时（退避重试 3 分钟后仍失败），需用户手动 `[重连]`
+见 [MCP Server 生命周期](../agent/mcp.md#一server-生命周期)。
 
 ## PlanStatus 枚举
 
-```
-PlanStatus = PAUSED | EXECUTING | COMPLETED | CANCELLED
-```
+见 [Plan 状态定义](../agent/plan.md#四plan-状态)。

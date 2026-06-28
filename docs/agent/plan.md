@@ -65,7 +65,7 @@ Plan 出错了？
 ### 关键行为
 
 - **自动执行**：创建后自动开始，每个计划项完成后自动进入下一个，不等待用户
-- **暂停**：用户点全局停止按钮(⏹) → 当前计划项完成后停止
+- **暂停**：用户点全局停止按钮(⏹) → 终止当前 Agent 执行，Plan 保持当前状态
 - **继续**：用户再次发送消息 → LLM 根据 Plan 状态自行决定是否继续执行（可先回应消息再继续，也可直接执行下一个）
 - **终止**：用户通过 LLM 调用 removePlan 工具删除所有剩余计划项 → Plan 标记 CANCELLED
 - **单项删除**：PAUSED 计划项行末有 [✕] 按钮，用户可删除不需要的计划项
@@ -157,7 +157,9 @@ LLM 在执行过程中**随时主动**创建正式执行计划：
 
 **Plan 与会话的关系：**
 
-- 一个 Session 最多一个活跃 Plan
+- 一个 Session 最多一个活跃 Plan。LLM 调用 `createPlan` 重新规划时，新 Plan 自动成为活跃 Plan，旧 Plan
+  的 EXECUTING 项重置为 PAUSED。旧 Plan 项的清理（标记 CANCELLED 等）需 LLM 主动调用 `removePlan`/
+  `markPlanDone` 或用户手动删除
 - Plan COMPLETED 或 CANCELLED 后，Session 可继续当作普通 Chat 会话
 - Plan 暂停时，用户可在同一 Session 中继续聊天，消息追加到同一 message 列表
 - Plan 状态独立于 AgentSession 状态——Plan 暂停但 Agent 可以 IDLE/聊天
