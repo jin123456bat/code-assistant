@@ -45,7 +45,7 @@ Code Assistant 的界面设计——基于 IntelliJ Platform 的 Swing 多页面
 
 ## 核心技术栈
 
-- **UI 框架：** IntelliJ Platform Swing（JPanel / JTextPane / EditorTextField / JScrollPane）
+- **UI 框架：** IntelliJ Platform Swing（JPanel / JLabel / JTextArea / JScrollPane）
 - **Markdown 渲染：** 手写字符串解析器，5 种 Block
   类型（Paragraph/CodeBlock/Header/ListItem/QuoteBlock），详见 [
   `docs/agent/markdown-rendering.md`](agent/markdown-rendering.md)

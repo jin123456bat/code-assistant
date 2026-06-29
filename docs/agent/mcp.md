@@ -109,7 +109,7 @@ MCP Server 的 stdout 可能混杂非 JSON-RPC 行（如 npm 安装日志、stde
 
 - Server 工具通过 `tools/list` 获取，注册到 `ToolRegistry`
 - 同名工具加前缀 `serverName/toolName`，内置工具优先级高于 MCP 工具
-- v1 不支持 `resources/list` 和 `prompts/list`
+- 不支持 `resources/list` 和 `prompts/list`
 - **MCP Server 断连时，已注册的工具不从 `ToolRegistry` 注销**。LLM 下一轮调用时看到的是"Server 断连"
   错误，而非"工具不存在"
 

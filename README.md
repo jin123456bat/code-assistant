@@ -123,14 +123,14 @@ Platform Plugin 2.2.1
 
 ## 开发状态
 
-🚧 **Alpha 阶段（v2.0.0）** — 核心功能已实现，正在持续完善中。尚未发布到 JetBrains Marketplace，需从源码构建。
+Code Assistant — 核心功能已实现。尚未发布到 JetBrains Marketplace，需从源码构建。
 
 ### 已知限制
 
 - 仅支持 DeepSeek API，不支持其他 LLM 提供商
 - MCP `resources/list` 和 `prompts/list` 暂不支持
 - 多 Agent 嵌套上限 1 层（子 Agent 不可再 spawn）
-- Sessions 全文搜索暂未实现，当前仅支持按标题过滤
+- Sessions 搜索仅支持按标题过滤
 - `Grep` 支持正则表达式匹配，不区分大小写。非法正则自动回退字面子串
 - `@file` glob 匹配上限 50 个文件，超出部分由 Glob 工具告知 LLM 截断情况，LLM 自行决定是否翻页
 

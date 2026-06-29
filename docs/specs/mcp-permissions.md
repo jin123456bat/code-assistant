@@ -162,10 +162,10 @@ fun dispose() {
 
 ## 九、当前不支持的功能
 
-| 功能               | 状态       |
-|------------------|----------|
-| `resources/list` | ❌ v1 不支持 |
-| `prompts/list`   | ❌ v1 不支持 |
-| MCP Server 热加载   | ❌ 需手动重启  |
-| MCP 工具权限隔离       | ❌ 待实现    |
-| MCP Server 沙箱    | ❌ 待评估    |
+| 功能               | 状态      |
+|------------------|---------|
+| `resources/list` | ❌ 不支持   |
+| `prompts/list`   | ❌ 不支持   |
+| MCP Server 热加载   | ❌ 需手动重启 |
+| MCP 工具权限隔离       | ❌ 待实现   |
+| MCP Server 沙箱    | ❌ 待评估   |

@@ -46,20 +46,64 @@ try {
     }
 } catch (e: Exception) {
     when {
-        // 429 Rate Limit — 自动重试
+        // 429 Rate Limit — 自动重试（PAUSED 状态等待后恢复）
         e is RateLimitException -> {
             if (retryCount < 2) {
                 retryCount++
-                val waitSec = parseWaitSeconds(e.message) ?: 10L
+                val waitSec = parseWaitSeconds(e.message) ?: 30L
+                session.pause()
                 Thread.sleep(waitSec * 1000)
+                session.resume()
                 continue  // 重试当前 turn
             } else {
-                return Result.Error("Rate Limit 重试耗尽")
+                session.pause()
+                return Result.Error("429 Rate Limit 重试耗尽")
             }
         }
 
-        // 流中断 — 保留已接收文本
-        e is SocketTimeoutException || e is IOException -> {
+        // 5xx 服务器错误 — 退避重试（1s → 3s → 9s，最多 3 次）
+        e is InternalServerException -> {
+            val backoffDelays = longArrayOf(1_000L, 3_000L, 9_000L)
+            if (serverErrorRetryCount < 3) {
+                Thread.sleep(backoffDelays[serverErrorRetryCount])
+                serverErrorRetryCount++
+                continue  // 重试当前 turn
+            } else {
+                session.markError("5xx — 退避重试耗尽")
+                return Result.Error("服务器错误: ${e.message}")
+            }
+        }
+
+        // 网络超时 — 退避重试（2s → 5s → 10s，最多 3 次）
+        e is SocketTimeoutException -> {
+            val backoffDelays = longArrayOf(2_000L, 5_000L, 10_000L)
+            if (timeoutRetryCount < 3) {
+                Thread.sleep(backoffDelays[timeoutRetryCount])
+                timeoutRetryCount++
+                continue  // 重试当前 turn
+            } else {
+                output.append("\n[连接中断]")
+                session.markError("连接中断: ${e.message}")
+                return Result.Error("连接中断: ... 已接收文本: ${output.take(500)}")
+            }
+        }
+
+        // 400 context too long — 强制 compact 后重发
+        e is BadRequestException -> {
+            if (isContextTooLong(e.message)) {
+                if (compactIfNeeded()) {
+                    continue  // compact 成功后重试
+                } else {
+                    return Result.Error("上下文过大，请使用 /clear 或 /new")
+                }
+            } else {
+                return Result.Error("请求参数错误: ${e.message}")
+            }
+        }
+
+        // IO 流中断 — 保留已接收文本，直接返回错误
+        e is IOException -> {
+            output.append("\n[连接中断]")
             session.markError("连接中断: ${e.message}")
             return Result.Error("连接中断: ... 已接收文本: ${output.take(500)}")
         }
@@ -75,11 +119,14 @@ try {
 
 ### 2.2 错误处理决策表
 
-| HTTP 状态码   | 异常类型                                     | 处理策略                     | 重试次数   | 用户感知                  |
-|------------|------------------------------------------|--------------------------|--------|-----------------------|
-| 429        | `RateLimitException`                     | 解析 Retry-After → 等待 → 重试 | 最多 2 次 | 自动静默重试，2 次后报错         |
-| 超时/断连      | `SocketTimeoutException` / `IOException` | 保留已接收文本 → 返回错误           | 0      | 已渲染内容保留，含 `[连接中断]` 标注 |
-| 其他 4xx/5xx | SDK 内置异常                                 | 直接返回错误                   | 0      | 错误消息显示在气泡中            |
+| HTTP 状态码 | 异常类型                                    | 处理策略                              | 重试次数               | 用户感知                                   |
+|----------|-----------------------------------------|-----------------------------------|--------------------|----------------------------------------|
+| 429      | `RateLimitException`                    | 解析 Retry-After → PAUSED → 等待 → 重试 | 最多 2 次             | 进入 PAUSED 自动静默重试，2 次后 PAUSED + 建议降并发   |
+| 5xx      | `InternalServerException`               | 退避重试：1s → 3s → 9s                 | 最多 3 次             | 自动静默重试，3 次后 ERROR                      |
+| 超时       | `SocketTimeoutException`                | 退避重试：2s → 5s → 10s                | 最多 3 次             | 3 次均失败 → ERROR，已渲染内容 + `[连接中断]`        |
+| 400      | `BadRequestException`（context too long） | 不重试，强制 compact 后重发                | 0（compact 后重试 1 次） | compact 成功则自动重发；仍失败 → 提示 /clear 或 /new |
+| 400（其他）  | `BadRequestException`                   | 不重试，直接返回错误                        | 0                  | 错误消息显示在气泡中                             |
+| IO 异常    | `IOException`                           | 保留已接收文本 + `[连接中断]` 标注 → 直接返回错误    | 0                  | 已渲染内容保留，含 `[连接中断]` 标注                  |
 
 ### 2.3 Rate Limit 等待时间解析
 
@@ -211,15 +258,16 @@ object AppLogger {
 
 ## 七、各模块错误策略对比
 
-| 维度         | Agent                  | Completion    | Git Message |
-|------------|------------------------|---------------|-------------|
-| HTTP 库     | Anthropic SDK (OkHttp) | OkHttp 单例     | OkHttp      |
-| 重试         | ✅ 429 自动重试 2 次         | ✅ 指数退避 2 次    | ❌ 不重试       |
-| 重试等待       | 解析 Retry-After（默认 10s） | 200ms → 400ms | —           |
-| 流中断恢复      | ✅ 保留已接收 + 可重试          | —             | ❌ 丢失        |
-| 错误提示       | 气泡显示错误消息               | 静默（无候选）       | 对话框         |
-| 日志         | ✅ 分级记录                 | ❌ 无           | ❌ 无         |
-| API Key 验证 | 启动时可选验证                | ❌             | ❌           |
+| 维度         | Agent                                               | Completion    | Git Message |
+|------------|-----------------------------------------------------|---------------|-------------|
+| HTTP 库     | Anthropic SDK (OkHttp)                              | OkHttp 单例     | OkHttp      |
+| 重试         | ✅ 429 + 5xx + 超时 退避重试                               | ✅ 指数退避 2 次    | ❌ 不重试       |
+| 重试等待       | 429: Retry-After(默认30s) / 5xx: 1-3-9s / 超时: 2-5-10s | 200ms → 400ms | —           |
+| 流中断恢复      | ✅ 保留已接收 + 可重试                                       | —             | ❌ 丢失        |
+| 400 过大     | ✅ 强制 compact 后重发                                    | ❌             | ❌           |
+| 错误提示       | 气泡显示错误消息                                            | 静默（无候选）       | 对话框         |
+| 日志         | ✅ 分级记录                                              | ❌ 无           | ❌ 无         |
+| API Key 验证 | 启动时可选验证                                             | ❌             | ❌           |
 
 ## 八、待改进
 

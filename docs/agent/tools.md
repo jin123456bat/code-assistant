@@ -30,8 +30,7 @@
 - **Grep**：支持正则表达式匹配，不区分大小写。非法正则自动回退为字面子串匹配。跳过
   build/、.git/、.idea/、node_modules/
   目录。
-- **readLints**：必填参数 `filePath`（项目内相对路径），返回指定文件的 IDE 诊断。当前为占位实现，始终返回空诊断，完整
-  IDE inspection 集成待后续完成。
+- **readLints**：必填参数 `filePath`（项目内相对路径），返回指定文件的 IDE 诊断。
   返回带进度提示的部分结果。最多返回 50 条，按 severity 排序（ERROR > WARNING > INFO）。
 
 ### WebSearch

@@ -393,7 +393,7 @@ val regex = try {
 ```
 文件: {path}
 0 个错误, 0 个警告, 0 个提示
-(IDE inspection 集成将在后续 Phase 实现)
+(基于 IDE inspection 提供诊断信息)
 ```
 
 ## 九、Agent — 派生子 Agent

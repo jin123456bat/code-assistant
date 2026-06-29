@@ -22,7 +22,7 @@
 |------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | 并发控制       | `Semaphore(maxConcurrentAgents)` 限制全局 Agent 并发总数（父 + 子总计）。默认 3（1 父 + 最多 2 子），0=不限，可在 Settings 中修改。排队策略：FIFO 公平排队，先请求先获得                                                                                                        |
 | 文件写锁       | `ConcurrentHashMap<VirtualFile, ReentrantLock>`（所有 Agent 共享）                                                                                                                                                                   |
-| 递归限制       | 最多 1 层嵌套（子不可再 spawn 孙）。Phase 5 后可评估是否放宽                                                                                                                                                                                        |
+| 递归限制       | 最多 1 层嵌套（子不可再 spawn 孙）                                                                                                                                                                                                         |
 | 结果摘要       | ≤ 2000 tokens 写入父的 toolResult。摘要 = 子 Agent 最后一轮 assistant 消息 + 所有 tool call 结果原文拼接，截断到 2000 tokens。不额外调用 LLM 生成摘要                                                                                                              |
 | 子 Session  | 独立持久化（`session.parentId` 关联）                                                                                                                                                                                                   |
 | 上下文构建      | 子 Agent 上下文独立构建，不继承父 Agent 的历史对话。仅包含：① System Prompt 基础部分（角色指令 + 工具描述 + 环境信息，不含父的对话历史摘要） + ② 父的 `prompt` 参数作为首条 user message。子 Agent 结束后，结果摘要通过回调写回父的 toolResult                                                               |
@@ -127,7 +127,7 @@
 
 **通信规则：**
 
-- **v1 规则**：子 Agent 之间**禁止直接通信**。所有协调通过父 Agent——父 Agent spawn 子 Agent →
+- **规则**：子 Agent 之间**禁止直接通信**。所有协调通过父 Agent——父 Agent spawn 子 Agent →
   接收回调 → 决定是否 spawn 更多子 Agent。
 - **同步/异步**：见 [Agent 工具参数](../agent/tools.md#agent)
 - **并发上限**：见 [关键约束](#二关键约束) 中的并发控制

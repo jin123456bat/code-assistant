@@ -102,7 +102,7 @@ private val monoFont = run {
 }
 ```
 
-## 五、不支持的元素（v1 限制）
+## 五、不支持的元素
 
 以下 Markdown 元素当前不解析，会被识别为 Paragraph：
 
