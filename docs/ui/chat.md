@@ -156,7 +156,7 @@ DeepSeek V4 在流式响应中会先输出 `reasoning_content`（思考过程）
 | ✅ DONE               | TestPassed | 绿色       | 执行成功            |
 | ❌ ERROR              | TestFailed | 红色       | 执行失败，含 [重试] 按钮  |
 | ⏰ TIMEOUT            | Warning    | 橙色       | 超时              |
-| 🚫 REJECTED          | Suspend    | 灰色       | 用户拒绝，含 [重审] 按钮  |
+| 🚫 REJECTED          | Suspend    | 灰色       | 用户拒绝            |
 | ⛔ CANCELLED          | Suspend    | 灰色       | 用户终止            |
 
 ### 折叠/展开规则
@@ -426,7 +426,7 @@ ChatViewModel
 
 ChatMessage:
 ├── id: String
-├── type: USER_TEXT | AGENT_TEXT | TOOL_CALL | TOOL_RESULT | ERROR | SYSTEM
+├── type: USER_TEXT | AGENT_TEXT | TOOL_CALL | ERROR | SYSTEM   // TOOL_RESULT 不独立渲染，结果内嵌在 ToolCallCard 中
 ├── content: String                        // Markdown 源码
 ├── toolCall: ToolCallUIData?              // TOOL_CALL 类型的额外数据
 ├── timestamp: Instant
@@ -512,10 +512,4 @@ ApprovalDialog
 
 ### 审批触发规则
 
-| 场景         | 触发条件                                                | 审批类型           |
-|------------|-----------------------------------------------------|----------------|
-| 首次工具使用     | 每个会话每种工具首次调用                                        | 首次审批（可"允许此会话"） |
-| Shell 危险命令 | `rm -rf /`, `git push --force`, `sudo`, `chmod 777` | 危险命令确认（不可跳过）   |
-| 公共 API 变更  | Edit/Write 修改 `public`/`open` 方法签名                  | 关键操作确认         |
-| 大范围修改      | 同一 turn 修改 ≥5 个文件                                   | 关键操作确认         |
-| 文件删除       | Bash 含 `rm ` 且目标在项目内                                | 关键操作确认         |
+详见 [工具系统 §六](../agent/tools.md#六审批机制)。

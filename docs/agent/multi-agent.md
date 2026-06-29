@@ -25,6 +25,7 @@
 | 递归限制       | 最多 1 层嵌套（子不可再 spawn 孙）。Phase 5 后可评估是否放宽                                                                                                       |
 | 结果摘要       | ≤ 2000 tokens 写入父的 toolResult。摘要 = 子 Agent 最后一轮 assistant 消息 + 所有 tool call 结果原文拼接，截断到 2000 tokens。不额外调用 LLM 生成摘要                             |
 | 子 Session  | 独立持久化（`session.parentId` 关联）                                                                                                                  |
+| 上下文压缩      | 子 Agent 复用父的 Auto-Compact 机制（同一阈值、策略），详见 [context.md §二](context.md#二auto-compact)                                                            |
 | 子 Agent 失败 | 子 Agent crash → `"Sub-agent failed: <error>"`；超时 → `"Sub-agent timeout: {timeout}s"`。父 LLM 自行决定重试或调整策略。crash/超时后自动清理：释放信号量、释放文件写锁、销毁 Shell 进程 |
 
 ## 三、子代理审批与工具限制

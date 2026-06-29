@@ -363,15 +363,7 @@ Chat 页面内流转（统一模式，无需切换）:
 
 ### messageBus 事件总线
 
-| Topic                   | 消息类型                                            | 发布者            | 订阅者                    |
-|-------------------------|-------------------------------------------------|----------------|------------------------|
-| `SessionChanged`        | sessionId + changeType(CREATED/UPDATED/DELETED) | SessionManager | SessionsPage, ChatPage |
-| `AgentStateChanged`     | newState (IDLE/PROCESSING/...)                  | AgentSession   | ChatPage, TabBar       |
-| `TokenUsageUpdated`     | sessionId + delta                               | AgentSession   | TokenUsagePage         |
-| `McpServerStateChanged` | serverId + newState                             | McpManager     | McpPage                |
-| `ApiKeyValidated`       | keyState (VALID/INVALID/UNKNOWN)                | WelcomePage    | ChatPage, SettingsPage |
-| `PlanStateChanged`      | sessionId + planStatus + currentPlan            | PlanExecutor   | ChatPage, SessionsPage |
-| `PageSwitched`          | from + to (PageId)                              | ChatToolWindow | 所有 Page                |
+完整 Topic 契约（消息类型、字段、发布者、订阅者）详见 [specs/event-bus.md](../specs/event-bus.md)。
 
 ## 十二、组件接口
 

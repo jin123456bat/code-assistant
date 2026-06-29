@@ -56,10 +56,4 @@
 
 ## ToolExecutor 线程分配
 
-| 工具                                                                | 执行线程                                                   |
-|-------------------------------------------------------------------|--------------------------------------------------------|
-| Read / Glob / Grep / ReadLints                                    | Background Thread                                      |
-| Write / Edit                                                      | `invokeAndWait { WriteCommandAction }`                 |
-| Bash                                                              | Background Thread（`ProcessHandler` + 实时 `onOutput` 回调） |
-| Task                                                              | `MultiAgentManager.spawn()`                            |
-| createPlan / listPlans / removePlan / reorderPlans / markPlanDone | `PlanExecutor`                                         |
+详见 [工具系统 §三](../agent/tools.md#三工具执行分发)。

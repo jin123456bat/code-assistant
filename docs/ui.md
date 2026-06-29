@@ -54,14 +54,5 @@ Code Assistant 的界面设计——基于 IntelliJ Platform 的 Swing 多页面
 
 ## 页面间通信
 
-通过 `project.messageBus` 事件总线：
-
-| Topic                   | 发布者            | 订阅者                    |
-|-------------------------|----------------|------------------------|
-| `SessionChanged`        | SessionManager | SessionsPage, ChatPage |
-| `AgentStateChanged`     | AgentSession   | ChatPage, TabBar       |
-| `TokenUsageUpdated`     | AgentSession   | TokenUsagePage         |
-| `McpServerStateChanged` | McpManager     | McpPage                |
-| `ApiKeyValidated`       | WelcomePage    | ChatPage, SettingsPage |
-| `PlanStateChanged`      | PlanExecutor   | ChatPage, SessionsPage |
-| `PageSwitched`          | ChatToolWindow | 所有 Page                |
+通过 `project.messageBus` 事件总线。完整 Topic
+契约（消息类型、字段、发布者、订阅者）详见 [specs/event-bus.md](specs/event-bus.md)。

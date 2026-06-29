@@ -15,7 +15,7 @@
 | `readLints`       | `filePath`, `timeout`                                                                        | —（扩展工具）   | IDE Inspections     | ≤ 50 条诊断                                 |
 | `Agent`           | `prompt`（必填，任务描述）, `timeout`（必填，int，子 Agent 超时秒数，0=不限）, `run_in_background`（必填，bool，true=异步） | Agent     | AgentLoop 复用        | 结果摘要 ≤ 2000 tokens                       |
 | `Skill`           | `skill`, `args?`                                                                             | Skill     | SkillManager        | LLM 自主判断触发时机                             |
-| `WebSearch`       | `query`, `allowedDomains?`, `blockedDomains?`                                                | —（扩展工具）   | HTTP API            | 搜索网页，返回标题+URL 列表                         |
+| `WebSearch`       | `query`, `allowedDomains?`, `blockedDomains?`, `offset?`                                     | —（扩展工具）   | HTTP API            | 搜索网页，返回标题+URL 列表，支持 offset 翻页            |
 | `WebFetch`        | `url`, `prompt`                                                                              | —（扩展工具）   | HTTP API            | 抓取 URL 内容并提取信息                           |
 | `AskUserQuestion` | `questions[]`（1-4 个，含 options/multiSelect）                                                   | —（扩展工具）   | IDE Dialog          | 向用户发起多选/单选问题以澄清需求                        |
 | `Symbol`          | `operation`, `filePath`, `line`, `character`, `query?`                                       | —（扩展工具）   | PSI + StubIndex     | 代码导航（8 种操作）：跳转定义/实现、查引用、类型提示、文件/全局符号、调用链 |
@@ -35,27 +35,26 @@
 
 搜索网页，返回匹配结果的标题和 URL 列表。当前仅支持美国区域搜索。
 
-| 特性       | 说明                                                                |
-|----------|-------------------------------------------------------------------|
-| **参数**   | `query`（必填，≥2 字符）、`allowedDomains?`（限定域名）、`blockedDomains?`（排除域名） |
-| **返回**   | 结果块列表，每个含 `title` + `url`。无结果时返回空列表                               |
-| **上限**   | 无硬性上限，服务器端控制返回数量                                                  |
-| **缓存**   | 15 分钟内相同查询返回缓存结果                                                  |
-| **工作目录** | 不适用（纯网络操作）                                                        |
-| **适用场景** | 查找最新技术文档、API 参考、开源库用法；不适合查询实时数据或需要登录的页面                           |
+| 特性       | 说明                                                                                       |
+|----------|------------------------------------------------------------------------------------------|
+| **参数**   | `query`（必填，≥2 字符）、`allowedDomains?`（限定域名）、`blockedDomains?`（排除域名）、`offset?`（翻页起始位置，默认 0） |
+| **返回**   | 结果块列表，每个含 `title` + `url`。无结果时返回空列表                                                      |
+| **上限**   | ≤ 10 条/页，超出时用 `offset` 翻页获取更多                                                            |
+| **翻页**   | 返回值尾部标注 `... (共 N 条，已返回 10 条。用 offset=10 翻页获取更多)`                                        |
+| **工作目录** | 不适用（纯网络操作）                                                                               |
+| **适用场景** | 查找最新技术文档、API 参考、开源库用法；不适合查询实时数据或需要登录的页面                                                  |
 
 ### WebFetch
 
 抓取指定 URL 的网页内容，转为 Markdown 后按 prompt 提取信息。
 
-| 特性       | 说明                                          |
-|----------|---------------------------------------------|
-| **参数**   | `url`（必填）、`prompt`（必填，描述要提取的内容）             |
-| **返回**   | 基于 prompt 从页面内容中提取的信息摘要                     |
-| **重定向**  | 跨主机重定向返回给 LLM 而非自动跟随，由 LLM 决定是否用新 URL 重新调用  |
-| **缓存**   | 15 分钟内相同 URL 返回缓存结果                         |
-| **限制**   | HTTP 自动升级为 HTTPS；不支持需认证/登录的页面；不支持 PDF/二进制文件 |
-| **适用场景** | 阅读官方文档页面、查看 GitHub README、获取技术博客内容          |
+| 特性       | 说明                                                |
+|----------|---------------------------------------------------|
+| **参数**   | `url`（必填）、`prompt`（必填，描述要提取的内容）                   |
+| **返回**   | 基于 prompt 从页面内容中提取的信息摘要                           |
+| **重定向**  | 跨主机重定向返回给 LLM 而非自动跟随，由 LLM 决定是否用新 URL 重新调用        |
+| **限制**   | HTTP 自动升级为 HTTPS；不支持需认证/登录的页面；不支持 PDF/二进制文件；不支持缓存 |
+| **适用场景** | 阅读官方文档页面、查看 GitHub README、获取技术博客内容                |
 
 ### AskUserQuestion
 
@@ -140,13 +139,13 @@
 
 ## 二、5 个计划管理工具
 
-| 工具             | 参数                      | 用途                                   |
-|----------------|-------------------------|--------------------------------------|
-| `createPlan`   | `task` + `plans[]`      | 创建/更新执行计划，自动开始执行，≤ 20 项              |
-| `listPlans`    | 无                       | 查看当前计划的所有计划项及状态                      |
-| `removePlan`   | `planId: String`        | 删除指定计划项（仅 PAUSED 状态可删）               |
-| `reorderPlans` | `planIds: List<String>` | 重排剩余 PAUSED 计划项的执行顺序（传入新的 planId 序列） |
-| `markPlanDone` | `planId: String`        | 将指定计划项标记为 COMPLETED                  |
+| 工具             | 参数                      | 用途                                                                                                        |
+|----------------|-------------------------|-----------------------------------------------------------------------------------------------------------|
+| `createPlan`   | `task` + `plans[]`      | 创建/更新执行计划。`plans[]` 子字段（description/tool/files）详见 [plan.md §九 PlanItem](plan.md#九-planexecutor-接口)，≤ 20 项 |
+| `listPlans`    | 无                       | 查看当前计划的所有计划项及状态                                                                                           |
+| `removePlan`   | `planId: String`        | 删除指定计划项（仅 PAUSED 状态可删）                                                                                    |
+| `reorderPlans` | `planIds: List<String>` | 重排剩余 PAUSED 计划项的执行顺序（传入新的 planId 序列）                                                                      |
+| `markPlanDone` | `planId: String`        | 将指定计划项标记为 COMPLETED                                                                                       |
 
 ## 三、工具执行分发
 
@@ -162,7 +161,7 @@
 | WebSearch / WebFetch                                              | Background Thread                      | HTTP API 调用，不阻塞 EDT                    |
 | AskUserQuestion                                                   | `invokeAndWait { Dialog }`             | MODAL dialog 必须在 EDT 上弹出               |
 | Symbol                                                            | Background Thread                      | PSI 只读操作，基于 StubIndex 索引               |
-| createPlan / listPlans / removePlan / reorderPlans / markPlanDone | PlanExecutor（Agent 线程）                 | 计划任务管理                                 |
+| createPlan / listPlans / removePlan / reorderPlans / markPlanDone | PlanExecutor（Agent 线程）                 | 计划管理工具                                 |
 
 **超时机制：** 每个工具都包含必填的 `timeout` 参数（秒），由 LLM 在 tool call 时传入。0=不限。Bash 超时时强制
 `destroyForcibly()` 终止进程。其他 I/O 工具的 timeout 由 ToolExecutor 统一读取，目前作为安全兜底。
@@ -181,11 +180,11 @@
 | `readLints`       | 50 条诊断                        | 按 severity 排序（error > warning > info），截断后注 `还有 N 条未显示，优先展示 error 级别`    |
 | `Edit`/`Write`    | 写入 ≤ 3000 行                   | 超过拒绝并返回错误 `内容过长 (N 行, 上限 3000 行)`                                       |
 | `Agent`           | 返回 ≤ 2000 tokens 摘要           | 完整结果保存到子 session，LLM 看到摘要 + `详情见 sub-session #N`                        |
-| `WebSearch`       | 10 条结果（服务端控制）                 | 超出时服务端截断，不额外标注                                                          |
+| `WebSearch`       | ≤ 10 条/页                      | 尾部注 `... (共 N 条，已返回 10 条。用 offset=N 翻页获取更多)`                            |
 | `WebFetch`        | 无硬性上限（prompt 提取）              | 大页面自动截断，不额外标注                                                           |
 | `AskUserQuestion` | 无上限（用户输入）                     | 不适用                                                                     |
 | `Symbol`          | 引用/调用 ≤ 50，符号 ≤ 100，全局搜索 ≤ 20 | 尾部注 `还有 N 处未显示`。缩小范围请用更精确的查询参数                                          |
-| MCP 工具            | 200 行                         | 尾部注 `... (共 N 行，已截断到 200 行)`。MCP 工具不支持翻页（重新调用有副作用）                      |
+| MCP 工具（动态注册）      | 200 行                         | 尾部注 `... (共 N 行，已截断到 200 行)`。MCP 工具由 MCP Server 动态注册，不支持翻页（重新调用有副作用）    |
 
 ## 五、Shell 安全
 
@@ -218,7 +217,7 @@ spawn 的子代理内部所有工具调用一律放行，无需审批**。子代
 - **按钮**：首次审批场景有 [允许一次] / [允许此会话] / [拒绝]；危险命令无"允许此会话"按钮
 - **超时**：无超时（`CountDownLatch` 永久等待）。Agent Loop 在后台线程池，阻塞不占 EDT；审批弹窗是模态
   Dialog，用户离开前必须处理
-- **被拒绝后**：ToolCallCard 保留 [重审] 按钮，用户点击后从 IDLE 重新进入 AWAITING_APPROVAL，无需重新发送消息
+- **被拒绝后**：发送拒绝消息给 LLM（tool_result 含拒绝标记），由 LLM 判断是更换方式重试还是中断当前任务
 
 ### 审批白名单
 
@@ -255,7 +254,7 @@ AgentSession:
   └─ 否：弹出审批 dialog
         ├─ [允许一次]   → 执行，不修改白名单
         ├─ [允许此会话] → approvedTools.add(toolName)，执行
-        └─ [拒绝]       → 返回 IDLE，ToolCallCard 保留 [重审]
+        └─ [拒绝]       → 发送拒绝 tool_result 给 LLM → PROCESSING（LLM 决定继续或中止）
 ```
 
 **为什么仅内存不持久化：** 审批信任是用户当下的意图表达。IDE 重启后信任关系重置，避免过时的信任被滥用。对齐
@@ -316,15 +315,16 @@ ToolInfo (ToolRegistry 内部类):
 | `Write`           | `内容最多 3000 行。超过此限制的操作会被拒绝。`                                                                                                                                                                               |
 | `Skill`           | `执行指定 Skill。LLM 根据用户需求自主判断触发时机，将 SKILL.md 内容作为消息注入 conversation。`                                                                                                                                         |
 | `Agent`           | `启动子代理执行子任务。prompt 描述任务，timeout 子 Agent 超时秒数（必填，0=不限），run_in_background 是否异步（必填）。结果摘要最多 2000 tokens。完整执行过程保存为独立 Session。`                                                                                 |
-| `WebSearch`       | `搜索网页，返回标题和 URL 列表。最多返回 10 条结果。15 分钟内相同查询返回缓存结果。`                                                                                                                                                         |
-| `WebFetch`        | `抓取 URL 内容并按提示提取信息。HTTP 自动升级为 HTTPS。不支持需认证的页面。15 分钟内相同 URL 返回缓存结果。`                                                                                                                                       |
+| `WebSearch`       | `搜索网页，返回标题和 URL 列表。≤ 10 条/页，超出时用 offset 参数翻页。不支持缓存。`                                                                                                                                                      |
+| `WebFetch`        | `抓取 URL 内容并按提示提取信息。HTTP 自动升级为 HTTPS。不支持需认证的页面。不支持缓存。`                                                                                                                                                     |
 | `AskUserQuestion` | `向用户发起问题以澄清需求。一次 1-4 个问题，每题 2-4 个选项。支持多选。`                                                                                                                                                                |
 | `Symbol`          | `基于 IDE PSI 的语义导航（8 种操作）。goToDefinition 跳转定义、goToImplementation 查实现、findReferences 查引用（≤50）、hover 类型提示、documentSymbol 文件结构（≤100）、workspaceSymbol 全局搜索（≤20，需 query）、incomingCalls/outgoingCalls 调用链（≤50）。` |
-| `createPlan`      | `创建执行计划，最多 20 项。计划创建后自动开始执行，LLM 可用 listPlans/removePlan/reorderPlans 管理。`                                                                                                                                 |
+| `createPlan`      | `创建执行计划，最多 20 项。计划项初始 PAUSED，随后自动按序执行（PAUSED→EXECUTING→COMPLETED），详见 plan.md。LLM 可用 listPlans/removePlan/reorderPlans/markPlanDone 管理。`                                                                   |
 | `listPlans`       | `查看当前计划的所有计划项及状态，无参数。`                                                                                                                                                                                    |
 | `removePlan`      | `删除指定计划项（仅 PAUSED 状态可删）。`                                                                                                                                                                                 |
 | `reorderPlans`    | `重排剩余 PAUSED 计划项的执行顺序，传入新的 planId 序列。`                                                                                                                                                                    |
 | `markPlanDone`    | `将指定计划项标记为 COMPLETED。`                                                                                                                                                                                    |
+| MCP 工具            | `由 MCP Server 动态注册，工具名和参数由 Server 声明。输出 ≤ 200 行，不支持翻页。详见 [mcp.md](mcp.md)。`                                                                                                                               |
 
 ### 工具模型
 
@@ -363,18 +363,18 @@ ToolResultState = DONE | CANCELLED | ERROR
 
 ### 各工具的结果特征
 
-| 工具        | content 特征                   | isError=true 的触发条件          |
-|-----------|------------------------------|-----------------------------|
-| Read      | 文件内容 + 头部/尾部标注               | 文件不存在、读取失败                  |
-| Write     | 写入成功确认 + 行数/字节数              | 内容过长、写入异常                   |
-| Edit      | 修改前后 3 行对比 + 自动 readLints 结果 | oldString 未找到、匹配多处、stamp 冲突 |
-| Bash      | 退出码 + stdout/stderr，错误优先格式   | 退出码非零、超时                    |
-| Glob      | 目录树 + 条目统计                   | 目录不存在                       |
-| Grep      | 匹配行列表 + 文件:行号                | 无（0 条匹配不算错误）                |
-| readLints | 诊断列表（按 severity 排序）          | 索引未就绪                       |
-| Agent     | 子任务摘要 + sub-session ID       | 子 Agent 崩溃、超时               |
-| Skill     | SKILL.md 正文                  | Skill 不存在                   |
-| MCP 工具    | MCP Server 返回的原始内容           | MCP 调用失败、Server 断连          |
+| 工具           | content 特征                   | isError=true 的触发条件          |
+|--------------|------------------------------|-----------------------------|
+| Read         | 文件内容 + 头部/尾部标注               | 文件不存在、读取失败                  |
+| Write        | 写入成功确认 + 行数/字节数              | 内容过长、写入异常                   |
+| Edit         | 修改前后 3 行对比 + 自动 readLints 结果 | oldString 未找到、匹配多处、stamp 冲突 |
+| Bash         | 退出码 + stdout/stderr，错误优先格式   | 退出码非零、超时                    |
+| Glob         | 目录树 + 条目统计                   | 目录不存在                       |
+| Grep         | 匹配行列表 + 文件:行号                | 无（0 条匹配不算错误）                |
+| readLints    | 诊断列表（按 severity 排序）          | 索引未就绪                       |
+| Agent        | 子任务摘要 + sub-session ID       | 子 Agent 崩溃、超时               |
+| Skill        | SKILL.md 正文                  | Skill 不存在                   |
+| MCP 工具（动态注册） | MCP Server 返回的原始内容           | MCP 调用失败、Server 断连          |
 
 ### 在 Agent Loop 中的流转
 

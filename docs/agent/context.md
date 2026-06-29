@@ -84,9 +84,20 @@ compact 后从头重建上下文时：
 | Tools 定义           | 不会             | 是，每次从 `ToolRegistry.generateToolDescriptions()` | 每个工具的 JSON Schema + 上限声明                           |
 | Skill 注入正文         | 会参与压缩          | compact 后从磁盘重新注入（对齐 Claude Code）                | 确保关键约束不因摘要质量丢失。正文 ≤ 2000 tokens 以减少重新注入开销          |
 
+### 子 Agent 压缩行为
+
+子 Agent 拥有独立 Session，**复用父 Agent 的 Auto-Compact 机制**（同一阈值、同一压缩策略）。二者关系：
+
+| 阶段                | 行为                                                                           |
+|-------------------|------------------------------------------------------------------------------|
+| 子 Agent 运行中       | 独立触发 compact，与父 Agent 互不干扰                                                   |
+| 子 Agent 完成后       | 结果截断为 ≤ 2000 tokens 摘要返回父 Agent（见 [multi-agent.md §二](multi-agent.md#二关键约束)） |
+| 父 Agent compact 时 | 子 Agent 结果摘要作为普通消息参与压缩，不递归进入子 Session                                        |
+
 ## 三、max_tokens 自动续写
 
-当 LLM 在输出中途达到 `max_tokens` 限制时，Agent 自动发送一条 `role=USER, content="继续"` 消息，让 LLM
+当 LLM 在输出中途达到 `max_tokens` 限制时，Agent 自动追加一条 `role: "user", content: "继续"` 的 API
+消息，让 LLM
 从中断处继续输出。
 
 ```

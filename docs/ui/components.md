@@ -172,21 +172,8 @@ ChatViewModel
     ├── images: List<ImageRef>
     └── tokenCount: Int
 
-ChatMessage:
-├── id: String
-├── type: USER_TEXT | AGENT_TEXT | TOOL_CALL | TOOL_RESULT | ERROR | SYSTEM
-├── content: String
-├── toolCall: ToolCallUIData?
-├── timestamp: Instant
-└── tokenDelta: TokenDelta?
-
-ToolCallUIData:
-├── toolName: String
-├── parameters: Map<String, Any>
-├── state: PENDING | AWAITING_APPROVAL | EXECUTING | DONE | ERROR | TIMEOUT | REJECTED | CANCELLED
-├── result: String?
-├── durationMs: Long?
-└── planId: String?
+ChatMessage → 见 [chat.md](chat.md) ChatMessage 接口定义
+ToolCallUIData → 见 [chat.md](chat.md) ToolCallUIData 接口定义
 
 ImageRef:
 ├── id: String (UUID)
@@ -311,12 +298,5 @@ ApprovalDialog
 ├── 超时: 无超时（CountDownLatch 永久等待）
 └── 生命周期: dispose() 时必须 countDown() 释放 latch
 
-审批触发规则:
-| 场景         | 触发条件                              | 审批类型           |
-|------------|-----------------------------------|----------------|
-| 首次工具使用     | 每个会话每种工具首次调用                      | 首次审批           |
-| Shell 危险命令 | rm -rf /, git push --force, sudo... | 危险命令确认（不可跳过）   |
-| 公共 API 变更  | Edit/Write 修改 public 方法签名         | 关键操作确认  |
-| 大范围修改      | 同一 turn 修改 ≥5 个文件                | 关键操作确认  |
-| 文件删除       | Bash 含 rm 且目标在项目内               | 关键操作确认  |
+审批触发规则详见 [工具系统 §六](../agent/tools.md#六审批机制)。
 ```

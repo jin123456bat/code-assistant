@@ -1,7 +1,7 @@
 # Agent Loop
 
 >
-关联文档：[工具系统](./tools.md)、[Plan Mode](./plan.md)、[上下文管理](./context.md)、[多 Agent 协作](./multi-agent.md)
+关联文档：[工具系统](./tools.md)、[Plan Mode](./plan.md)、[上下文管理](./context.md)、[多 Agent 协作](./multi-agent.md)、[Settings](../specs/settings.md)
 
 ## 一、主循环
 
@@ -10,7 +10,7 @@ tool_use、调度工具执行、回传结果，直到对话自然结束或被用
 
 ```
 val effectiveMaxTurns = if (maxTurns == 0) Int.MAX_VALUE else maxTurns  // 0=不限，内部转为最大值
-var continueStreak = 0                           // 当前轮续写链长度（每轮重置）
+var continueStreak = 0                           // 当前轮续写链长度（仅 max_tokens 时累加，其余退出路径归零）
 while (turn < effectiveMaxTurns && !cancelled):
   ├─ if (stop_reason != "max_tokens") turn++       ← 仅用户消息触发的 API 调用计数，续写不增加 turn
   ├─ compactIfNeeded(system, messages, tools, modelLimit) ← 估算实际总 token，超 modelLimit × 0.7 阈值则压缩 messages
@@ -50,7 +50,7 @@ while (turn < effectiveMaxTurns && !cancelled):
   │                      未超 → 追加临时 "继续" 消息（不持久化），循环回到顶部继续（续写不增加 turn）
   │    "stop_sequence" → continueStreak = 0, 退出 while。在 assistant 消息尾部追加系统标注 "[响应被 stop_sequence 终止]"
   │
-stop: cancelled → 按[第五节清理顺序](#五项目关闭清理)逐步关闭
+stop: cancelled → continueStreak = 0, 按[第五节清理顺序](#五项目关闭清理)逐步关闭
 ```
 
 **关键分支说明：**
@@ -79,7 +79,7 @@ IDLE ──sendMessage()──→ PROCESSING ──LLM 返回输出──→ IDL
   │                        │
   │                        ├── toolUse → AWAITING_APPROVAL（如有审批）
   │                        │     ├─ 确认 → EXECUTING → PROCESSING
-  │                        │     └─ 拒绝 → IDLE（[重审] 按钮可重试）
+  │                        │     └─ 拒绝 → 发送拒绝 tool_result → PROCESSING（LLM 决定更换方式或中断）
   │                        │
   │                        └── 无审批 → EXECUTING → PROCESSING
   │
@@ -93,7 +93,7 @@ IDLE ──sendMessage()──→ PROCESSING ──LLM 返回输出──→ IDL
 |---------------------|----------------------------------------------------------------------------------------|
 | `IDLE`              | 可接受输入，无进行中的 Agent 操作                                                                   |
 | `PROCESSING`        | LLM 流式输出中，或 tool 结果已提交等待 LLM 响应                                                        |
-| `AWAITING_APPROVAL` | 弹出审批 dialog，等待用户操作（无超时，等待用户操作 → IDLE）                                                  |
+| `AWAITING_APPROVAL` | 弹出审批 dialog，等待用户操作（无超时）。确认 → EXECUTING，拒绝 → PROCESSING。详见 [工具系统](./tools.md) 审批流程      |
 | `EXECUTING`         | 工具正在执行（非阻塞，UI 显示进度）                                                                    |
 | `CANCELLED`         | 用户中断，清理中                                                                               |
 | `ERROR`             | API 调用失败或 tool 执行异常，等待用户操作                                                             |
@@ -202,7 +202,7 @@ AgentLoop
 ├── modelContextLimit: Int = 1_000_000  // 模型上下文窗口大小（DeepSeek V4 的 1M tokens，写死）
 ├── maxAutoContinue: Int = 5            // max_tokens 自动续写最大次数（单轮内连续续写链长度）
 ├── autoContinueMessage: String = "继续" // max_tokens 时自动发送的续写消息
-├── continueStreak: Int = 0              // 当前轮内续写链已执行次数，end_turn 后归零
+├── continueStreak: Int = 0              // 当前轮内续写链已执行次数，仅 max_tokens 累加，其余退出路径归零
 ├── turnWarningRatio: Double = 0.6      // 轮次预警触发比例
 └── turnWarningMessage: String          // 轮次预警文本模板
 ```
@@ -242,12 +242,19 @@ AgentSession
 
 AgentState = IDLE | PROCESSING | AWAITING_APPROVAL | EXECUTING | CANCELLED | ERROR | PAUSED
 
-Message:
+Message:（内部 UI 模型。API 层 message.role 仅 `user`/`assistant`，content block.type 为 `text`/`tool_use`/`tool_result`，详见 [DeepSeek 文档](https://api-docs.deepseek.com/zh-cn/guides/anthropic_api)）
 ├── id: String
-├── role: USER | ASSISTANT | SYSTEM | TOOL_CALL | TOOL_RESULT | ERROR
+├── role: USER | ASSISTANT | SYSTEM | ERROR          // 消息级角色，与 API role 对应：
+│                                                      //   USER → API role="user"
+│                                                      //   ASSISTANT → API role="assistant"
+│                                                      //   SYSTEM/ERROR → 内部生成，不直接对应 API
+├── contentType: TEXT | TOOL_USE | TOOL_RESULT       // 内容块类型，映射到 API content block.type：
+│                                                      //   TEXT → type="text"
+│                                                      //   TOOL_USE → type="tool_use"（位于 ASSISTANT 消息内）
+│                                                      //   TOOL_RESULT → type="tool_result"（位于 USER 消息内）
 ├── content: String
 ├── timestamp: Instant
-├── toolCalls: List<ToolCallRecord>?   // ASSISTANT 消息可能含工具调用
+├── toolCalls: List<ToolCallRecord>?   // ASSISTANT 消息可能含工具调用记录
 ├── tokenUsage: TokenDelta?            // ASSISTANT 消息的 token 消耗
 ├── feedback: String?                  // 用户反馈 "positive" | "negative"
 └── deleted: Boolean = false           // 回退标记，true 时持久化保留但 UI 不渲染
@@ -257,3 +264,8 @@ TokenUsage:
 ├── outputTokens: Long
 └── timestamp: Instant
 ```
+
+## 八、/clear 和 /new
+
+行为详见 [上下文管理 - /clear 和 /new](./context.md#四clear-和-new)
+。二者等价——重置当前会话（messages/plan/compactSummary/totalTokens 清空，session.id 复用）。
