@@ -160,6 +160,7 @@ ChatViewModel
 │   → session.compactSummary = null, session.compactCount = 0
 │   → session.plan = null
 │   → session.totalTokens 归零
+│   → session.approvedTools 保留（不清除审批信任）
 │   → 复用当前 session.id，不新建文件
 │
 ├── rollbackToMessage(messageId: String)
@@ -283,20 +284,15 @@ ChatInputArea
 └── 剪贴板监听
 ```
 
-### ApprovalDialog
+### 审批内嵌卡片（ToolCallCard AWAITING_APPROVAL）
 
-```
-ApprovalDialog
-├── 类型: MODAL
-├── 布局: BorderLayout
-│   ├── NORTH: JLabel 标题行
-│   ├── CENTER: JTextPane（只读）
-│   └── SOUTH: JPanel(FlowLayout.RIGHT) 按钮行
-│       ├── [允许一次]
-│       ├── [允许此会话]
-│       └── [拒绝]
-├── 超时: 无超时（CountDownLatch 永久等待）
-└── 生命周期: dispose() 时必须 countDown() 释放 latch
+审批不弹独立 Dialog，而是复用 ToolCallCard 的 `AWAITING_APPROVAL` 状态，在消息流中**内嵌**呈现审批按钮：
+
+| 属性        | 值                                          |
+|-----------|--------------------------------------------|
+| **交互位置**  | 嵌入 ChatPage 消息流，ToolCallCard 自动展开          |
+| **按钮**    | `[允许一次]` `[允许此会话]` `[拒绝]`（危险命令无"允许此会话"）    |
+| **阻塞**    | 卡片不可折叠 + CountDownLatch，Agent Loop 在后台线程等待 |
+| **无关闭概念** | 用户只能选择批准/拒绝，不存在关闭窗口绕过审批的路径                 |
 
 审批触发规则详见 [工具系统 §六](../agent/tools.md#六审批机制)。
-```

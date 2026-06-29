@@ -20,7 +20,7 @@
 - 列出目录结构
 - 搜索代码内容
 - 读取 IDE 诊断信息（错误和警告）
-- 启动子代理处理子任务
+- 启动子 Agent 处理子任务
 
 当前项目：{projectName}
 项目路径：{projectBasePath}

@@ -42,3 +42,26 @@ AppSettingsService（SettingsConfigurable 读写）
 
 Settings 页面实际为关于页 + 快捷键参考 + IDE 设置入口卡片，不包含 Agent 配置编辑控件。Agent 配置通过
 `Settings > Tools > Code Assistant` 的 IDE SettingsConfigurable 面板管理。
+
+---
+
+## 配置项索引（全项目）
+
+以下汇总所有可配置项及其所在位置，避免分散查找：
+
+| 配置项             | 默认值                 | 范围/可选值             | 存储方式                  | 说明文档                                                    |
+|-----------------|---------------------|--------------------|-----------------------|---------------------------------------------------------|
+| API Key         | —                   | —                  | `PasswordSafe`        | 本文 §设置项详解                                               |
+| Model           | `deepseek-v4-pro`   | 固定                 | `PropertiesComponent` | 本文 §设置项详解                                               |
+| 代码补全开关          | `true`              | on/off             | `PropertiesComponent` | [completion.md](../../docs/completion.md#八配置项)          |
+| 补全 max_tokens   | `256`               | 1-1024             | `PropertiesComponent` | [completion.md](../../docs/completion.md#八配置项)          |
+| Commit Prompt   | `""`（使用默认）          | 自定义模板              | `PropertiesComponent` | [git-message.md](../../docs/git-message.md#八配置项)        |
+| Agent 最大轮次      | `20`                | 0=不限               | `PropertiesComponent` | [agent.md](../../docs/agent.md#配置项)                     |
+| 多 Agent 并发上限    | `3`                 | 0=不限               | `PropertiesComponent` | [multi-agent.md](../../docs/agent/multi-agent.md#二关键约束) |
+| 补全缓存 TTL        | `60s`               | 固定                 | 内存（不可配）               | [completion.md](../../docs/completion.md#五缓存策略)         |
+| 上下文窗口           | `1M tokens`         | 固定（DeepSeek V4 上限） | 硬编码                   | [context.md](../../docs/agent/context.md)               |
+| Auto-Compact 阈值 | `70%` (700K tokens) | 固定                 | 硬编码                   | [auto-compact.md](auto-compact.md)                      |
+| Shell 超时        | LLM 每次 tool call 传入 | 0=不限               | 非 Settings            | [tools.md](../../docs/agent/tools.md#五shell-安全)         |
+
+> **不在 Settings 中的固定值：** Shell 超时由 LLM 每次传入（非用户配置）、缓存 TTL 60s、上下文窗口
+> 1M tokens、Compact 阈值 70%——这些为硬编码常量，不暴露为可配置项。

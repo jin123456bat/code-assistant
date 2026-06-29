@@ -46,8 +46,11 @@ Code Assistant 的界面设计——基于 IntelliJ Platform 的 Swing 多页面
 ## 核心技术栈
 
 - **UI 框架：** IntelliJ Platform Swing（JPanel / JTextPane / EditorTextField / JScrollPane）
-- **Markdown 渲染：** `org.intellij.plugins.markdown` bundled plugin（13 个核心 PSI 类型可用，含表格）
-- **代码块渲染：** `EditorTextField` 只读模式，语法高亮
+- **Markdown 渲染：** 手写字符串解析器，5 种 Block
+  类型（Paragraph/CodeBlock/Header/ListItem/QuoteBlock），详见 [
+  `docs/agent/markdown-rendering.md`](agent/markdown-rendering.md)
+- **代码块渲染：** `JTextArea` 只读模式（JetBrains Mono 等宽字体），非 `EditorTextField`。详见 [
+  `docs/agent/markdown-rendering.md`](agent/markdown-rendering.md)
 - **流式渲染：** 首 token 即时渲染，后续 token 静默合并（token 停顿 ≥30ms 后批量 flush）
 - **主题适配：** `JBColor` 亮/暗双主题自动切换
 - **页面路由：** CardLayout 懒加载，首屏只创建 Welcome + Chat

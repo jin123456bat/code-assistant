@@ -114,10 +114,17 @@ LLM 通过工具管理计划:
 
 ### Plan 解析流程（4 层回退）
 
-1. 提取 ` ```json ``` ` → Gson → Plan
-2. 搜索裸 `{ ... }` → Gson → Plan
-3. 正则 `"Plan N: "` → 文本拆分 → Plan
-4. 原始文本 → `Plan(summary=原始文本, plans=[Plan(description=原始文本)])`
+1. **JSON 代码块**：提取 ` ```json ... ``` ` → Gson 反序列化 → `Plan`
+    - 示例输入：
+      `` ```json {"task": "重构", "plans": [{"description": "读取文件", "tool": "Read", "files": ["UserService.kt"]}]} ``` ``
+2. **裸 JSON**：搜索 `{ ... }` → Gson 反序列化 → `Plan`（跳过代码块标记不匹配的情况）
+    - 示例输入：`{"task": "重构 UserService", "plans": [...]}`（无 ``` 包裹）
+3. **正则文本**：正则 `/Plan \d+:/` → 按 `Plan N:` 拆分文本 → `Plan`
+    - 示例输入：`Plan 1: 读取 UserService.kt，用 Read 工具\nPlan 2: 修改方法签名，用 Edit 工具`
+4. **原始文本**：前三层均失败时兜底 → `Plan(summary=原始文本, plans=[PlanItem(description=原始文本)])`
+    - 将整个 LLM 输出作为一个计划项，让 PlanExecutor 逐条尝试
+
+> 任一层解析成功后立即返回，不再尝试后续层。全部 4 层失败 → Plan 创建失败，错误反馈给 LLM 重试。
 
 ### Plan 生命周期
 

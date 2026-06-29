@@ -41,8 +41,8 @@
 - Background → UI：`ApplicationManager.invokeLater { ... }` 或 `SwingUtilities.invokeLater { ... }`
 - UI → Background：`ApplicationManager.executeOnPooledThread { ... }`
 - UI 等待 Background：`invokeAndWait` 用于 Write/Edit
-- Background 等待 UI：`CountDownLatch` 用于审批弹窗（无超时——Agent Loop 在后台线程，不阻塞
-  EDT；审批弹窗模态，用户必响应；加超时反而引入竞态风险）
+- Background 等待 UI：`CountDownLatch` 用于审批等待（无超时——Agent Loop 在后台线程，不阻塞
+  EDT；审批以对话内 ToolCallCard 呈现，用户必响应；加超时反而引入竞态风险）
 - 流式静默合并 flush：首 token 即时渲染，后续 token 写入 buffer + 重置 timer。Timer 为单次触发（
   `isRepeats=false`），仅在 token 停顿 ≥30ms 后才在 EDT 上批量 flush。连续到达的 token 会不断推迟
   timer，避免高频重绘

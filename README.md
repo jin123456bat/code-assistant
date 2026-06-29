@@ -16,9 +16,9 @@
 
 ### Agent 对话核心能力
 
-- 8 个内置工具（读文件/写文件/编辑文件/执行 Shell/列目录/搜索内容/读诊断/派生子 Agent）
+- 13 个内置工具（文件操作/Shell/搜索/诊断/子 Agent/Skill/网页搜索/用户交互/代码导航）+ 5 个计划管理工具
 - Plan Mode：`/plan` 命令生成执行计划，自动连续执行，用户可随时暂停干预
-- **LLM 自动规划（规划中）**：System Prompt 复杂度预判 + 轮次预警 + `createPlan` 工具让 LLM 主动拆分超长任务
+- **LLM 自动规划**：System Prompt 复杂度预判 + 轮次预警 + `createPlan` 工具让 LLM 主动拆分超长任务
 - MCP 支持：连接外部工具服务（数据库、文件系统、API）
 - Skill 系统：兼容 Claude Code SKILL.md 格式，自定义 Agent 能力
 - 多 Agent 协作：父 Agent 可 spawn 子 Agent 并行处理子任务

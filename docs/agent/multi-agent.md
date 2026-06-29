@@ -4,7 +4,7 @@
 
 ## 一、架构
 
-父 Agent 通过 `Agent` 工具启动子代理处理子任务，由 `MultiAgentManager` 统一调度。
+父 Agent 通过 `Agent` 工具启动子 Agent处理子任务，由 `MultiAgentManager` 统一调度。
 
 **MultiAgentManager 职责：**
 
@@ -28,17 +28,17 @@
 | 上下文压缩      | 子 Agent 复用父的 Auto-Compact 机制（同一阈值、策略），详见 [context.md §二](context.md#二auto-compact)                                                            |
 | 子 Agent 失败 | 子 Agent crash → `"Sub-agent failed: <error>"`；超时 → `"Sub-agent timeout: {timeout}s"`。父 LLM 自行决定重试或调整策略。crash/超时后自动清理：释放信号量、释放文件写锁、销毁 Shell 进程 |
 
-## 三、子代理审批与工具限制
+## 三、子 Agent 审批与工具限制
 
 ### 审批策略
 
-**子代理不需要审批，所有工具调用一律自动放行。**
+**子 Agent 不需要审批，所有工具调用一律自动放行。**
 
 原因：
 
-- 父 Agent 调用 `Agent` 工具 spawn 子代理时已经过审批（首次使用时弹窗确认），信任已建立
-- 子代理的工具范围受白名单/黑名单限制，不会越权操作
-- 对齐 Claude Code：子代理继承父会话的权限模式，父 Agent 处于高权限模式时子代理强制继承
+- 父 Agent 调用 `Agent` 工具 spawn 子 Agent 时已经过审批（首次使用时弹窗确认），信任已建立
+- 子 Agent 的工具范围受白名单/黑名单限制，不会越权操作
+- 对齐 Claude Code：子 Agent 继承父会话的权限模式，父 Agent 处于高权限模式时子 Agent 强制继承
 
 ### 权限继承
 
@@ -49,44 +49,50 @@
 | `bypassPermissions` | 用户在审批弹窗中选择"允许此会话" | 当前会话内所有后续工具调用跳过审批，全部自动放行              |
 | `acceptEdits`       | 用户授予编辑权限          | 当前会话内文件编辑类操作（Write/Edit）自动批准，其余工具仍需审批 |
 
-父 Agent 的权限状态决定子代理行为：
+父 Agent 的权限状态决定子 Agent行为：
 
-| 父权限状态              | 子代理行为              |
-|--------------------|--------------------|
-| 首次使用已确认            | 子代理内所有工具自动放行，不弹审批窗 |
-| 父处于 bypass 模式      | 子代理强制继承，全部操作跳过审批   |
-| 父处于 acceptEdits 模式 | 子代理强制继承，编辑类操作自动批准  |
+| 父权限状态              | 子 Agent行为              |
+|--------------------|------------------------|
+| 首次使用已确认            | 子 Agent内所有工具自动放行，不弹审批窗 |
+| 父处于 bypass 模式      | 子 Agent强制继承，全部操作跳过审批   |
+| 父处于 acceptEdits 模式 | 子 Agent强制继承，编辑类操作自动批准  |
 
-> 对齐 Claude Code：父 Agent 处于高权限模式（`bypassPermissions`、`acceptEdits`）时，子代理强制继承该模式且
-**不可被子代理覆盖**。子代理可能有不同的 system prompt 和行为约束，因此继承高权限模式意味着它们获得完全的自主执行权限。
+> 对齐 Claude Code：父 Agent 处于高权限模式（`bypassPermissions`、`acceptEdits`）时，子 Agent强制继承该模式且
+**不可被子 Agent覆盖**。子 Agent可能有不同的 system prompt 和行为约束，因此继承高权限模式意味着它们获得完全的自主执行权限。
 
 ### 工具白名单
 
-子代理的工具范围由系统预配置，LLM 调用 `Agent` 时无需传类型参数。
+子 Agent的工具范围由系统预配置，LLM 调用 `Agent` 时无需传类型参数。
 
 | 系统预配置           | 可用工具                   | 说明            |
 |-----------------|------------------------|---------------|
 | Explore（只读搜索）   | `Read`, `Grep`, `Glob` | 纯只读，不允许修改文件   |
-| General-purpose | 全部工具（可配置排除项）           | 通用任务执行，默认全部可用 |
+| General-purpose | 全部 11 个工具（见下方列表）       | 通用任务执行，默认全部可用 |
+
+**General-purpose 默认可用工具（11 个）：** `Read`, `Write`, `Edit`, `Bash`, `Glob`, `Grep`,
+`readLints`, `WebSearch`, `WebFetch`, `AskUserQuestion`, `Symbol`
+
+> **不可用：** `Agent`（禁止嵌套）、`Skill`（Skill 注入由父 Agent 管理，子 Agent不加载 Skill）。计划管理工具（
+`createPlan` 等 5 个）在子 Agent中不可用——子 Agent的任务由父 Agent 通过 prompt 直接描述。
 
 ### 工具限制规则
 
-| 限制方式   | 配置                              | 说明                    |
-|--------|---------------------------------|-----------------------|
-| 白名单    | `tools: Read, Grep, Glob, Bash` | 子代理**仅获得**列出的工具       |
-| 黑名单    | `disallowedTools: Write, Edit`  | 子代理获得**除列表外**的全部工具    |
-| MCP 禁用 | `disallowedTools: mcp__*`       | 禁用全部 MCP 工具           |
-| 特定 MCP | `disallowedTools: mcp__github`  | 禁用指定 MCP Server 的全部工具 |
+| 限制方式   | 配置                              | 说明                     |
+|--------|---------------------------------|------------------------|
+| 白名单    | `tools: Read, Grep, Glob, Bash` | 子 Agent**仅获得**列出的工具    |
+| 黑名单    | `disallowedTools: Write, Edit`  | 子 Agent获得**除列表外**的全部工具 |
+| MCP 禁用 | `disallowedTools: mcp__*`       | 禁用全部 MCP 工具            |
+| 特定 MCP | `disallowedTools: mcp__github`  | 禁用指定 MCP Server 的全部工具  |
 
 **始终不可用的工具：**
 
-| 工具      | 原因                               |
-|---------|----------------------------------|
-| `Agent` | 当前仅支持 1 层嵌套（子不可 spawn 孙）         |
-| `Skill` | Skill 注入由父 Agent 管理，子代理不加载 Skill |
+| 工具      | 原因                                   |
+|---------|--------------------------------------|
+| `Agent` | 当前仅支持 1 层嵌套（子不可 spawn 孙）             |
+| `Skill` | Skill 注入由父 Agent 管理，子 Agent不加载 Skill |
 
-> 对齐 Claude Code：`AskUserQuestion`、`EnterPlanMode` 等依赖父会话状态的工具在子代理中不可用。当前项目因嵌套上限为
-> 1 层，`Agent` 工具在子代理中同样不可用。
+> 对齐 Claude Code：`AskUserQuestion`、`EnterPlanMode` 等依赖父会话状态的工具在子 Agent中不可用。当前项目因嵌套上限为
+> 1 层，`Agent` 工具在子 Agent中同样不可用。
 
 ### 与父 Agent 审批的区别
 

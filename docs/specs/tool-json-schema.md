@@ -394,13 +394,13 @@ val regex = try {
 ```json
 {
   "name": "Task",
-  "description": "启动子代理处理子任务，子代理完成后返回结果摘要",
+  "description": "启动子 Agent 处理子任务，子 Agent 完成后返回结果摘要",
   "input_schema": {
     "type": "object",
     "properties": {
       "task": {
         "type": "string",
-        "description": "子代理的任务描述"
+        "description": "子 Agent 的任务描述"
       },
       "timeout": {
         "type": "integer",

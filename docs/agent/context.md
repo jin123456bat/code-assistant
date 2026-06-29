@@ -129,6 +129,7 @@ while (turn < maxTurns && !cancelled):
 - 清空 `session.plan = null`（如有活跃 Plan 一并丢弃）
 - 清空 `session.totalTokens` 归零
 - `session.id` 保持不变（不创建新文件，复用当前 session）
+- **不清除 `session.approvedTools`**——审批白名单是会话级配置，`/clear` 仅重置对话上下文
 - 不保存旧消息（等价于"当前会话重新开始"）
 
 **为什么复用 session 而不是新建：** 用户通常只是想让上下文干净一点，频繁新建 session 文件会堆积。

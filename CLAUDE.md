@@ -16,23 +16,23 @@ docs/
 ├── ui.md                       UI 模块总览 → ui/ 子文档
 ├── completion.md               代码补全模块
 ├── git-message.md              Commit Message 模块
-├── agent/                      Agent 功能子文档（loop/tools/plan/multi-agent/context/correctness/skills/mcp/session）
+├── agent/                      Agent 功能子文档（loop/tools/plan/multi-agent/context/correctness/skills/mcp/session/images/markdown-rendering）
 ├── ui/                         UI 功能子文档（pages/chat/design-system/components）
-└── specs/                      跨模块规范（thread-model/event-bus/data-flow/system-prompt/tool-return-formats/token-estimation/persistence/settings）
+└── specs/                      跨模块规范（module-interaction/thread-model/event-bus/data-flow/system-prompt/tool-return-formats/token-estimation/persistence/settings/plugin-lifecycle/api-error-handling/bash-security/mcp-permissions/auto-compact/tool-json-schema/multi-project-isolation/modification-stamp）
 ```
 
 ## 架构速查
 
 ### 各层关键组件
 
-| 层          | 核心文件                                                                                                              | 要点                                                                      |
-|------------|-------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------|
-| Agent      | `AgentLoop`, `AgentSession`, `ToolRegistry`, `ToolExecutor`, `ToolModels`, `PlanExecutor`, `MultiAgentManager`    | 8 个内置工具（Read/Write/Edit/Bash/Glob/Grep/readLints/Task）+ 审批策略 + while 循环 |
-| Completion | `CompletionProvider`, `DeepSeekFimClient`, `CompletionContextCollector`, `CompletionCache`, `CompletionStats`     | FIM 补全 + PSI 增强上下文                                                      |
-| Session    | `SessionManager`, `SessionStore`                                                                                  | JSON 持久化：.tmp → ATOMIC_MOVE + FileLock                                  |
-| Skills     | `SkillManager`                                                                                                    | SKILL.md 扫描/解析/交叉验证工具声明                                                 |
-| MCP        | `McpManager`                                                                                                      | MCP Server 生命周期（启动/握手/心跳/崩溃重启）                                          |
-| UI         | `AppColors`, `ChatToolWindow`, `TabBar`, `MessageBus`, `SelectionListener`, `OpenChatAction` + 7 page + 5 chat 组件 | 统一颜色令牌，亮/暗主题；详细设计见 [`docs/ui.md`](docs/ui.md)                           |
+| 层          | 核心文件                                                                                                              | 要点                                                                                                                        |
+|------------|-------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------|
+| Agent      | `AgentLoop`, `AgentSession`, `ToolRegistry`, `ToolExecutor`, `ToolModels`, `PlanExecutor`, `MultiAgentManager`    | 13 个内置工具（Read/Write/Edit/Bash/Glob/Grep/readLints/Agent/Skill/WebSearch/WebFetch/AskUserQuestion/Symbol）+ 审批策略 + while 循环 |
+| Completion | `CompletionProvider`, `DeepSeekFimClient`, `CompletionContextCollector`, `CompletionCache`, `CompletionStats`     | FIM 补全 + PSI 增强上下文                                                                                                        |
+| Session    | `SessionManager`, `SessionStore`                                                                                  | JSON 持久化：.tmp → ATOMIC_MOVE + FileLock                                                                                    |
+| Skills     | `SkillManager`                                                                                                    | SKILL.md 扫描/解析/交叉验证工具声明                                                                                                   |
+| MCP        | `McpManager`                                                                                                      | MCP Server 生命周期（启动/握手/心跳/崩溃重启）                                                                                            |
+| UI         | `AppColors`, `ChatToolWindow`, `TabBar`, `MessageBus`, `SelectionListener`, `OpenChatAction` + 7 page + 5 chat 组件 | 统一颜色令牌，亮/暗主题；详细设计见 [`docs/ui.md`](docs/ui.md)                                                                             |
 
 ## Skill routing
 

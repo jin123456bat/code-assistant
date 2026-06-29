@@ -71,7 +71,7 @@
 
 ### Agent
 
-启动子代理执行子任务。通过 `run_in_background` 控制同步/异步模式。
+启动子 Agent执行子任务。通过 `run_in_background` 控制同步/异步模式。
 
 | 特性       | 说明                                                                 |
 |----------|--------------------------------------------------------------------|
@@ -208,57 +208,64 @@
 | 文件删除       | Bash 含 `rm ` 且目标在项目内                                | 关键操作确认         |
 
 **Agent 工具特殊规则：** Agent 工具本身首次使用时需审批（与普通工具一致），但 **Agent
-spawn 的子代理内部所有工具调用一律放行，无需审批**。子代理的工具范围受白名单/黑名单限制，详见 [多 Agent
-协作 §三](./multi-agent.md#三子代理审批与工具限制)。
+spawn 的子 Agent内部所有工具调用一律放行，无需审批**。子
+Agent的工具范围受白名单/黑名单限制，详见 [多 Agent
+协作 §三](./multi-agent.md#三子-agent-审批与工具限制)。
 
-### 审批弹窗行为
+### 审批提示行为
 
-- **类型**：MODAL（阻塞父窗口），可拖动
-- **按钮**：首次审批场景有 [允许一次] / [允许此会话] / [拒绝]；危险命令无"允许此会话"按钮
-- **超时**：无超时（`CountDownLatch` 永久等待）。Agent Loop 在后台线程池，阻塞不占 EDT；审批弹窗是模态
-  Dialog，用户离开前必须处理
-- **被拒绝后**：发送拒绝消息给 LLM（tool_result 含拒绝标记），由 LLM 判断是更换方式重试还是中断当前任务
+审批以**对话内 ToolCallCard 形式**呈现，不弹出独立 Dialog。ToolCallCard 状态变为 `AWAITING_APPROVAL`
+时，卡片在消息流中自动展开并显示审批按钮，用户点击后卡片更新为对应状态（DONE/REJECTED）。
+
+- **交互方式**：对话内嵌按钮——[允许一次] / [允许此会话] / [拒绝]，危险命令无"允许此会话"按钮
+- **阻塞机制**：ToolCallCard 处于 `AWAITING_APPROVAL` 时不可折叠，Agent Loop 等待用户操作。
+  Agent Loop 在后台线程池，不占 EDT；用户操作按钮在 EDT 上，`CountDownLatch` 跨线程同步
+- **被拒绝后**：ToolCallCard → REJECTED，发送拒绝 tool_result 给 LLM，由 LLM 判断更换方式重试还是中断
+- **无关闭弹窗概念**：审批内嵌在对话中，用户只能选择批准或拒绝，不存在"关闭窗口绕过审批"的路径
 
 ### 审批白名单
 
-用户点击 **[允许此会话]** 后，工具名被加入当前 Session 的内存白名单。后续同一工具调用跳过审批。
+用户点击 **[允许此会话]** 后，工具名被加入当前 Session 的持久化白名单。后续同一工具调用跳过审批。
 
 **数据结构：**
 
 ```
 AgentSession:
-└── approvedTools: Set<String> = emptySet()   // 已批准的工具名集合，仅内存不持久化
+└── approvedTools: Set<String> = emptySet()   // 已批准的工具名集合，持久化到 Session JSON 的 approvedTools 字段
 ```
 
 **生命周期：**
 
-| 事件           | 白名单行为                                          |
-|--------------|------------------------------------------------|
-| 用户点击 [允许此会话] | `approvedTools.add(toolName)`                  |
-| 后续同工具调用      | 检查 `approvedTools.contains(toolName)` → 跳过审批弹窗 |
-| 用户点击 [允许一次]  | 仅本次放行，不加入白名单                                   |
-| `/clear`     | `approvedTools.clear()`，重置为全新会话                |
-| IDE 重启       | 白名单丢失（不持久化），下次使用重新审批                           |
-| 危险命令         | **无视白名单**，始终弹窗二次确认                             |
+| 事件              | 白名单行为                                                     |
+|-----------------|-----------------------------------------------------------|
+| 用户点击 [允许此会话]    | `approvedTools.add(toolName)`，持久化到 Session JSON           |
+| 后续同工具调用         | 检查 `approvedTools.contains(toolName)` → 跳过审批              |
+| 用户点击 [允许一次]     | 仅本次放行，不加入白名单                                              |
+| `/clear` `/new` | **不受影响**——白名单是会话级配置，`/clear`（`/new` 是其别名）仅清空对话上下文，不重置审批信任 |
+| IDE 重启          | 从 Session JSON 恢复白名单，信任关系保留                               |
+| 危险命令            | **无视白名单**，始终需二次确认                                         |
+
+**持久化位置：** Session JSON 的 `approvedTools` 字段（`List<String>`），与其他会话数据一同通过
+`SessionStore.save()` 原子写入。
 
 **审批判定流程：**
 
 ```
 工具调用到达 ToolExecutor
   ├─ 危险命令检测（rm -rf、git push --force、sudo、chmod 777）
-  │     → 始终弹窗，不检查白名单
+  │     → 始终提示确认，不检查白名单
   │
   ├─ approvedTools.contains(toolName)?
   │     → 是：跳过审批，直接执行
   │
-  └─ 否：弹出审批 dialog
-        ├─ [允许一次]   → 执行，不修改白名单
-        ├─ [允许此会话] → approvedTools.add(toolName)，执行
-        └─ [拒绝]       → 发送拒绝 tool_result 给 LLM → PROCESSING（LLM 决定继续或中止）
+  └─ 否：ToolCallCard → AWAITING_APPROVAL（对话内嵌按钮）
+        ├─ [允许一次]   → DONE，执行，不修改白名单
+        ├─ [允许此会话] → DONE，approvedTools.add(toolName) + 持久化，执行
+        └─ [拒绝]       → REJECTED，发送拒绝 tool_result 给 LLM
 ```
 
-**为什么仅内存不持久化：** 审批信任是用户当下的意图表达。IDE 重启后信任关系重置，避免过时的信任被滥用。对齐
-Claude Code 的会话级权限继承机制。
+**持久化理由：** 审批信任是用户对"当前会话中该工具"的授权。同一次会话跨越 IDE 重启后，信任关系应保留——
+用户已在对话中明确授权，重启不应撤销。对齐 Claude Code：`/clear` 重置权限，但关闭窗口再打开权限保留。
 
 ## 七、前置校验
 
@@ -314,7 +321,7 @@ ToolInfo (ToolRegistry 内部类):
 | `Edit`            | `newString 最多 3000 行。超过此限制的操作会被拒绝。`                                                                                                                                                                       |
 | `Write`           | `内容最多 3000 行。超过此限制的操作会被拒绝。`                                                                                                                                                                               |
 | `Skill`           | `执行指定 Skill。LLM 根据用户需求自主判断触发时机，将 SKILL.md 内容作为消息注入 conversation。`                                                                                                                                         |
-| `Agent`           | `启动子代理执行子任务。prompt 描述任务，timeout 子 Agent 超时秒数（必填，0=不限），run_in_background 是否异步（必填）。结果摘要最多 2000 tokens。完整执行过程保存为独立 Session。`                                                                                 |
+| `Agent`           | `启动子 Agent执行子任务。prompt 描述任务，timeout 子 Agent 超时秒数（必填，0=不限），run_in_background 是否异步（必填）。结果摘要最多 2000 tokens。完整执行过程保存为独立 Session。`                                                                             |
 | `WebSearch`       | `搜索网页，返回标题和 URL 列表。≤ 10 条/页，超出时用 offset 参数翻页。不支持缓存。`                                                                                                                                                      |
 | `WebFetch`        | `抓取 URL 内容并按提示提取信息。HTTP 自动升级为 HTTPS。不支持需认证的页面。不支持缓存。`                                                                                                                                                     |
 | `AskUserQuestion` | `向用户发起问题以澄清需求。一次 1-4 个问题，每题 2-4 个选项。支持多选。`                                                                                                                                                                |
