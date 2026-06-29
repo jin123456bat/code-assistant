@@ -25,14 +25,14 @@ docs/
 
 ### 各层关键组件
 
-| 层          | 核心文件                                                                                                              | 要点                                                                                                                                                                                       |
-|------------|-------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Agent      | `AgentLoop`, `AgentSession`, `ToolRegistry`, `ToolExecutor`, `ToolModels`, `PlanExecutor`, `MultiAgentManager`    | 18 个工具：13 内置（Read/Write/Edit/Bash/Glob/Grep/readLints/Skill/Agent/WebSearch/WebFetch/AskUserQuestion/Symbol）+ 5 计划管理（createPlan/listPlans/removePlan/reorderPlans/markPlanDone），while 循环 |
-| Completion | `CompletionProvider`, `DeepSeekFimClient`, `CompletionContextCollector`, `CompletionCache`, `CompletionStats`     | FIM 补全 + PSI 增强上下文                                                                                                                                                                       |
-| Session    | `SessionManager`, `SessionStore`                                                                                  | JSON 持久化：.tmp → ATOMIC_MOVE + FileLock                                                                                                                                                   |
-| Skills     | `SkillManager`                                                                                                    | SKILL.md 扫描/解析/交叉验证工具声明                                                                                                                                                                  |
-| MCP        | `McpManager`                                                                                                      | MCP Server 生命周期（启动/握手/心跳/崩溃重启）                                                                                                                                                           |
-| UI         | `AppColors`, `ChatToolWindow`, `TabBar`, `MessageBus`, `SelectionListener`, `OpenChatAction` + 7 page + 5 chat 组件 | 统一颜色令牌，亮/暗主题；详细设计见 [`docs/ui.md`](docs/ui.md)                                                                                                                                            |
+| 层          | 核心文件                                                                                                              | 要点                                                                      |
+|------------|-------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------|
+| Agent      | `AgentLoop`, `AgentSession`, `ToolRegistry`, `ToolExecutor`, `ToolModels`, `PlanExecutor`, `MultiAgentManager`    | 8 个内置工具（Read/Write/Edit/Bash/Glob/Grep/readLints/Task）+ 审批策略 + while 循环 |
+| Completion | `CompletionProvider`, `DeepSeekFimClient`, `CompletionContextCollector`, `CompletionCache`, `CompletionStats`     | FIM 补全 + PSI 增强上下文                                                      |
+| Session    | `SessionManager`, `SessionStore`                                                                                  | JSON 持久化：.tmp → ATOMIC_MOVE + FileLock                                  |
+| Skills     | `SkillManager`                                                                                                    | SKILL.md 扫描/解析/交叉验证工具声明                                                 |
+| MCP        | `McpManager`                                                                                                      | MCP Server 生命周期（启动/握手/心跳/崩溃重启）                                          |
+| UI         | `AppColors`, `ChatToolWindow`, `TabBar`, `MessageBus`, `SelectionListener`, `OpenChatAction` + 7 page + 5 chat 组件 | 统一颜色令牌，亮/暗主题；详细设计见 [`docs/ui.md`](docs/ui.md)                           |
 
 ## Skill routing
 

@@ -28,7 +28,7 @@
 │  └─ McpManager 连接/握手                                  │
 ├─────────────────────────────────────────────────────────┤
 │ Swing Timer (javax.swing.Timer, 运行在 EDT)               │
-│  └─ ChatBubbleRenderer 30ms batch flush                  │
+│  └─ ChatViewModel 静默合并 flush（token 停顿 ≥30ms 触发）   │
 ├─────────────────────────────────────────────────────────┤
 │ ProcessHandler listener                                  │
 │  └─ Bash onTextAvailable → batch buffer → Timer(100ms)│
@@ -43,7 +43,9 @@
 - UI 等待 Background：`invokeAndWait` 用于 Write/Edit
 - Background 等待 UI：`CountDownLatch` 用于审批弹窗（无超时——Agent Loop 在后台线程，不阻塞
   EDT；审批弹窗模态，用户必响应；加超时反而引入竞态风险）
-- 流式批量 flush：Swing Timer 在 EDT 上合并连续 token
+- 流式静默合并 flush：首 token 即时渲染，后续 token 写入 buffer + 重置 timer。Timer 为单次触发（
+  `isRepeats=false`），仅在 token 停顿 ≥30ms 后才在 EDT 上批量 flush。连续到达的 token 会不断推迟
+  timer，避免高频重绘
 
 ## AgentLoop 线程约束
 

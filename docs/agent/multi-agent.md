@@ -145,7 +145,7 @@
 
 **展开后（子 Agent 详情面板）：**
 
-- 子 Agent 流式文本实时追加（30ms batch flush）
+- 子 Agent 流式文本实时追加（首 token 即时，后续静默合并 ≥30ms flush）
 - 子 ToolCallCard 嵌套展示（可折叠，与父 ToolCallCard 规则一致）
 - 错误红色标注
 - 底部显示耗时 + "详情: sub-session #{sessionId}"（点击跳转 SessionsPage）

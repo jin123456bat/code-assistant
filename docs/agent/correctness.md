@@ -122,7 +122,32 @@ $ ./gradlew build
 | 2   | `Read` 前置强制执行       | ToolExecutor 加检查 | 杜绝凭空编造代码      |
 | 3   | 文件路径 VFS 校验         | ToolExecutor 加检查 | 杜绝幻觉文件路径      |
 | 4   | Shell 输出强化标注        | 改返回值格式           | LLM 更准确理解执行结果 |
-| 5   | 工具结果自检反馈环           | AgentLoop 加后处理   | 系统性减少所有工具误读   |
+
+---
+
+## 四、Write/Edit 撤销机制
+
+**Write/Edit 操作不支持 IDE 原生撤销（Undo）。**
+
+Write/Edit 通过 `WriteCommandAction.runWriteCommandAction()` 执行文件写入，但**不加入 IntelliJ 的
+UndoManager 栈**。用户无法通过 `Cmd+Z` / `Ctrl+Z` 撤销 Agent 的文件修改。
+
+### 撤销策略
+
+如需撤销，由 **LLM 自行决定**如何恢复：
+
+1. LLM 记住修改前的内容，通过一次新的 Edit 逆向还原
+2. 用户手动 `git checkout` 恢复文件
+3. 用户通过 IDE 的 Local History 恢复
+
+### 设计理由
+
+| 理由                | 说明                                                      |
+|-------------------|---------------------------------------------------------|
+| 避免 UndoManager 污染 | Agent 的一次对话可能产生数十次 Edit，全部进栈会让用户自己的操作被淹没                |
+| 对齐交互模型            | Agent 的修改是"对话驱动的"，撤销也应由对话驱动——用户说"撤销刚才的修改"，LLM 执行逆向 Edit |
+| Git 是最终安全网        | 推荐用户在 Agent 操作前 commit，任何修改都可通过 git 安全回滚                |
+| 5                 | 工具结果自检反馈环                                               | AgentLoop 加后处理   | 系统性减少所有工具误读   |
 
 > 方案 1 零成本立即可做，方案 2+3 改动小防御面广，方案 4+5 是锦上添花的系统性优化。
 
