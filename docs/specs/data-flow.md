@@ -124,7 +124,10 @@ LLM 通过工具管理计划:
 4. **原始文本**：前三层均失败时兜底 → `Plan(summary=原始文本, plans=[PlanItem(description=原始文本)])`
     - 将整个 LLM 输出作为一个计划项，让 PlanExecutor 逐条尝试
 
-> 任一层解析成功后立即返回，不再尝试后续层。全部 4 层失败 → Plan 创建失败，错误反馈给 LLM 重试。
+> 任一层解析成功后立即返回，不再尝试后续层。第 4 层为无条件兜底（原始文本 → Plan），永不失败。
+>
+> **注意：** 4 层解析仅用于 `/plan` 命令场景（LLM 输出文本 → 解析为结构化 Plan）。`createPlan` 工具走
+`createPlanFromTool()` 直接拿结构化参数，不经过解析。
 
 ### Plan 生命周期
 

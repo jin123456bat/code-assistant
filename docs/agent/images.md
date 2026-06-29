@@ -164,13 +164,13 @@ ImageSource:
 
 ## 四、图片在会话中的生命周期
 
-| 阶段          | 行为                                                                                       |
-|-------------|------------------------------------------------------------------------------------------|
-| **粘贴**      | 编码为 Base64 → 存入 `ChatViewModel.images[]` → UI 显示缩略图 tag                                  |
-| **发送**      | `buildContext()` 组装为 image block → 追加到 API 请求                                            |
-| **持久化**     | Base64 数据**不**写入 Session JSON（过大）。`session.messages` 中仅保留 `[Image: screenshot.png]` 占位文本 |
-| **恢复**      | 从 Session JSON 恢复时，图片 block 丢失，LLM 只能看到占位文本                                              |
-| **Compact** | 与普通消息一同压缩为摘要，图片内容不参与摘要生成                                                                 |
+| 阶段          | 行为                                                                                                         |
+|-------------|------------------------------------------------------------------------------------------------------------|
+| **粘贴**      | 编码为 Base64 → 存入 `ChatViewModel.images[]` → UI 显示缩略图 tag                                                    |
+| **发送**      | `buildContext()` 组装为 image block → 追加到 API 请求                                                              |
+| **持久化**     | Base64 数据**不**写入 Session JSON（过大）。`session.messages` 中仅保留 `[Image: screenshot.png]` 占位文本                   |
+| **恢复**      | 从 Session JSON 恢复时，图片 block 丢失，LLM 只能看到占位文本。用户从历史会话恢复后再次发送消息时，图片占位文本 `[Image: screenshot.png]` 被丢弃，不传给 LLM |
+| **Compact** | 与普通消息一同压缩为摘要，图片内容不参与摘要生成                                                                                   |
 
 > **为什么不持久化图片：** Base64 编码的 2048px PNG 约 1-3MB，频繁粘贴会迅速膨胀 Session
 > JSON。对齐主流实现做法——图片仅当前 turn 有效，重启后 LLM 需要通过 Read 工具重新读取图片文件（如果图片来自项目文件）。

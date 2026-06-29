@@ -28,13 +28,17 @@ LLM 丢失关键上下文。
 
 ### 压缩策略（保留窗口 + 摘要）
 
-1. 保留最近 N 条消息原文。`N = max(保留最近 2 轮的消息数, ceil(messages.size / 3))`。"保留最近 2 轮"
-   是硬下限——即使 `messages.size` 很大，最近 2 轮（至少 4 条：user + assistant × 2）也绝不压缩
-2. 早期消息 → 独立 API 调用生成摘要（不带 tools，`max_tokens=1024`），不阻塞主流程
-3. 摘要插入消息列表头部，替换被压缩消息
-4. 从 `session.messages` 中移除被压缩的旧消息原文（保留摘要消息在头部）
-5. 后续 API 请求的 `messages` 参数变为 `[摘要消息, ...近期原文, 新用户消息]`
-6. 多次压缩时，之前的摘要参与新一轮压缩（幂等）
+1. 保留最近 N 条消息原文。`N = min(保留最近 3 轮的消息数, ceil(messages.size / 3))`。如果最近 3 轮
+   仍超出 N，直接提示压缩问题——不再保留更多消息，LLM 可能丢失上下文。
+2. **"1 轮"的定义**：一条 user message 到下一个 user message 之前的所有消息（含 assistant
+   回复、tool_use、tool_result）。
+3. **tool_use 和 tool_result 必须成对保留**，不能拆开。例外：tool_use 后程序崩溃，此时对应的 tool_result
+   不存在，tool_use 可单独保留。
+4. 早期消息 → 独立 API 调用生成摘要（不带 tools，`max_tokens=1024`），不阻塞主流程
+5. 摘要插入消息列表头部，替换被压缩消息
+6. 从 `session.messages` 中移除被压缩的旧消息原文（保留摘要消息在头部）
+7. 后续 API 请求的 `messages` 参数变为 `[摘要消息, ...近期原文, 新用户消息]`
+8. 多次压缩时，之前的摘要参与新一轮压缩（幂等）
 
 **摘要生成 Prompt 模板：**
 
@@ -120,19 +124,13 @@ while (turn < maxTurns && !cancelled):
 
 ## 四、/clear 和 /new
 
-`/clear` 和 `/new` 行为完全一致——重置当前会话。对齐 Claude Code 的 `/clear` 语义。
+`/clear` 和 `/new` 行为完全一致——创建全新会话。对齐 Claude Code 的 `/clear` 语义。
 
 **行为：**
 
-- 清空 `session.messages = []`
-- 清空 `session.compactSummary = null`，`session.compactCount = 0`
-- 清空 `session.plan = null`（如有活跃 Plan 一并丢弃）
-- 清空 `session.totalTokens` 归零
-- `session.id` 保持不变（不创建新文件，复用当前 session）
-- **不清除 `session.approvedTools`**——审批白名单是会话级配置，`/clear` 仅重置对话上下文
-- 不保存旧消息（等价于"当前会话重新开始"）
-
-**为什么复用 session 而不是新建：** 用户通常只是想让上下文干净一点，频繁新建 session 文件会堆积。
+- 创建新 `AgentSession`（新 `session.id`），旧 session 保留在 Sessions 列表中
+- 新 session 的 `approvedTools` 为空（不继承旧 session 的审批白名单）
+- 旧 session 的 messages/plan/compactSummary/totalTokens 保持不变，后续可通过 Sessions 页面访问
 
 ## 五、Token 估算
 

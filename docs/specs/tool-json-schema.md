@@ -1,8 +1,11 @@
 # 工具 JSON Schema 完整定义
 
-> 本文档给出 Agent 模式 8 个内置工具在 API 调用时的完整 JSON Schema。Schema 由 Anthropic SDK 的
-`@JsonClassDescription` + `@JsonPropertyDescription` 注解自动生成，`strict: true` +
-`additionalProperties: false` + 全部属性 `required`。
+> 本文档给出 Agent 模式部分内置工具在 API 调用时的完整 JSON Schema。完整工具列表见
+> [tools.md](../agent/tools.md)。缺失的工具（Agent、Skill、WebSearch、WebFetch、AskUserQuestion、
+> Symbol 及计划管理工具）其 JSON Schema 由 Kotlin data class 的 `@JsonClassDescription` 注解自动生成。
+>
+> Schema 由 Anthropic SDK 的 `@JsonClassDescription` + `@JsonPropertyDescription` 注解自动生成，
+> `strict: true` + `additionalProperties: false` + 全部属性 `required`。
 
 ## 一、Schema 生成机制
 
@@ -210,12 +213,17 @@ if (lastReadStamp != null && lastReadStamp != currentStamp)
       "timeout": {
         "type": "integer",
         "description": "超时秒数，必填。快速命令设 10-30s，构建/测试设 120-300s，长时间任务设 600s，0=不限"
+      },
+      "dangerous": {
+        "type": "boolean",
+        "description": "是否危险命令，必填。如 rm -rf /、git push --force、sudo、chmod 777 等设为 true"
       }
     },
     "required": [
       "command",
       "workDir",
-      "timeout"
+      "timeout",
+      "dangerous"
     ],
     "additionalProperties": false
   }
@@ -226,8 +234,7 @@ if (lastReadStamp != null && lastReadStamp != currentStamp)
 
 - Shell: `/bin/bash -c <command>`
 - 工作目录: `workDir` 参数或 `project.basePath`
-- 输出截断: **10,000 字符**（stdout + stderr 合并后截取）
-- 返回内容截断: **4,000 字符**
+- 输出截断及返回值格式详见 [tools.md §四 工具返回截断策略](../agent/tools.md#四工具返回截断策略)
 - 超时后强制 `destroyForcibly()`
 
 ### 返回值格式
@@ -323,7 +330,7 @@ $ {command}
 ### 搜索范围
 
 - 文件扩展名白名单: `kt, java, kts, xml, json, md, gradle, properties, yml, yaml`
-- 排除目录: `build/`, `.git/`, `.idea/`
+- 排除目录: `build/`, `.git/`, `.idea/`, `node_modules/`
 - 最多扫描 **800 个**文件
 - 结果上限 **50 条**（超出标注截断）
 
@@ -389,18 +396,22 @@ val regex = try {
 (IDE inspection 集成将在后续 Phase 实现)
 ```
 
-## 九、Task — 派生子 Agent
+## 九、Agent — 派生子 Agent
 
 ```json
 {
-  "name": "Task",
+  "name": "Agent",
   "description": "启动子 Agent 处理子任务，子 Agent 完成后返回结果摘要",
   "input_schema": {
     "type": "object",
     "properties": {
-      "task": {
+      "prompt": {
         "type": "string",
         "description": "子 Agent 的任务描述"
+      },
+      "run_in_background": {
+        "type": "boolean",
+        "description": "是否后台运行，默认 false（同步等待）"
       },
       "timeout": {
         "type": "integer",
@@ -408,7 +419,8 @@ val regex = try {
       }
     },
     "required": [
-      "task",
+      "prompt",
+      "run_in_background",
       "timeout"
     ],
     "additionalProperties": false
@@ -420,7 +432,8 @@ val regex = try {
 
 - 并发上限: **3 个**（`Semaphore(3)`，超出返回错误）
 - 子不可再 spawn 孙（嵌套上限 1 层）
-- 子 Agent 执行期间父 Agent 阻塞等待（`CompletableFuture.get()` 无超时）
+- 子 Agent 执行期间父 Agent 阻塞等待（`CompletableFuture.get()` 无超时，除非
+  `run_in_background: true`）
 
 ### 返回值格式
 
@@ -454,10 +467,10 @@ val regex = try {
 | **Write** | ✅    | 写文件       |
 | **Edit**  | ✅    | 写文件       |
 | **Bash**  | ✅    | 执行命令      |
-| **Task**  | ✅    | 派生子 Agent |
+| **Agent** | ✅    | 派生子 Agent |
 
-审批弹窗为模态 `Messages.showYesNoDialog`，在 EDT 上通过 `invokeAndWait` 执行。Agent Loop 在后台线程通过
-`CountDownLatch.await()` 阻塞等待用户选择。
+审批以**对话内 ToolCallCard 形式**呈现，不弹出独立 Dialog。ToolCallCard 状态变为 `AWAITING_APPROVAL`
+时，卡片在消息流中自动展开并显示审批按钮。详细机制见 [tools.md §六 审批机制](../agent/tools.md#六审批机制)。
 
 ## 十一、工具参数提取工具类
 

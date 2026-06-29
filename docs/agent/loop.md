@@ -46,8 +46,7 @@ while (turn < effectiveMaxTurns && !cancelled):
   │
   ├─ stop_reason 分叉:
   │    "end_turn"      → continueStreak = 0, 退出 while（等待用户下一条消息）
-  │    "max_tokens"    → continueStreak++, 超过 maxAutoContinue(5) 则 emit Error + 退出
-  │                      未超 → 追加临时 "继续" 消息（不持久化），循环回到顶部继续（续写不增加 turn）
+│    "max_tokens"    → continueStreak++, 追加临时 "继续" 消息（不持久化），循环回到顶部继续（续写不增加 turn），不限次数直到 LLM 返回 end_turn
   │    "stop_sequence" → continueStreak = 0, 退出 while。在 assistant 消息尾部追加系统标注 "[响应被 stop_sequence 终止]"
   │
 stop: cancelled → continueStreak = 0, 按[第五节清理顺序](#五项目关闭清理)逐步关闭
@@ -55,12 +54,12 @@ stop: cancelled → continueStreak = 0, 按[第五节清理顺序](#五项目关
 
 **关键分支说明：**
 
-| 分支              | 触发条件                 | 行为                                   |
-|-----------------|----------------------|--------------------------------------|
-| `end_turn`      | LLM 自然完成回复           | 正常退出 while，等待用户下一条消息                 |
-| `max_tokens`    | LLM 输出被 token 上限截断   | 自动发送"继续"消息，续写不增加 turn 计数，最多连续 5 次    |
-| `stop_sequence` | LLM 遇到 stop sequence | 正常结束，消息尾部标注 `[响应被 stop_sequence 终止]` |
-| `cancelled`     | 用户点击停止按钮             | 退出循环，按清理顺序关闭                         |
+| 分支              | 触发条件                 | 行为                                              |
+|-----------------|----------------------|-------------------------------------------------|
+| `end_turn`      | LLM 自然完成回复           | 正常退出 while，等待用户下一条消息                            |
+| `max_tokens`    | LLM 输出被 token 上限截断   | 自动发送"继续"消息，续写不增加 turn 计数，不限次数直到 LLM 返回 end_turn |
+| `stop_sequence` | LLM 遇到 stop sequence | 正常结束，消息尾部标注 `[响应被 stop_sequence 终止]`            |
+| `cancelled`     | 用户点击停止按钮             | 退出循环，按清理顺序关闭                                    |
 
 **工具执行顺序：** 同一轮中 LLM 可能返回多个 `tool_use`。按 LLM 返回的顺序串行执行，不并行。前一个工具的结果会立即追加到
 `params.messages`，后续工具可以看到前面工具的执行结果。LLM 应通过返回顺序控制执行依赖（如先 `Read` 后
@@ -200,7 +199,7 @@ AgentLoop
 │                         // 估算实际总 token = system + messages + tools。超过 compactThreshold × modelLimit 则压缩。
 ├── compactThreshold: Double = 0.7      // 触发压缩的上下文使用率阈值
 ├── modelContextLimit: Int = 1_000_000  // 模型上下文窗口大小（DeepSeek V4 的 1M tokens，写死）
-├── maxAutoContinue: Int = 5            // max_tokens 自动续写最大次数（单轮内连续续写链长度）
+├── maxAutoContinue: Int = Int.MAX_VALUE // max_tokens 自动续写，不限次数，直到 LLM 返回 end_turn
 ├── autoContinueMessage: String = "继续" // max_tokens 时自动发送的续写消息
 ├── continueStreak: Int = 0              // 当前轮内续写链已执行次数，仅 max_tokens 累加，其余退出路径归零
 ├── turnWarningRatio: Double = 0.6      // 轮次预警触发比例
@@ -252,6 +251,11 @@ Message:（内部 UI 模型。API 层 message.role 仅 `user`/`assistant`，cont
 │                                                      //   TEXT → type="text"
 │                                                      //   TOOL_USE → type="tool_use"（位于 ASSISTANT 消息内）
 │                                                      //   TOOL_RESULT → type="tool_result"（位于 USER 消息内）
+│                                                      //
+│                                                      // role 与 contentType 的关系：
+│                                                      //   - role 对应 API 层 user/assistant
+│                                                      //   - contentType 对应 API 层 content block 类型 text/tool_use/tool_result
+│                                                      //   - TOOL_USE 和 TOOL_RESULT 是独立 Message 记录，不是子字段
 ├── content: String
 ├── timestamp: Instant
 ├── toolCalls: List<ToolCallRecord>?   // ASSISTANT 消息可能含工具调用记录
@@ -268,4 +272,4 @@ TokenUsage:
 ## 八、/clear 和 /new
 
 行为详见 [上下文管理 - /clear 和 /new](./context.md#四clear-和-new)
-。二者等价——重置当前会话（messages/plan/compactSummary/totalTokens 清空，session.id 复用）。
+。二者等价——创建全新会话（新 `session.id`），旧 session 保留。

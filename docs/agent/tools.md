@@ -9,7 +9,7 @@
 | `Read`            | `filePath`, `startLine?`, `endLine?`, `timeout`                                              | Read      | PSI/VFS             | 单次 ≤ 500 行，超出需分页                         |
 | `Write`           | `filePath`, `content`, `timeout`                                                             | Write     | WriteCommandAction  | 内容 ≤ 3000 行                              |
 | `Edit`            | `filePath`, `oldString`, `newString`, `timeout`                                              | Edit      | WriteCommandAction  | newString ≤ 3000 行                       |
-| `Bash`            | `command`, `workDir?`, `timeout`                                                             | Bash      | GeneralCommandLine  | 输出 ≤ 200 行，timeout 必填                    |
+| `Bash`            | `command`, `workDir?`, `timeout`, `dangerous`                                                | Bash      | GeneralCommandLine  | 输出 ≤ 200 行，timeout 必填                    |
 | `Glob`            | `dirPath`, `maxDepth?`, `offset?`, `timeout`                                                 | Glob      | VFS + FilenameIndex | ≤ 50 条目，超出需翻页                            |
 | `Grep`            | `query`, `filePattern?`, `timeout`                                                           | Grep      | 文件遍历 + 正则           | ≤ 50 条匹配                                 |
 | `readLints`       | `filePath`, `timeout`                                                                        | —（扩展工具）   | IDE Inspections     | ≤ 50 条诊断                                 |
@@ -23,12 +23,15 @@
 **关键工具行为补充：**
 
 - **Read**：读文件内容，支持行范围。单次最多 500 行，超出用 `startLine` 分页。
+- **Write**：覆盖写入整个文件。父目录不存在时自动 `Files.createDirectories()` 创建。用于创建新文件或需要大范围修改时。
 - **Edit**：精确字符串替换（old→new），不重写整个文件。执行前校验 `modificationStamp`——如与 Agent
   上次读取时不一致，返回错误提示重新 Read。`oldString` 必须精确匹配且唯一。空 `oldString` +
   文件不存在 = 自动创建新文件（Write 也支持同样语义）。
-- **Grep**：支持正则表达式匹配，不区分大小写。非法正则自动回退为字面子串匹配。跳过 build/、.git/、.idea/
+- **Grep**：支持正则表达式匹配，不区分大小写。非法正则自动回退为字面子串匹配。跳过
+  build/、.git/、.idea/、node_modules/
   目录。
-- **readLints**：必填参数 `filePath`（项目内相对路径），返回指定文件的 IDE 诊断。项目未索引完成 →
+- **readLints**：必填参数 `filePath`（项目内相对路径），返回指定文件的 IDE 诊断。当前为占位实现，始终返回空诊断，完整
+  IDE inspection 集成待后续完成。
   返回带进度提示的部分结果。最多返回 50 条，按 severity 排序（ERROR > WARNING > INFO）。
 
 ### WebSearch
@@ -171,20 +174,20 @@
 > **双重告知：** 每个工具的上限同时在工具描述中声明（事前，LLM 调用前通过 JSON Schema 的 description
 > 字段知晓）和返回值截断标注中体现（事后）。两者不可互相替代——事前防止误判，事后确保发现遗漏。
 
-| 工具                | 最大返回行数                        | 截断后行为                                                                   |
-|-------------------|-------------------------------|-------------------------------------------------------------------------|
-| `Read`            | 500 行                         | 尾部注 `... (共 N 行，已截断到 500 行，如需查看剩余内容请用 startLine 参数分页读取)`                |
-| `Grep`            | 50 条匹配                        | 尾部注 `... (共 N 条，已截断到 50 条。如有必要，请使用更精确的搜索词缩小范围)`                         |
-| `Glob`            | 50 条目                         | 尾部注 `... (共 N 条目，已截断到 50。用 dirPath/maxDepth 缩小范围，或用 offset={N} 翻页获取更多)` |
-| `Bash`            | 200 行 (stdout+stderr)         | 中段截断：保留头部 30 行 + 尾部 30 行，中间标注 `... (省略 N 行)`。Bash 不支持翻页（重新执行有副作用）       |
-| `readLints`       | 50 条诊断                        | 按 severity 排序（error > warning > info），截断后注 `还有 N 条未显示，优先展示 error 级别`    |
-| `Edit`/`Write`    | 写入 ≤ 3000 行                   | 超过拒绝并返回错误 `内容过长 (N 行, 上限 3000 行)`                                       |
-| `Agent`           | 返回 ≤ 2000 tokens 摘要           | 完整结果保存到子 session，LLM 看到摘要 + `详情见 sub-session #N`                        |
-| `WebSearch`       | ≤ 10 条/页                      | 尾部注 `... (共 N 条，已返回 10 条。用 offset=N 翻页获取更多)`                            |
-| `WebFetch`        | 无硬性上限（prompt 提取）              | 大页面自动截断，不额外标注                                                           |
-| `AskUserQuestion` | 无上限（用户输入）                     | 不适用                                                                     |
-| `Symbol`          | 引用/调用 ≤ 50，符号 ≤ 100，全局搜索 ≤ 20 | 尾部注 `还有 N 处未显示`。缩小范围请用更精确的查询参数                                          |
-| MCP 工具（动态注册）      | 200 行                         | 尾部注 `... (共 N 行，已截断到 200 行)`。MCP 工具由 MCP Server 动态注册，不支持翻页（重新调用有副作用）    |
+| 工具                | 最大返回行数                           | 截断后行为                                                                   |
+|-------------------|----------------------------------|-------------------------------------------------------------------------|
+| `Read`            | 500 行                            | 尾部注 `... (共 N 行，已截断到 500 行，如需查看剩余内容请用 startLine 参数分页读取)`                |
+| `Grep`            | 50 条匹配                           | 尾部注 `... (共 N 条，已截断到 50 条。如有必要，请使用更精确的搜索词缩小范围)`                         |
+| `Glob`            | 50 条目                            | 尾部注 `... (共 N 条目，已截断到 50。用 dirPath/maxDepth 缩小范围，或用 offset={N} 翻页获取更多)` |
+| `Bash`            | 200 行 / 4,000 字符 (stdout+stderr) | 中段截断：保留头部 30 行 + 尾部 30 行，中间标注 `... (省略 N 行)`。Bash 不支持翻页（重新执行有副作用）       |
+| `readLints`       | 50 条诊断                           | 按 severity 排序（error > warning > info），截断后注 `还有 N 条未显示，优先展示 error 级别`    |
+| `Edit`/`Write`    | 写入 ≤ 3000 行                      | 超过拒绝并返回错误 `内容过长 (N 行, 上限 3000 行)`                                       |
+| `Agent`           | 返回 ≤ 2000 tokens 摘要              | 完整结果保存到子 session，LLM 看到摘要 + `详情见 sub-session #N`                        |
+| `WebSearch`       | ≤ 10 条/页                         | 尾部注 `... (共 N 条，已返回 10 条。用 offset=N 翻页获取更多)`                            |
+| `WebFetch`        | 无硬性上限（prompt 提取）                 | 大页面自动截断，不额外标注                                                           |
+| `AskUserQuestion` | 无上限（用户输入）                        | 不适用                                                                     |
+| `Symbol`          | 引用/调用 ≤ 50，符号 ≤ 100，全局搜索 ≤ 20    | 尾部注 `还有 N 处未显示`。缩小范围请用更精确的查询参数                                          |
+| MCP 工具（动态注册）      | 200 行                            | 尾部注 `... (共 N 行，已截断到 200 行)`。MCP 工具由 MCP Server 动态注册，不支持翻页（重新调用有副作用）    |
 
 ## 五、Shell 安全
 
@@ -192,20 +195,22 @@
   Prompt 要求 LLM 必须传非 0 值
 - **实时流式输出**：`ProcessHandler` listener → batch 100ms → `invokeLater` 更新 UI（防 EDT 洪水）
 - **工作目录限定项目根**
-- **危险模式二次确认**：`rm -rf /`、`git push --force`、`sudo`、`chmod 777`（不可跳过）。正则检测定位为"
-  安全提醒"非"安全防线"——真正边界是项目根目录限定 + 完全透明
+- **`dangerous` 参数**：bool 类型，必填。由 LLM 判断当前命令是否为危险命令（如 `rm -rf /`、
+  `git push --force`、`sudo`、`chmod 777`）。`dangerous=true`
+  时始终弹窗二次确认，无视白名单。详见 [§六 审批机制](#六审批机制)
 
 ## 六、审批机制
 
 ### 审批触发规则
 
-| 场景         | 触发条件                                                | 审批类型           |
-|------------|-----------------------------------------------------|----------------|
-| 首次工具使用     | 每个会话每种工具首次调用                                        | 首次审批（可"允许此会话"） |
-| Shell 危险命令 | `rm -rf /`, `git push --force`, `sudo`, `chmod 777` | 危险命令确认（不可跳过）   |
-| 公共 API 变更  | Edit/Write 修改了方法签名且文件被 ≥3 个其他文件引用                   | 关键操作确认         |
-| 大范围修改      | 同一 turn 修改 ≥5 个文件                                   | 关键操作确认         |
-| 文件删除       | Bash 含 `rm ` 且目标在项目内                                | 关键操作确认         |
+| 场景                        | 触发条件                                                | 审批类型              |
+|---------------------------|-----------------------------------------------------|-------------------|
+| 首次工具使用                    | 每个会话每种工具首次调用                                        | 首次审批（可"允许此会话"）    |
+| Shell 危险命令                | `rm -rf /`, `git push --force`, `sudo`, `chmod 777` | 危险命令确认（不可跳过）      |
+| Bash 危险命令（dangerous=true） | Bash 工具 `dangerous=true`（由 LLM 判断）                  | 始终弹窗确认，不可跳过，无视白名单 |
+| 公共 API 变更                 | Edit/Write 修改了方法签名且文件被 ≥3 个其他文件引用                   | 关键操作确认            |
+| 大范围修改                     | 同一 turn 修改 ≥5 个文件                                   | 关键操作确认            |
+| 文件删除                      | Bash 含 `rm ` 且目标在项目内                                | 关键操作确认            |
 
 **Agent 工具特殊规则：** Agent 工具本身首次使用时需审批（与普通工具一致），但 **Agent
 spawn 的子 Agent内部所有工具调用一律放行，无需审批**。子

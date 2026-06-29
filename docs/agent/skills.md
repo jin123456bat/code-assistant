@@ -59,6 +59,9 @@ tools:
 - `SkillManager` 启动时扫描目录，解析注册。Skill 文件更新后需执行 `/reload-skill` 重新加载
 - 工具声明与 `ToolRegistry` 交叉验证——不存在则发出警告标记（启动时一次性检查，结果体现在 Skill 列表中，
   `hasMissingTools=true` 的 Skill 不可调用）
+- **command 冲突处理**：若 Skill 的 `command` 与内置命令（如 `/plan`）冲突，或两个不同 Skill 定义了相同的
+  `command` 值，则两个都不加载，在 Skills 页面显示冲突提示（如
+  `⚠️ command 冲突: /review 被 code-review 和 qa-review 两个 Skill 同时声明，均已禁用`）
 - System Prompt 末尾注入 Skill 列表（名称 + 描述），不包含完整正文
 - LLM 通过内置 `Skill` 工具触发 Skill（对齐 Claude Code），不做关键词匹配
 - 用户也可手动 `/command` 调用
@@ -108,6 +111,10 @@ Skills 页面提供 Skill 列表管理界面：
 │  │ [❌] docker-helper              ⚠ 工具缺失   ││ ← 禁用+警告
 │  │      Docker 容器管理和编排                   ││
 │  │      ⚠ 声明了不存在的工具: docker-compose    ││
+│  │                                               ││
+│  │ [❌] qa-review                   ⚠ command 冲突 ││ ← command 冲突
+│  │      报告式 QA 测试                          ││
+│  │      ⚠ command /review 与 code-review 冲突   ││
 │  └──────────────────────────────────────────────┘│
 └──────────────────────────────────────────────────┘
 ```

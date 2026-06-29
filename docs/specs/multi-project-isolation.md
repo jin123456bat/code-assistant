@@ -67,6 +67,11 @@ class AppSettingsService {
 
 修改 Settings 页面中的任何配置项，**立即对所有项目窗口生效**。
 
+**注意：**
+
+- 用户在窗口 A 修改了 API Key，窗口 B 需要刷新或重启才能生效。
+- 不支持不同项目使用不同 API Key（仅支持单 Key）。
+
 ### API Key 客户端
 
 `AnthropicOkHttpClient` 按 API Key 缓存——相同 Key 复用同一客户端实例。多项目共用同一 Key 时共享 HTTP

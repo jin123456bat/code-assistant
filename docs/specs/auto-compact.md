@@ -1,6 +1,5 @@
 # Auto-Compact 上下文压缩
 
-> **当前状态：** Auto-Compact 逻辑在 AgentLoop 中**尚未实现**。本文档描述设计意图和 System Prompt
 > 完整内容，供后续开发参考。
 
 ## 一、设计意图（来自设计文档）
@@ -28,7 +27,7 @@
 
 当 API 返回 `stop_reason="max_tokens"` 时自动发送 `"继续"`：
 
-- `maxAutoContinue = 5`（单轮最多续写 5 次，防死循环）
+- 无次数上限，持续续写直到 LLM 返回 `end_turn`
 - 续写**不增加** turn 计数
 - `"继续"` 消息**不持久化**
 - `continueStreak` 在 `end_turn` 后归零
@@ -158,10 +157,10 @@ fun buildSystemPromptTools(): String {
 
 ## 四、与 Claude Code 的差异
 
-| 特性           | Claude Code | Code Assistant（当前） |
-|--------------|-------------|--------------------|
-| Auto-Compact | ✅ 自动触发      | ❌ 未实现              |
-| 续写机制         | ✅           | ❌ 未实现              |
-| 摘要保留工具结果     | ✅           | —                  |
-| 阈值可配         | ❌ 内置        | —                  |
-| 手动 /compact  | ✅           | ❌                  |
+| 特性           | Claude Code | Code Assistant |
+|--------------|-------------|----------------|
+| Auto-Compact | ✅ 自动触发      | ✅ 自动触发         |
+| 续写机制         | ✅           | ✅ 不限次数         |
+| 摘要保留工具结果     | ✅           | ❌ 仅保留描述        |
+| 阈值可配         | ❌ 内置        | ❌ 内置，不可配       |
+| 手动 /compact  | ✅           | ❌              |

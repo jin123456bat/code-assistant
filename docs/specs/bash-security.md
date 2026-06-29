@@ -14,37 +14,23 @@ object ToolApprovalPolicy {
 }
 ```
 
-所有 **Bash** 调用都需要用户审批，**无例外**。当前不区分"安全命令"和"危险命令"——都是统一的审批弹窗。
+Bash 工具包含 `dangerous` 必填参数（bool 类型），由 LLM 判断当前命令是否危险。`dangerous=true`
+时始终弹窗二次确认，无视白名单。`dangerous=false` 时走正常审批流程：首次调用需审批，用户点击"允许此会话"
+后同会话内后续调用信任放行。
 
 ### 审批流程
 
-```
-LLM 发起 Bash tool call
-  │
-  ▼
-ToolExecutor.execute(toolUse)
-  ├── ToolApprovalPolicy.requiresApproval("Bash") → true
-  ├── session.requireApproval()
-  ├── onToolStateChanged(AWAITING_APPROVAL)
-  │
-  ├── EDT: showApprovalDialog(message)
-  │     └── Messages.showYesNoDialog(项目, 消息, "确认工具执行", "允许", "拒绝", WARNING_ICON)
-  │
-  ├── 用户选择 "允许" → session.approvalGranted() → 继续执行
-  └── 用户选择 "拒绝" → session.approvalRejected() → 返回 "用户拒绝执行工具: Bash"
-```
+审批以**对话内嵌 ToolCallCard 形式**呈现，不弹出独立 Dialog。Bash
+工具的审批流程与普通工具一致，详见 [tools.md §六 审批机制](../agent/tools.md#六审批机制)。
 
-### 审批弹窗消息格式
+`dangerous=true` 时，ToolCallCard 仅展示"允许一次"/"拒绝"按钮（无"允许此会话"），始终二次确认。
+`dangerous=false` 时，首次调用展示全部按钮。`dangerous=true` 的命令即使已在白名单中也必须弹出确认。
 
-```
-工具: Bash
-命令: {command}
-目录: {workDir}
+## 二、输出上限
 
-允许 Code Assistant 执行这个操作吗？
-```
+Bash 输出上限及截断策略详见 [tools.md §四 工具返回截断策略](../agent/tools.md#四工具返回截断策略)。
 
-## 二、执行环境
+## 三、执行环境
 
 ### Shell 类型
 
@@ -69,14 +55,13 @@ val process = Runtime.getRuntime().exec(
 - 进程注册到 `session.runningProcesses`（MutableSet）
 - 用户点击停止按钮时，遍历 `runningProcesses` 逐个 `destroyForcibly()`
 
-## 三、超时与资源限制
+## 四、超时与资源限制
 
-| 限制项  | 值                             | 说明          |
-|------|-------------------------------|-------------|
-| 超时   | 由 LLM 在 `timeout` 参数中指定（必填）   | 0 = 不限      |
-| 输出缓冲 | 10,000 字符（stdout + stderr 合并） | 超出截断        |
-| 返回内容 | 4,000 字符                      | 返回给 LLM 的内容 |
-| 超时行为 | `process.destroyForcibly()`   | 强制终止        |
+| 限制项  | 值                           | 说明                                                                |
+|------|-----------------------------|-------------------------------------------------------------------|
+| 超时   | 由 LLM 在 `timeout` 参数中指定（必填） | 0 = 不限                                                            |
+| 返回内容 | 200 行 / 4,000 字符（取较小者）      | 中段截断：保留头部 30 行 + 尾部 30 行，中间标注 `... (省略 N 行)`。Bash 不支持翻页（重新执行有副作用） |
+| 超时行为 | `process.destroyForcibly()` | 强制终止                                                              |
 
 ### 超时实现
 
@@ -104,16 +89,21 @@ val (stdout, stderr) = if (timeoutSec > 0) {
 }
 ```
 
-## 四、危险命令检测（当前：无）
+## 五、危险命令检测
 
-**当前版本不区分安全/危险命令**。所有 Bash 调用统一走审批弹窗。
+危险命令检测由 LLM 通过 Bash 工具的参数 `dangerous`（bool，必填）自行判断。LLM 认为命令具有高风险时设置
+`dangerous=true`，典型危险命令包括：
 
-> **设计考量：** LLM 自身不知道用户环境的具体情况（如生产数据库连接、敏感文件），因此交由用户判断是最安全的策略。后续可考虑：
-> - 命令白名单模式（如 `ls`、`pwd`、`cat` 自动放行）
-> - 正则黑名单模式（如 `rm -rf /`、`sudo` 始终二次确认）
-> - 按工作目录区分（项目目录内 vs 项目目录外）
+- `rm -rf /` —— 递归删除根目录
+- `git push --force` —— 强制推送覆盖远程
+- `sudo` —— 提权操作
+- `chmod 777` —— 开放全部权限
+- 其他破坏性文件操作、生产环境数据修改等
 
-## 五、已知安全边界
+`dangerous=true` 时 ToolCallCard 始终弹窗二次确认，无视白名单，不提供"允许此会话"选项。
+`dangerous=false` 时走正常审批流程（首次授权后同会话信任）。
+
+## 六、已知安全边界
 
 | 边界          | 当前状态                                        | 风险等级             |
 |-------------|---------------------------------------------|------------------|
@@ -124,13 +114,13 @@ val (stdout, stderr) = if (timeoutSec > 0) {
 | sudo        | 不阻止，由用户审批时自行判断                              | 🔴 高             |
 | `timeout=0` | LLM 可指定不限超时，命令可能永久挂起                        | 🟡 中             |
 
-## 六、对比 Claude Code
+## 七、对比 Claude Code
 
-| 特性     | Claude Code | Code Assistant |
-|--------|-------------|----------------|
-| 审批粒度   | 首次授权后同会话信任  | 每次 Bash 调用都审批  |
-| 危险命令检测 | ✅ 内置检测      | ❌ 无            |
-| 工作目录沙箱 | ❌           | ❌              |
-| 环境变量隔离 | ❌           | ❌              |
-| 审批超时   | 有           | 无（模态弹窗，用户必响应）  |
-| 命令白名单  | ❌           | ❌ 待考虑          |
+| 特性     | Claude Code | Code Assistant                 |
+|--------|-------------|--------------------------------|
+| 审批粒度   | 首次授权后同会话信任  | 首次授权后同会话信任，dangerous=true 始终确认 |
+| 危险命令检测 | ✅ 内置检测      | ✅ LLM 通过 `dangerous` 参数判断      |
+| 工作目录沙箱 | ❌           | ❌                              |
+| 环境变量隔离 | ❌           | ❌                              |
+| 审批超时   | 有           | 无（对话内嵌按钮，用户必响应）                |
+| 命令白名单  | ❌           | 首次授权后同会话信任                     |

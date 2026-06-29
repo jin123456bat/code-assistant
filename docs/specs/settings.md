@@ -33,10 +33,10 @@ AppSettingsService（SettingsConfigurable 读写）
 
 ## 存储方式
 
-| 存储方式                  | 适用场景    | 说明                                     |
-|-----------------------|---------|----------------------------------------|
-| `PasswordSafe`        | API Key | IntelliJ 内置安全存储，自动加密，跨项目共享             |
-| `PropertiesComponent` | 其余所有配置  | IntelliJ 项目级/应用级 properties 存储，支持默认值回退 |
+| 存储方式                  | 适用场景    | 说明                                                                  |
+|-----------------------|---------|---------------------------------------------------------------------|
+| `PasswordSafe`        | API Key | IntelliJ 内置安全存储，自动加密，跨项目共享。不可用时直接抛 `IllegalStateException`，不做降级明文存储 |
+| `PropertiesComponent` | 其余所有配置  | IntelliJ 项目级/应用级 properties 存储，支持默认值回退                              |
 
 ## Settings 页面（UI）
 

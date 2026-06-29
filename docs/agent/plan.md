@@ -149,20 +149,21 @@ LLM 在执行过程中**随时主动**创建正式执行计划：
 
 ## 七、边界处理
 
-| 场景                   | 行为                                                                                                 |
-|----------------------|----------------------------------------------------------------------------------------------------|
-| 用户修改了 Plan 后续项       | 修改直接更新 Session JSON 的 `plan.plans` 数组，恢复时展示修改后的计划                                                  |
-| LLM 需要调整剩余项          | 调用 `reorderPlans` / `removePlan` 自主管理                                                              |
-| 用户删除 PAUSED 项        | 通过 PlanCard [✕] 按钮 → PlanExecutor.removePlan()，LLM 收到通知后跳过该项                                       |
-| LLM 终止计划             | LLM 调用 removePlan 删除所有剩余项 → Plan 标记 CANCELLED                                                      |
-| 多个会话各有暂停计划           | 允许。每个会话独立存储。Sessions 页面标注"⏸ 计划暂停中"                                                                 |
-| Plan 暂停期间切换到 Chat 输入 | 新消息追加到同一个 session。LLM 上下文包含暂停的计划摘要 + 新消息。LLM 自行判断消息意图——纯咨询则先回答再继续执行，要求继续则执行下一个计划项。Plan 状态保持 PAUSED |
+| 场景                   | 行为                                                                                                                                                       |
+|----------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 用户修改了 Plan 后续项       | 修改直接更新 Session JSON 的 `plan.plans` 数组，恢复时展示修改后的计划                                                                                                        |
+| LLM 需要调整剩余项          | 调用 `reorderPlans` / `removePlan` 自主管理                                                                                                                    |
+| 用户删除 PAUSED 项        | 通过 PlanCard [✕] 按钮 → PlanExecutor.removePlan()，LLM 收到通知后跳过该项                                                                                             |
+| LLM 终止计划             | LLM 调用 removePlan 删除所有剩余项 → Plan 标记 CANCELLED                                                                                                            |
+| 多个会话各有暂停计划           | 允许。每个会话独立存储。Sessions 页面标注"⏸ 计划暂停中"                                                                                                                       |
+| Plan 暂停期间切换到 Chat 输入 | 新消息追加到同一个 session。LLM 上下文包含暂停的计划摘要 + 新消息。LLM 自行判断消息意图——纯咨询则先回答再继续执行，要求继续则执行下一个计划项。Plan 状态保持 PAUSED。用户消息不会改变 Plan 状态，也不会修改 Plan 描述。Plan 不更新，除非 LLM 通过工具修改 |
 
 **Plan 与会话的关系：**
 
-- 一个 Session 最多一个活跃 Plan。LLM 调用 `createPlan` 重新规划时，新 Plan 自动成为活跃 Plan，旧 Plan
-  的 EXECUTING 项重置为 PAUSED。旧 Plan 项的清理（标记 CANCELLED 等）需 LLM 主动调用 `removePlan`/
-  `markPlanDone` 或用户手动删除
+- 一个 Session 最多一个活跃 Plan。LLM 调用 `createPlan` 只是创建一个新 Plan，不会自动替换旧 Plan，也
+  不会影响旧 Plan 的状态。旧 Plan 项的清理（标记 CANCELLED 等）需 LLM 主动调用 `removePlan`/
+  `markPlanDone` 或用户手动删除。Plan 的 id 必须唯一，如果创建时 id 不唯一，返回错误给 LLM。Session
+  JSON 中保留旧 Plan 数据
 - Plan COMPLETED 或 CANCELLED 后，Session 可继续当作普通 Chat 会话
 - Plan 暂停时，用户可在同一 Session 中继续聊天，消息追加到同一 message 列表
 - Plan 状态独立于 AgentSession 状态——Plan 暂停但 Agent 可以 IDLE/聊天

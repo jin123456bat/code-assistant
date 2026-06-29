@@ -226,7 +226,43 @@ fun toUnifiedDiff(oldName: String, newName: String, diff: List<DiffLine>): Strin
 | API Key       | `PasswordSafe`        | —                 | 与 Agent、补全共用               |
 | Model         | `PropertiesComponent` | `deepseek-v4-pro` | 与 Agent、补全共用               |
 
-## 九、已知限制
+## 九、边界情况处理
+
+### 空 diff（无变更）
+
+当所有变更文件被取消勾选，或 diff 内容为空时：
+
+- 按钮仍可见但点击后弹出提示：`"没有检测到代码变更，请勾选需要提交的文件"`
+- 不发起 API 调用
+- `isGenerating` 保持 `false`
+
+### Merge Commit
+
+检测到 merge commit 场景（`.git/MERGE_HEAD` 存在或 `git diff --staged` 包含 merge 特征）时：
+
+- 使用专门的 merge prompt 模板：`"生成一个简洁的 merge commit message，描述合并的内容"`
+- 不强行要求 Conventional Commits 格式
+- diff 内容仍然正常采集（包含冲突解决后的变更）
+
+### 超大 Diff（超出 Token 限制）
+
+当 diff 总字符数超过 50,000 上限时：
+
+1. 优先保留 `git diff --stat` 摘要（变更文件列表 + 增删行数统计）
+2. 选取前 30 个文件的 diff 内容（按变更行数降序）
+3. 每个文件的 diff 截断到前 500 行
+4. 尾部标注：`... (共 {totalFiles} 个文件变更，仅展示前 30 个文件的 diff)`
+5. 如果截断后仍超过 50,000 字符 → 仅发送 `--stat` 摘要，不发送逐文件 diff
+
+### 无 Staged Changes 且无 Unstaged Changes
+
+（新仓库、刚 commit 完）时：
+
+- `getCheckedChanges()` 返回空列表
+- 按钮隐藏（`changes.isNotEmpty()` = false）
+- 不发起任何操作
+
+## 十、已知限制
 
 - 仅支持 Git VCS，其他版本控制系统（SVN、Mercurial）不支持
 - 仅支持 DeepSeek Chat API（`/v1/chat/completions`），不支持其他 LLM 提供商

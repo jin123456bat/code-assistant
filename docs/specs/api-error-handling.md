@@ -230,7 +230,48 @@ object AppLogger {
 | Git Message 无重试  | 可加 1 次自动重试                       |
 | 无全局 429 协调       | Agent 和 Completion 同时触发时可能互相加重限流 |
 
-## 九、Agent 与 Completion 并发
+## 九、全局异常处理
+
+**各组件不自行处理异常，所有异常由全局异常处理器统一处理。**
+
+### 处理器注册
+
+```kotlin
+// EDT 线程
+SwingUtilities.invokeLater {
+    Thread.setDefaultUncaughtExceptionHandler(GlobalExceptionHandler)
+}
+
+// 后台线程池
+ExecutorService.execute {
+    Thread.currentThread().uncaughtExceptionHandler = GlobalExceptionHandler
+}
+```
+
+### 处理策略
+
+| 线程                                    | 异常处理                                                                        |
+|---------------------------------------|-----------------------------------------------------------------------------|
+| EDT                                   | `LoggingUncaughtExceptionHandler` → 记录日志 + toast 提示"插件内部错误，请查看日志" + 不中断 IDE |
+| PooledThread（Agent Loop / 工具执行）       | 记录日志 + `session.markError()` → 错误气泡展示给用户 + Agent 状态 → ERROR                 |
+| Swing Timer / ProcessHandler listener | 记录日志 + 静默恢复（根据上下文决定是否 toast）                                                |
+| Completion 协程                         | `CoroutineExceptionHandler` → 记录日志 + 静默（无候选，不打扰用户）                          |
+
+### 降级行为
+
+| 异常类型                   | 降级行为                          |
+|------------------------|-------------------------------|
+| 未捕获 `RuntimeException` | 记录完整堆栈 + toast "插件内部错误"       |
+| `OutOfMemoryError`     | 记录日志 + 不做额外操作（让 IDE 自行处理）     |
+| `Error`（非 OOM）         | 记录日志 + 不捕获（让 IDE 处理，避免隐藏严重问题） |
+
+### 组件规范
+
+- **禁止组件自行 try-catch 吞掉异常**：各组件不写 `catch (e: Exception) { log }` 空处理
+- **需要特定降级时向上抛**：抛出自定义异常，由全局处理器按类型分发
+- **日志脱敏**：`AppLogger` 统一提供，自动脱敏 API Key 和代码内容
+
+## 十、Agent 与 Completion 并发
 
 **Agent 和 Completion 同时使用 API Key 时无并发限制。**
 

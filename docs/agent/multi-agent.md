@@ -18,15 +18,16 @@
 
 ## 二、关键约束
 
-| 约束项        | 规则                                                                                                                                            |
-|------------|-----------------------------------------------------------------------------------------------------------------------------------------------|
-| 并发控制       | `Semaphore(maxConcurrentAgents)` 限制全局 Agent 并发总数（父 + 子总计）。默认 3（1 父 + 最多 2 子），0=不限，可在 Settings 中修改                                             |
-| 文件写锁       | `ConcurrentHashMap<VirtualFile, ReentrantLock>`（所有 Agent 共享）                                                                                  |
-| 递归限制       | 最多 1 层嵌套（子不可再 spawn 孙）。Phase 5 后可评估是否放宽                                                                                                       |
-| 结果摘要       | ≤ 2000 tokens 写入父的 toolResult。摘要 = 子 Agent 最后一轮 assistant 消息 + 所有 tool call 结果原文拼接，截断到 2000 tokens。不额外调用 LLM 生成摘要                             |
-| 子 Session  | 独立持久化（`session.parentId` 关联）                                                                                                                  |
-| 上下文压缩      | 子 Agent 复用父的 Auto-Compact 机制（同一阈值、策略），详见 [context.md §二](context.md#二auto-compact)                                                            |
-| 子 Agent 失败 | 子 Agent crash → `"Sub-agent failed: <error>"`；超时 → `"Sub-agent timeout: {timeout}s"`。父 LLM 自行决定重试或调整策略。crash/超时后自动清理：释放信号量、释放文件写锁、销毁 Shell 进程 |
+| 约束项        | 规则                                                                                                                                                                                                                             |
+|------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 并发控制       | `Semaphore(maxConcurrentAgents)` 限制全局 Agent 并发总数（父 + 子总计）。默认 3（1 父 + 最多 2 子），0=不限，可在 Settings 中修改。排队策略：FIFO 公平排队，先请求先获得                                                                                                        |
+| 文件写锁       | `ConcurrentHashMap<VirtualFile, ReentrantLock>`（所有 Agent 共享）                                                                                                                                                                   |
+| 递归限制       | 最多 1 层嵌套（子不可再 spawn 孙）。Phase 5 后可评估是否放宽                                                                                                                                                                                        |
+| 结果摘要       | ≤ 2000 tokens 写入父的 toolResult。摘要 = 子 Agent 最后一轮 assistant 消息 + 所有 tool call 结果原文拼接，截断到 2000 tokens。不额外调用 LLM 生成摘要                                                                                                              |
+| 子 Session  | 独立持久化（`session.parentId` 关联）                                                                                                                                                                                                   |
+| 上下文构建      | 子 Agent 上下文独立构建，不继承父 Agent 的历史对话。仅包含：① System Prompt 基础部分（角色指令 + 工具描述 + 环境信息，不含父的对话历史摘要） + ② 父的 `prompt` 参数作为首条 user message。子 Agent 结束后，结果摘要通过回调写回父的 toolResult                                                               |
+| 上下文压缩      | 子 Agent 复用父的 Auto-Compact 机制（同一阈值、策略），详见 [context.md §二](context.md#二auto-compact)                                                                                                                                             |
+| 子 Agent 失败 | 子 Agent crash → `"Sub-agent failed: <error>"`；超时 → `"Sub-agent timeout: {timeout}s"`。父 LLM 自行决定重试或调整策略。crash/超时后自动清理：释放信号量、释放文件写锁、销毁 Shell 进程。**子 Agent 崩溃不会导致父 Agent 崩溃**。如果父同时 spawn 了多个子 Agent，其中 1 个 crash，另外的子 Agent 继续执行 |
 
 ## 三、子 Agent 审批与工具限制
 
@@ -136,6 +137,9 @@
 - **文件修改通知**：子 Agent 完成时，`MultiAgentManager` 自动失效父 Agent 中被子 Agent 修改过的文件的
   `modificationStamp`，迫使父 Agent 下次 `Edit` 前必须重新 `Read`
   。参见 [前置校验](../agent/tools.md#七前置校验)
+- **数据流路径**：子 Agent 的 `Flow<AgentEvent>` 直接 collect 到父 `ChatViewModel` 渲染（不经过
+  `MultiAgentManager` 转发）。子 Agent 的 `ToolCallCard` 锁在 `MultiAgentBlock` 卡片内部独立渲染，
+  不混入父的 `messageContainer`。
 - **Chat 页面展示**：仅显示 `🤖 Agent: 重构 UserService → 已完成 (sub-session #42)，摘要: ...`。子 Agent
   的 ToolCallCard 出现在自己的 Session 视图中，不嵌入父的 ChatPage。
 
