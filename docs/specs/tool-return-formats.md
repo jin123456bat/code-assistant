@@ -1,6 +1,6 @@
 # 工具返回值格式契约
 
-> **原始来源：** `docs/tech-spec.md`（已拆分，内容归入 `docs/specs/` 各文件）
+> **原始来源：** `tech-spec.md`（已拆分，内容归入 `specs/` 各文件）
 
 本文档定义每个 Tool 的 `execute()` 方法中 `ToolResult.content` 的**精确格式契约**。LLM
 收到的就是这些字符串。格式不一致会导致 LLM 行为不可预测。

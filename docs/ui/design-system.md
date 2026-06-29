@@ -143,38 +143,38 @@ dialog:     0px 8px 24px rgba(0,0,0,0.15)    — 弹窗（审批、确认）
 
 使用 IntelliJ Platform 内置图标集（`com.intellij.icons.AllIcons`），不引入外部图标库。
 
-| 用途                       | 图标引用                                    |
-|--------------------------|-----------------------------------------|
-| TabBar - Chat            | `AllIcons.Actions.Forum`                |
-| TabBar - Sessions        | `AllIcons.Actions.ListFiles`            |
-| TabBar - Token Usage     | `AllIcons.Actions.ShowAsPieChart`       |
-| TabBar - MCP             | `AllIcons.Nodes.Plugin`                 |
-| TabBar - Skills          | `AllIcons.Actions.Star`                 |
-| TabBar - Settings        | `AllIcons.General.Gear`                 |
-| TabBar - Welcome         | `AllIcons.Actions.Home`                 |
-| ToolCallCard - DONE      | `AllIcons.RunConfigurations.TestPassed` |
-| ToolCallCard - ERROR     | `AllIcons.RunConfigurations.TestFailed` |
-| ToolCallCard - EXECUTING | `AllIcons.Process.Plan_4`（旋转动画）         |
-| ToolCallCard - PENDING   | `AllIcons.Process.Plan_0`               |
-| 发送按钮                     | `AllIcons.Actions.Commit`               |
-| 停止按钮                     | `AllIcons.Actions.Suspend`              |
-| 文件引用 tag                 | `AllIcons.FileTypes.Text`               |
-| 图片 tag                   | `AllIcons.FileTypes.Image`              |
+| 用途                       | 图标引用                                      |
+|--------------------------|-------------------------------------------|
+| TabBar - Chat            | `AllIcons.Toolwindows.ToolWindowMessages` |
+| TabBar - Sessions        | `AllIcons.Actions.ListFiles`              |
+| TabBar - Token Usage     | `AllIcons.Actions.Show`                   |
+| TabBar - MCP             | `AllIcons.Nodes.Plugin`                   |
+| TabBar - Skills          | `AllIcons.Nodes.Favorite`                 |
+| TabBar - Settings        | `AllIcons.General.Gear`                   |
+| TabBar - Welcome         | `AllIcons.Nodes.HomeFolder`               |
+| ToolCallCard - DONE      | `AllIcons.RunConfigurations.TestPassed`   |
+| ToolCallCard - ERROR     | `AllIcons.RunConfigurations.TestFailed`   |
+| ToolCallCard - EXECUTING | `AllIcons.Process.Plan_4`（旋转动画）           |
+| ToolCallCard - PENDING   | `AllIcons.Process.Plan_0`                 |
+| 发送按钮                     | 文字 "→" / "发送"（中文环境）                       |
+| 停止按钮                     | 输入框右侧 spinner 动画（无独立按钮）                   |
+| 文件引用 tag                 | `AllIcons.FileTypes.Text`                 |
+| 图片 tag                   | `AllIcons.FileTypes.Image`                |
 
 ## 七、动效规范
 
-| 动效        | 时长    | 缓动              | 触发条件                                |
-|-----------|-------|-----------------|-------------------------------------|
-| Toast 滑入  | 300ms | ease-out        | Toast 触发                            |
-| Toast 滑出  | 200ms | ease-in         | 3s 后自动                              |
-| 审批弹窗出现    | 200ms | ease-out        | tool_use 到达 + requiresApproval=true |
-| 审批弹窗消失    | 150ms | ease-in         | 用户操作（批准/拒绝）                         |
-| 消息气泡出现    | 150ms | ease-out        | 消息添加到列表                             |
-| 流式闪烁光标    | 500ms | blink           | 流式生成中                               |
-| 工具卡片展开/折叠 | 200ms | ease-out        | 点击头部                                |
-| 执行中旋转     | 1s/圈  | linear infinite | EXECUTING 状态                        |
-| 页面切换      | 0ms   | 无               | CardLayout.show()（即时）               |
-| hover 高亮  | 100ms | ease-out        | 鼠标进入按钮/卡片                           |
+| 动效        | 时长                                 | 缓动              | 触发条件                                |
+|-----------|------------------------------------|-----------------|-------------------------------------|
+| Toast 滑入  | 300ms                              | ease-out        | Toast 触发                            |
+| Toast 滑出  | 200ms                              | ease-in         | 3s 后自动                              |
+| 审批弹窗出现    | 200ms                              | ease-out        | tool_use 到达 + requiresApproval=true |
+| 审批弹窗消失    | 150ms                              | ease-in         | 用户操作（批准/拒绝）                         |
+| 消息气泡出现    | 150ms                              | ease-out        | 消息添加到列表                             |
+| 流式闪烁光标    | 500ms 可见 / 500ms 隐藏交替（完整周期 1000ms） | blink           | 流式生成中                               |
+| 工具卡片展开/折叠 | 200ms                              | ease-out        | 点击头部                                |
+| 执行中旋转     | 1s/圈                               | linear infinite | EXECUTING 状态                        |
+| 页面切换      | 0ms                                | 无               | CardLayout.show()（即时）               |
+| hover 高亮  | 100ms                              | ease-out        | 鼠标进入按钮/卡片                           |
 
 ### prefers-reduced-motion 适配
 

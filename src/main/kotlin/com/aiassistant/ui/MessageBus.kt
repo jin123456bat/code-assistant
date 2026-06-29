@@ -14,7 +14,10 @@ object MessageBus {
         fun onAgentStateChanged(sessionId: String, newState: String) {}
         fun onTokenUsageUpdated(sessionId: String, delta: Long) {}
         fun onMcpServerStateChanged(serverId: String, newState: String) {}
+        fun onApiKeyValidated(state: String) {}
         fun onPlanStateChanged(sessionId: String, status: String) {}
+        fun onPageSwitched(from: String, to: String) {}
+        fun onSystemError(title: String, message: String) {}
     }
 
     fun register(listener: MessageBusListener) {
@@ -37,6 +40,15 @@ object MessageBus {
     fun publishMcpServerStateChanged(serverId: String, newState: String) =
         listeners.forEach { it.onMcpServerStateChanged(serverId, newState) }
 
+    fun publishApiKeyValidated(state: String) =
+        listeners.forEach { it.onApiKeyValidated(state) }
+
     fun publishPlanStateChanged(sessionId: String, status: String) =
         listeners.forEach { it.onPlanStateChanged(sessionId, status) }
+
+    fun publishPageSwitched(from: String, to: String) =
+        listeners.forEach { it.onPageSwitched(from, to) }
+
+    fun publishSystemError(title: String, message: String) =
+        listeners.forEach { it.onSystemError(title, message) }
 }

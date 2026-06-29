@@ -22,7 +22,7 @@ Code Assistant 的界面设计——基于 IntelliJ Platform 的 Swing 多页面
 │  ├── TabBar.kt             顶部导航                   │
 │  ├── AppColors.kt          颜色令牌                   │
 │  ├── MessageBus.kt         事件总线                   │
-│  ├── SelectionListener.kt  编辑器选中监听              │
+│  ├── EditorSelectionListener.kt  编辑器选中监听              │
 │  ├── OpenChatAction.kt     快捷键 Action              │
 │  ├── page/                 7 个 Page                  │
 │  │   ├── WelcomePage.kt                            │
@@ -48,9 +48,9 @@ Code Assistant 的界面设计——基于 IntelliJ Platform 的 Swing 多页面
 - **UI 框架：** IntelliJ Platform Swing（JPanel / JLabel / JTextArea / JScrollPane）
 - **Markdown 渲染：** 手写字符串解析器，5 种 Block
   类型（Paragraph/CodeBlock/Header/ListItem/QuoteBlock），详见 [
-  `docs/agent/markdown-rendering.md`](agent/markdown-rendering.md)
+  `agent/markdown-rendering.md`](agent/markdown-rendering.md)
 - **代码块渲染：** `JTextArea` 只读模式（JetBrains Mono 等宽字体），非 `EditorTextField`。详见 [
-  `docs/agent/markdown-rendering.md`](agent/markdown-rendering.md)
+  `agent/markdown-rendering.md`](agent/markdown-rendering.md)
 - **流式渲染：** 首 token 即时渲染，后续 token 静默合并（token 停顿 ≥30ms 后批量 flush）
 - **主题适配：** `JBColor` 亮/暗双主题自动切换
 - **页面路由：** CardLayout 懒加载，首屏只创建 Welcome + Chat

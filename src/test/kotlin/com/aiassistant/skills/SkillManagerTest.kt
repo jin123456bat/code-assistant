@@ -28,13 +28,15 @@ class SkillManagerTest {
         )
 
         val manager = SkillManager(projectAt(root.toString()))
-        manager.setEnabled("review", false)
+        manager.disableSkill("review")
 
-        assertFalse(manager.loadSkills().single().enabled)
+        val disabledSkill = manager.loadSkills().first { it.name == "review" }
+        assertFalse(disabledSkill.enabled)
         assertFalse(manager.getSystemPromptExtension().contains("/review"))
 
-        manager.setEnabled("review", true)
-        assertTrue(manager.loadSkills().single().enabled)
+        manager.enableSkill("review")
+        val enabledSkill = manager.loadSkills().first { it.name == "review" }
+        assertTrue(enabledSkill.enabled)
     }
 
     @Test
@@ -44,9 +46,11 @@ class SkillManagerTest {
         writeSkill(root, "test", "test")
 
         val manager = SkillManager(projectAt(root.toString()))
-        manager.setEnabled("test", false)
+        manager.disableSkill("test")
 
-        assertEquals(listOf("/review"), manager.enabledSlashCommands())
+        val commands = manager.enabledSlashCommands()
+        assertTrue("/review" in commands, "Expected /review to be enabled")
+        assertFalse("/test" in commands, "Expected /test to be disabled")
     }
 
     private fun writeSkill(root: java.nio.file.Path, name: String, command: String) {

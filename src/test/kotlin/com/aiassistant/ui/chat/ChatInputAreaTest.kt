@@ -49,10 +49,10 @@ class ChatInputAreaTest {
     fun `shows and clears selection tag`() {
         val inputArea = ChatInputArea(onSend = {})
 
-        inputArea.setSelectionReference("UserService.kt:40-60")
+        inputArea.setSelectionReference(fileName = "UserService.kt", lineRange = "40-60")
         assertTrue(labelsIn(inputArea).any { it.text?.contains("UserService.kt:40-60") == true })
 
-        inputArea.setSelectionReference(null)
+        inputArea.setSelectionReference(fileName = null)
         assertTrue(labelsIn(inputArea).none { it.text?.contains("UserService.kt:40-60") == true })
     }
 

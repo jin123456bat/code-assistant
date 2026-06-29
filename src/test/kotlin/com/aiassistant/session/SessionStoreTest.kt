@@ -1,6 +1,7 @@
 package com.aiassistant.session
 
 import com.aiassistant.agent.AgentSession
+import com.aiassistant.agent.ContentType
 import com.aiassistant.agent.Message
 import com.aiassistant.agent.Role
 import com.aiassistant.agent.ToolCallRecord
@@ -22,7 +23,8 @@ class SessionStoreTest {
         val session = AgentSession(id = "session-with-tool")
         session.addMessage(
             Message(
-                role = Role.TOOL_CALL,
+                role = Role.SYSTEM,
+                contentType = ContentType.TOOL_USE,
                 content = "",
                 toolCalls = listOf(
                     ToolCallRecord(

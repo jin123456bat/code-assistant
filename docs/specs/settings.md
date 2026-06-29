@@ -1,6 +1,6 @@
 # Settings 持久化规范
 
-> **原始来源：** `docs/tech-spec.md`（已拆分，内容归入 `docs/specs/` 各文件）
+> **原始来源：** `tech-spec.md`（已拆分，内容归入 `specs/` 各文件）
 
 Agent 设置已迁移到 IDE SettingsConfigurable（Settings > Tools > Code Assistant），与代码补全、Commit
 生成统一管理。面板内 Settings 页面简化为关于页 + 快捷键参考。存储复用 `PasswordSafe`（API Key）和

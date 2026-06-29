@@ -8,11 +8,11 @@
 
 ## 功能概览
 
-| 功能                 | 说明                                                         | 文档                                           |
-|--------------------|------------------------------------------------------------|----------------------------------------------|
-| 💬 **Agent 对话**    | AI 编程代理：工具调用、Plan Mode、多 Agent、Skill 系统、MCP 外部工具           | [`docs/agent.md`](docs/agent.md)             |
-| ⌨️ **代码自动补全**      | FIM（Fill-in-the-Middle）代码补全，PSI 上下文增强，缓存加速                 | [`docs/completion.md`](docs/completion.md)   |
-| 📝 **Git Message** | 基于 `git diff` 自动生成 Conventional Commits 规范的 commit message | [`docs/git-message.md`](docs/git-message.md) |
+| 功能                 | 说明                                                         | 文档                              |
+|--------------------|------------------------------------------------------------|---------------------------------|
+| 💬 **Agent 对话**    | AI 编程代理：工具调用、Plan Mode、多 Agent、Skill 系统、MCP 外部工具           | `agent.md`agent.md)             |
+| ⌨️ **代码自动补全**      | FIM（Fill-in-the-Middle）代码补全，PSI 上下文增强，缓存加速                 | `completion.md`completion.md)   |
+| 📝 **Git Message** | 基于 `git diff` 自动生成 Conventional Commits 规范的 commit message | `git-message.md`git-message.md) |
 
 ### Agent 对话核心能力
 
@@ -86,26 +86,26 @@ Platform Plugin 2.2.1
 
 ## 快捷键
 
-| 快捷键（Windows/Linux） | 快捷键（macOS）    | 操作             |
-|--------------------|---------------|----------------|
-| `Ctrl+Shift+K`     | `Cmd+Shift+K` | 打开/关闭 Agent 面板 |
-| `Alt+P`            | `Cmd+P`       | 手动触发代码补全       |
-| `↑` / `↓`          | `↑` / `↓`     | 补全候选切换         |
-| `Enter`            | `Enter`       | 发送消息           |
-| `Shift+Enter`      | `Shift+Enter` | 输入框换行          |
-| `Escape`           | `Escape`      | 关闭 Popup（详见 [agent.md](docs/agent.md#快捷键)） |
-| `Ctrl+Shift+N`     | `Cmd+Shift+N` | 新建会话           |
-| `↑`（空输入框）          | `↑`（空输入框）     | 填充上一条消息        |
+| 快捷键（Windows/Linux） | 快捷键（macOS）    | 操作                                 |
+|--------------------|---------------|------------------------------------|
+| `Ctrl+Shift+K`     | `Cmd+Shift+K` | 打开/关闭 Agent 面板                     |
+| `Alt+P`            | `Cmd+P`       | 手动触发代码补全                           |
+| `↑` / `↓`          | `↑` / `↓`     | 补全候选切换                             |
+| `Enter`            | `Enter`       | 发送消息                               |
+| `Shift+Enter`      | `Shift+Enter` | 输入框换行                              |
+| `Escape`           | `Escape`      | 关闭 Popup（详见 agent.mdagent.md#快捷键)） |
+| `Ctrl+Shift+N`     | `Cmd+Shift+N` | 新建会话                               |
+| `↑`（空输入框）          | `↑`（空输入框）     | 填充上一条消息                            |
 
 ## 文档索引
 
-| 文档                                                       | 说明                                   |
-|----------------------------------------------------------|--------------------------------------|
-| [`docs/agent.md`](docs/agent.md)                         | Agent 智能对话 — 模块总览，引用所有 Agent 功能子文档   |
-| [`docs/ui.md`](docs/ui.md)                               | UI/UX 设计 — 模块总览，引用所有 UI 功能子文档        |
-| [`docs/completion.md`](docs/completion.md)               | 代码自动补全 — FIM 流程、PSI 上下文增强、缓存、后处理     |
-| [`docs/git-message.md`](docs/git-message.md)             | Git Message — diff 构建、Prompt 模板、流式生成 |
-| [`docs/agent/correctness.md`](docs/agent/correctness.md) | Agent 正确性验证体系 — 防幻觉、代码验证、方案验证        |
+| 文档                                          | 说明                                   |
+|---------------------------------------------|--------------------------------------|
+| `agent.md`agent.md)                         | Agent 智能对话 — 模块总览，引用所有 Agent 功能子文档   |
+| `ui.md`ui.md)                               | UI/UX 设计 — 模块总览，引用所有 UI 功能子文档        |
+| `completion.md`completion.md)               | 代码自动补全 — FIM 流程、PSI 上下文增强、缓存、后处理     |
+| `git-message.md`git-message.md)             | Git Message — diff 构建、Prompt 模板、流式生成 |
+| `agent/correctness.md`agent/correctness.md) | Agent 正确性验证体系 — 防幻觉、代码验证、方案验证        |
 
 ## 配置项
 

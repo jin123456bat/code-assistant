@@ -3,6 +3,9 @@ package com.aiassistant.completion
 import com.aiassistant.AppLogger
 import com.aiassistant.AppSettingsService
 import com.intellij.codeInsight.inline.completion.InlineCompletionEvent
+import com.intellij.psi.PsiDocumentManager
+import com.intellij.psi.codeStyle.CodeStyleSettingsManager
+import com.intellij.psi.codeStyle.CommonCodeStyleSettings
 import com.intellij.codeInsight.inline.completion.InlineCompletionInsertEnvironment
 import com.intellij.codeInsight.inline.completion.InlineCompletionInsertHandler
 import com.intellij.codeInsight.inline.completion.InlineCompletionProvider
@@ -16,86 +19,6 @@ import com.intellij.openapi.project.ProjectManager
 import com.intellij.openapi.project.ProjectManagerListener
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
-
-/**
- * 对模型返回的所有候选文本做清理和验证。返回有效候选列表（无重复）。
- */
-object CompletionPostProcessor {
-
-    /**
-     * @param choices 模型返回的原始候选列表
-     * @param prefix 光标前的文本，用于裁剪开头重叠
-     * @param suffix 光标后的文本，用于裁剪结尾重叠
-     * @return 去重后的有效补全候选文本列表
-     */
-    fun process(choices: List<DeepSeekFimClient.FimChoice>, prefix: String, suffix: String): List<String> {
-        val seen = mutableSetOf<String>()
-        val results = mutableListOf<String>()
-
-        for (choice in choices) {
-            // 内容过滤的候选直接跳过
-            if (choice.finishReason == "content_filter") continue
-
-            var text = choice.text
-
-            // suffix 重叠裁剪：去掉补全文本末尾与 suffix 开头重叠的部分
-            text = trimSuffixOverlap(text, suffix)
-
-            // prefix 开头重叠裁剪：去掉补全文本开头与 prefix 结尾重叠的部分
-            text = trimPrefixOverlap(text, prefix)
-
-            // finish_reason == "length" → 截断到最后一个完整行，避免半行代码
-            if (choice.finishReason == "length") {
-                val lastNewline = text.lastIndexOf('\n')
-                if (lastNewline > 0) text = text.substring(0, lastNewline)
-            }
-
-            // 有效性过滤
-            val trimmed = text.trim()
-            if (trimmed.isEmpty()) continue
-            // 如果补全内容和 suffix 开头完全相同则无意义
-            if (trimmed == suffix.take(trimmed.length).trim()) continue
-            if (seen.contains(trimmed)) continue
-
-            seen.add(trimmed)
-            results.add(trimmed)
-        }
-
-        return results
-    }
-
-    /**
-     * 裁剪补全文本末尾与 [suffix] 开头的重叠部分。
-     * 例如 text="hello world", suffix="world!" → 返回 "hello "
-     */
-    private fun trimSuffixOverlap(text: String, suffix: String): String {
-        if (suffix.isEmpty()) return text
-        val minLen = minOf(text.length, suffix.length)
-        for (i in minLen downTo 1) {
-            val tail = text.substring(text.length - i)
-            if (suffix.startsWith(tail)) {
-                return text.substring(0, text.length - i)
-            }
-        }
-        return text
-    }
-
-    /**
-     * 裁剪补全文本开头与 [prefix] 结尾的重叠部分。
-     * 例如 text="world!", prefix="hello world" → 返回 "!"
-     */
-    private fun trimPrefixOverlap(text: String, prefix: String): String {
-        if (prefix.isEmpty()) return text
-        val minLen = minOf(text.length, prefix.length)
-        for (i in minLen downTo 1) {
-            val head = text.substring(0, i)
-            if (prefix.endsWith(head)) {
-                return text.substring(i)
-            }
-        }
-        return text
-    }
-}
 
 /**
  * AI 补全 Provider，实现 IntelliJ Inline Completion API。
@@ -131,6 +54,22 @@ class AiCompletionProvider : InlineCompletionProvider {
     @Volatile
     private var currentLanguage: String = "unknown"
 
+    /**
+     * 上一次返回给 IDE 的补全候选的 prefix/suffix 快照，用于检测用户拒绝。
+     * IntelliJ InlineCompletionInsertHandler 只有 afterInsertion 回调（接受），
+     * 没有原生 rejection 回调，因此通过对比两次 getSuggestion 之间是否发生
+     * afterInsertion 来推断：如果上次返回了候选但本次 getSuggestion 时
+     * afterInsertion 未被调用，说明用户拒绝了上次的补全。
+     */
+    @Volatile
+    private var lastSuggestionPrefix: String? = null
+
+    @Volatile
+    private var lastSuggestionSuffix: String? = null
+
+    @Volatile
+    private var lastSuggestionAccepted: Boolean = false
+
     /** Provider 唯一标识（Kotlin inline class，JVM 层面 getter 名为 getId-S2YkoFA） */
     override val id: InlineCompletionProviderID = InlineCompletionProviderID("ai-assistant")
 
@@ -149,6 +88,17 @@ class AiCompletionProvider : InlineCompletionProvider {
 
         if (project == null || !settings.isCompletionEnabled()) {
             return emptySuggestion()
+        }
+
+        // === 补全拒绝检测 ===
+        // 如果上一次返回了补全候选但 afterInsertion 未被调用，
+        // 说明用户拒绝了上次的补全（继续输入而非按 Tab 接受）。
+        // 此时触发缓存失效和统计记录。
+        val prevPrefix = lastSuggestionPrefix
+        val prevSuffix = lastSuggestionSuffix
+        if (prevPrefix != null && prevSuffix != null && !lastSuggestionAccepted) {
+            cache.remove(prevPrefix, prevSuffix)
+            CompletionStats.recordRejected(currentLanguage)
         }
 
         // 上下文采集
@@ -209,9 +159,19 @@ class AiCompletionProvider : InlineCompletionProvider {
                 return emptySuggestion()
             }
 
-            candidates = CompletionPostProcessor.process(response.choices, context.prefix, context.suffix)
+            val psiFile = PsiDocumentManager.getInstance(project).getPsiFile(editor.document)
+            val codeStyleSettings: CommonCodeStyleSettings.IndentOptions? = if (psiFile != null) {
+                CodeStyleSettingsManager.getInstance(project).currentSettings.getIndentOptions(
+                    psiFile.fileType
+                )
+            } else {
+                null
+            }
+            candidates = CompletionPostProcessor.process(
+                response.choices, context.prefix, context.suffix, codeStyleSettings
+            )
 
-            if (candidates.isNotEmpty()) {
+            if (!manualTrigger && candidates.isNotEmpty()) {
                 cache.put(context.prefix, context.suffix, candidates)
             }
 
@@ -232,6 +192,11 @@ class AiCompletionProvider : InlineCompletionProvider {
             }
         }
 
+        // 记录本次返回的候选位置，用于下次 getSuggestion 时检测用户是否拒绝
+        lastSuggestionPrefix = context.prefix
+        lastSuggestionSuffix = context.suffix
+        lastSuggestionAccepted = false
+
         return buildSuggestion {
             elementsFlow.collect { element -> emit(element) }
         }
@@ -247,6 +212,7 @@ class AiCompletionProvider : InlineCompletionProvider {
                 environment: InlineCompletionInsertEnvironment,
                 elements: List<InlineCompletionElement>
             ) {
+                lastSuggestionAccepted = true
                 CompletionStats.recordAccepted(currentLanguage)
             }
         }

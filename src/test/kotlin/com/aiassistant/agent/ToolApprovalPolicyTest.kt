@@ -8,22 +8,6 @@ import kotlin.test.assertTrue
 class ToolApprovalPolicyTest {
 
     @Test
-    fun `requires approval for mutating and shell tools`() {
-        assertTrue(ToolApprovalPolicy.requiresApproval("Write"))
-        assertTrue(ToolApprovalPolicy.requiresApproval("Edit"))
-        assertTrue(ToolApprovalPolicy.requiresApproval("Bash"))
-        assertTrue(ToolApprovalPolicy.requiresApproval("Task"))
-    }
-
-    @Test
-    fun `does not require approval for read-only tools`() {
-        assertFalse(ToolApprovalPolicy.requiresApproval("Read"))
-        assertFalse(ToolApprovalPolicy.requiresApproval("Glob"))
-        assertFalse(ToolApprovalPolicy.requiresApproval("Grep"))
-        assertFalse(ToolApprovalPolicy.requiresApproval("readLints"))
-    }
-
-    @Test
     fun `describes command and file targets for approval dialog`() {
         val shellText = ToolApprovalPolicy.describe(
             "Bash",
@@ -37,5 +21,14 @@ class ToolApprovalPolicyTest {
             mapOf("filePath" to "src/App.kt")
         )
         assertContains(writeText, "src/App.kt")
+    }
+
+    @Test
+    fun `isDangerousReason returns true for dangerous reasons`() {
+        assertTrue(ToolApprovalPolicy.isDangerousReason(ToolApprovalPolicy.ApprovalReason.DANGEROUS_SHELL_COMMAND))
+        assertTrue(ToolApprovalPolicy.isDangerousReason(ToolApprovalPolicy.ApprovalReason.DANGEROUS_FLAG))
+        assertFalse(ToolApprovalPolicy.isDangerousReason(ToolApprovalPolicy.ApprovalReason.PUBLIC_API_CHANGE))
+        assertFalse(ToolApprovalPolicy.isDangerousReason(ToolApprovalPolicy.ApprovalReason.FIRST_USE))
+        assertFalse(ToolApprovalPolicy.isDangerousReason(null))
     }
 }

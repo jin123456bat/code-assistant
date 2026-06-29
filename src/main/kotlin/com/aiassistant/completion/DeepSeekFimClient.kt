@@ -75,7 +75,8 @@ class DeepSeekFimClient(
 
     data class FimUsage(
         @SerializedName("prompt_tokens") val promptTokens: Int,
-        @SerializedName("completion_tokens") val completionTokens: Int
+        @SerializedName("completion_tokens") val completionTokens: Int,
+        @SerializedName("total_tokens") val totalTokens: Int
     )
 
     data class FimResponse(

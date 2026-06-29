@@ -1,6 +1,6 @@
 # 持久化 JSON Schema
 
-> **原始来源：** `docs/tech-spec.md`（已拆分，内容归入 `docs/specs/` 各文件）
+> **原始来源：** `tech-spec.md`（已拆分，内容归入 `specs/` 各文件）
 
 本文档定义 Code Assistant Agent Mode 的持久化 JSON Schema，包括会话（Session）、会话索引（Session Index）和
 MCP 配置的数据结构。另附会话存储的写入流程与读取容错描述。

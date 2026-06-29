@@ -1,0 +1,2461 @@
+package com.aiassistant.agent
+
+import com.aiassistant.mcp.McpManager
+import com.aiassistant.skills.SkillManager
+import com.anthropic.models.beta.messages.BetaBase64ImageSource
+import com.anthropic.models.beta.messages.BetaImageBlockParam
+import com.anthropic.models.beta.messages.BetaToolResultBlockParam
+import com.anthropic.models.beta.messages.BetaToolUseBlock
+import com.intellij.codeInsight.daemon.impl.DaemonCodeAnalyzerEx
+import com.intellij.codeInsight.daemon.impl.HighlightInfo
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.command.WriteCommandAction
+import com.intellij.openapi.fileEditor.FileDocumentManager
+import com.intellij.openapi.project.Project
+import com.intellij.openapi.vfs.LocalFileSystem
+import okhttp3.ConnectionPool
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import java.io.File
+import java.net.HttpURLConnection
+import java.net.URI
+import java.net.URL
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.atomic.AtomicReference
+
+class ToolExecutor(
+    private val project: Project,
+    private val session: AgentSession,
+    private val mcpManager: McpManager? = null
+) {
+
+    /** 工具状态变更回调，供 AgentLoop 驱动 ToolCallCard 实时刷新 */
+    var onToolStateChanged: ((toolUseId: String, state: ToolCallState, result: BetaToolResultBlockParam.Content?, durationMs: Long?) -> Unit)? =
+        null
+
+    /** 审批结果枚举 */
+    enum class ApprovalResult {
+        APPROVE_ONCE,   // [允许一次]
+        APPROVE_SESSION, // [允许此会话]
+        REJECT           // [拒绝]
+    }
+
+    /** 当前 turn 内已修改的文件路径集合，用于大范围修改检测 */
+    private val modifiedFilesInTurn: MutableSet<String> = mutableSetOf()
+
+    /** 当前 turn 内已 Read 过的文件路径集合，用于 Edit/Write 前置校验 */
+    private val readFilesInTurn: MutableSet<String> = mutableSetOf()
+
+    /** 审批请求回调，供 AgentLoop 驱动 ToolCallCard 展开审批按钮。
+     *  参数：(toolUseId, toolName, message, 是否危险命令(无"允许此会话"按钮), CountDownLatch, 审批结果引用)
+     *  UI 层设置审批结果引用后 countDown latch。 */
+    var onApprovalRequested: ((toolUseId: String, toolName: String, message: String, dangerous: Boolean, latch: java.util.concurrent.CountDownLatch, approvalResult: java.util.concurrent.atomic.AtomicReference<ApprovalResult>) -> Unit)? = null
+
+    fun execute(toolUse: BetaToolUseBlock): BetaToolResultBlockParam.Content {
+        val toolUseId = toolUse.id()
+        val toolName = toolUse.name()
+        return try {
+            val input = toolUse._input()
+            val timeoutSec = ToolInput.int(input, "timeout") ?: 0
+
+            // 审批判定：子 Agent 所有工具一律放行（父 Agent 已建立信任），
+            // 父 Agent 使用 ToolApprovalPolicy.checkDetailedApproval 做细化规则检查
+            if (!session.isSubAgent && ToolApprovalPolicy.requiresApproval(toolName)) {
+                val reason = ToolApprovalPolicy.checkDetailedApproval(
+                    toolName = toolName,
+                    input = input,
+                    modifiedFileCountInTurn = modifiedFilesInTurn.size + 1,
+                    fileReferenceCount = estimateReferenceCount(toolName, input)
+                )
+
+                if (!ToolApprovalPolicy.canSkipApproval(toolName, reason, session)) {
+                    val approved = requestApproval(toolUse)
+                    if (approved == ApprovalResult.REJECT) {
+                        val resultStr = when (reason) {
+                            ToolApprovalPolicy.ApprovalReason.DANGEROUS_COMMAND -> "用户拒绝执行 Shell 危险命令"
+                            ToolApprovalPolicy.ApprovalReason.DANGEROUS_FLAG -> "用户拒绝执行危险命令"
+                            ToolApprovalPolicy.ApprovalReason.FILE_DELETION -> "用户拒绝执行文件删除"
+                            ToolApprovalPolicy.ApprovalReason.PUBLIC_API_CHANGE -> "用户拒绝执行公共 API 变更"
+                            ToolApprovalPolicy.ApprovalReason.LARGE_MODIFICATION -> "用户拒绝大范围修改"
+                            else -> "用户拒绝执行工具: $toolName"
+                        }
+                        val content = BetaToolResultBlockParam.Content.ofString(resultStr)
+                        onToolStateChanged?.invoke(toolUseId, ToolCallState.REJECTED, content, null)
+                        return content
+                    }
+                    // [允许此会话] → 加入白名单
+                    if (approved == ApprovalResult.APPROVE_SESSION) {
+                        session.approvedTools.add(toolName)
+                    }
+                }
+            }
+
+            // MCP 工具审批：子 Agent 所有工具一律放行，父 Agent 按 Server 粒度审批
+            if (!session.isSubAgent && ToolApprovalPolicy.isMcpTool(toolName) && !ToolApprovalPolicy.canSkipMcpApproval(toolName, session)) {
+                val approved = requestMcpApproval(toolUse)
+                if (approved == ApprovalResult.REJECT) {
+                    val resultStr = "用户拒绝使用 MCP Server 工具: $toolName"
+                    val content = BetaToolResultBlockParam.Content.ofString(resultStr)
+                    onToolStateChanged?.invoke(toolUseId, ToolCallState.REJECTED, content, null)
+                    return content
+                }
+                // [允许此会话] → 将该 MCP Server 加入 approvedMcpServers
+                if (approved == ApprovalResult.APPROVE_SESSION) {
+                    val serverId = ToolApprovalPolicy.extractMcpServerId(toolName)
+                    if (serverId != null) {
+                        session.approvedMcpServers.add(serverId)
+                    }
+                }
+            }
+            onToolStateChanged?.invoke(toolUseId, ToolCallState.EXECUTING, null, null)
+            val start = System.currentTimeMillis()
+            // 线程分发：按文档 docs/agent/tools.md §三 表格分发到不同线程
+            // Write/Edit → EDT (invokeAndWait), AskUserQuestion → EDT (invokeAndWait Dialog),
+            // 其余 → Background Thread（即当前线程，直接执行）
+            val result = dispatchToThread(toolName, timeoutSec, toolUse)
+            val elapsed = System.currentTimeMillis() - start
+            // 判断是否为错误：检查 result 的 string 内容
+            val resultStr = result.string().orElse("")
+            val isError =
+                resultStr.startsWith("错误") || resultStr.startsWith("超时") || resultStr.startsWith("未知工具")
+            onToolStateChanged?.invoke(
+                toolUseId,
+                if (isError) ToolCallState.ERROR else ToolCallState.DONE,
+                result,
+                elapsed
+            )
+            result
+        } catch (e: Exception) {
+            val content = BetaToolResultBlockParam.Content.ofString("错误: ${e.javaClass.simpleName}: ${e.message}")
+            onToolStateChanged?.invoke(
+                toolUseId,
+                ToolCallState.ERROR,
+                content,
+                null
+            )
+            content
+        }
+    }
+
+    /**
+     * 通用超时包装器：通过 CompletableFuture 为工具执行增加超时控制。
+     * 对齐文档 docs/agent/tools.md §三 工具执行分发 超时机制。
+     *
+     * @param timeoutSec 超时秒数，由 LLM 在 tool call 时传入，0=不限
+     * @param toolUse 工具调用块，仅用于错误消息中的工具名
+     * @param block 实际工具执行逻辑
+     * @return 工具执行结果，超时时返回超时错误消息
+     */
+    private fun executeWithTimeout(timeoutSec: Int, toolUse: BetaToolUseBlock, block: () -> BetaToolResultBlockParam.Content): BetaToolResultBlockParam.Content {
+        if (timeoutSec <= 0) {
+            return block()
+        }
+        return try {
+            CompletableFuture.supplyAsync(block)
+                .get(timeoutSec.toLong(), TimeUnit.SECONDS)
+        } catch (e: TimeoutException) {
+            BetaToolResultBlockParam.Content.ofString("超时: ${toolUse.name()} 工具执行超过 ${timeoutSec}s，已取消")
+        } catch (e: Exception) {
+            val cause = e.cause ?: e
+            BetaToolResultBlockParam.Content.ofString("错误: ${toolUse.name()} 工具执行异常: ${cause.javaClass.simpleName}: ${cause.message}")
+        }
+    }
+
+
+    /**
+     * 请求审批。使用 CountDownLatch 阻塞 Agent Loop 后台线程，
+     * 等待用户在 EDT 上操作 ToolCallCard 内嵌按钮。
+     * 无超时等待 —— 用户必须明确选择。
+     */
+
+    /**
+     * 估算文件引用数，用于公共 API 变更检测。
+     * 当前实现通过 Grep 搜索文件路径来快速估算引用数量。
+     */
+    private fun estimateReferenceCount(toolName: String, input: Any?): Int {
+        if (toolName != "Edit" && toolName != "Write") return 0
+        val filePath = ToolInput.string(input, "filePath") ?: return 0
+        val basePath = project.basePath ?: return 0
+        val fileName = java.io.File(filePath).nameWithoutExtension
+        if (fileName.isEmpty()) return 0
+        val sourceExtensions = setOf("kt", "java", "kts")
+        var refCount = 0
+        try {
+            java.io.File(basePath).walkTopDown()
+                .filter {
+                    it.isFile && it.path != java.io.File(basePath, filePath).path
+                        && !it.path.contains("/build/")
+                        && !it.path.contains("/.git/")
+                        && !it.path.contains("/.idea/")
+                        && !it.path.contains("/node_modules/")
+                        && it.extension in sourceExtensions
+                }
+                .take(500)
+                .forEach { file ->
+                    file.useLines { lines ->
+                        if (lines.any { line -> line.contains(fileName) }) refCount++
+                    }
+                }
+        } catch (_: Exception) { refCount = 0 }
+        return refCount
+    }
+    private fun requestApproval(toolUse: BetaToolUseBlock): ApprovalResult {
+        val toolUseId = toolUse.id()
+        val toolName = toolUse.name()
+        val input = toolUse._input()
+        val message = ToolApprovalPolicy.describe(toolName, input)
+
+        // 判断是否为危险命令（决定是否显示 [允许此会话] 按钮）
+        val reason = ToolApprovalPolicy.checkDetailedApproval(toolName, input)
+        val isDangerous = reason.cannotSkipByWhitelist
+
+        session.requireApproval()
+        onToolStateChanged?.invoke(toolUseId, ToolCallState.AWAITING_APPROVAL, null, null)
+
+        // 用 CountDownLatch 跨线程同步，Agent Loop 在后台线程池，UI 按钮在 EDT
+        val latch = CountDownLatch(1)
+        val approvalResult = AtomicReference(ApprovalResult.REJECT)
+
+        // 通知 UI 层展开审批按钮（在 EDT 上执行）
+        onApprovalRequested?.invoke(toolUseId, toolName, message, isDangerous, latch, approvalResult)
+
+        // 阻塞当前线程（Agent Loop 的后台线程），等待用户操作
+        try {
+            latch.await()
+        } catch (e: InterruptedException) {
+            // 线程被中断，视为拒绝
+            return ApprovalResult.REJECT
+        }
+
+        val result = approvalResult.get()
+        if (result == ApprovalResult.REJECT) {
+            session.approvalRejected()
+        } else {
+            session.approvalGranted()
+        }
+        return result
+    }
+
+    /**
+     * 请求 MCP Server 审批。对齐 docs/specs/mcp-permissions.md §五：
+     * 首次调用某 MCP Server 的任意工具时弹窗"允许此 Server 的所有工具？"
+     * MCP 工具不参与危险命令检测，始终显示 [允许此会话] 按钮。
+     */
+    private fun requestMcpApproval(toolUse: BetaToolUseBlock): ApprovalResult {
+        val toolUseId = toolUse.id()
+        val toolName = toolUse.name()
+        val serverId = ToolApprovalPolicy.extractMcpServerId(toolName) ?: toolName
+        val toolList = mcpManager?.getServer(serverId)?.tools?.map { it.name } ?: emptyList()
+        val message = ToolApprovalPolicy.describeMcpApproval(toolName, toolList)
+
+        // MCP 工具不是危险命令，始终显示 [允许此会话] 按钮
+        val isDangerous = false
+
+        session.requireApproval()
+        onToolStateChanged?.invoke(toolUseId, ToolCallState.AWAITING_APPROVAL, null, null)
+
+        // 用 CountDownLatch 跨线程同步，Agent Loop 在后台线程池，UI 按钮在 EDT
+        val latch = CountDownLatch(1)
+        val approvalResult = AtomicReference(ApprovalResult.REJECT)
+
+        // 通知 UI 层展开审批按钮（在 EDT 上执行）
+        onApprovalRequested?.invoke(toolUseId, toolName, message, isDangerous, latch, approvalResult)
+
+        // 阻塞当前线程（Agent Loop 的后台线程），等待用户操作
+        try {
+            latch.await()
+        } catch (e: InterruptedException) {
+            return ApprovalResult.REJECT
+        }
+
+        val result = approvalResult.get()
+        if (result == ApprovalResult.REJECT) {
+            session.approvalRejected()
+        } else {
+            session.approvalGranted()
+        }
+        return result
+    }
+
+    /**
+     * 按工具类型分发到不同线程执行。
+     * 对齐文档 docs/agent/tools.md §三：
+     * - Write/Edit: invokeAndWait { WriteCommandAction }（EDT 执行文件写入）
+     * - AskUserQuestion: invokeAndWait { Dialog }（EDT 弹出 MODAL dialog）
+     * - Read/Glob/Grep/readLints/Bash/Agent/Skill/WebSearch/WebFetch/Symbol/MCP/计划管理: 当前线程（Background Thread）
+     *
+     * 注意：Write/Edit/AskUserQuestion 工具方法内部不再自行调用 invokeAndWait，统一由此分发层决定线程。
+     */
+    private fun dispatchToThread(toolName: String, timeoutSec: Int, toolUse: BetaToolUseBlock): BetaToolResultBlockParam.Content {
+        return when (toolName) {
+            // ── EDT: invokeAndWait { WriteCommandAction } ──
+            "Write" -> executeEdt(toolUse) { write(toolUse) }
+            "Edit" -> executeEdt(toolUse) { edit(toolUse) }
+            // ── EDT: invokeAndWait { Dialog } ──
+            "AskUserQuestion" -> executeEdt(toolUse) { askUserQuestion(toolUse) }
+            // ── Background Thread（即当前线程，带超时包装）──
+            // Bash/Agent/WebSearch 内部自行处理超时，其余工具由 executeWithTimeout 统一包装
+            "Read" -> executeWithTimeout(timeoutSec, toolUse) { read(toolUse) }
+            "Bash" -> runShell(toolUse, timeoutSec)
+            "Glob" -> executeWithTimeout(timeoutSec, toolUse) { glob(toolUse) }
+            "Grep" -> executeWithTimeout(timeoutSec, toolUse) { grep(toolUse) }
+            "readLints" -> executeWithTimeout(timeoutSec, toolUse) { readLints(toolUse) }
+            "Skill" -> executeWithTimeout(timeoutSec, toolUse) { skill(toolUse) }
+            "Task" -> agent(toolUse)
+            "WebSearch" -> webSearch(toolUse)
+            "WebFetch" -> executeWithTimeout(timeoutSec, toolUse) { webFetch(toolUse) }
+            "Symbol" -> executeWithTimeout(timeoutSec, toolUse) { symbol(toolUse) }
+            "createPlan" -> executeWithTimeout(timeoutSec, toolUse) { createPlan(toolUse) }
+            "listPlans" -> executeWithTimeout(timeoutSec, toolUse) { listPlans(toolUse) }
+            "removePlan" -> executeWithTimeout(timeoutSec, toolUse) { removePlan(toolUse) }
+            "reorderPlans" -> executeWithTimeout(timeoutSec, toolUse) { reorderPlans(toolUse) }
+            "markPlanDone" -> executeWithTimeout(timeoutSec, toolUse) { markPlanDone(toolUse) }
+            else -> executeWithTimeout(timeoutSec, toolUse) { runMcpTool(toolUse) }
+        }
+    }
+
+    /**
+     * 在 EDT 上通过 invokeAndWait 执行工具闭包，并捕获返回值。
+     * 用于 Write/Edit/AskUserQuestion 等必须在 EDT 上执行的文件写入和 UI 操作。
+     *
+     * 注意：如果当前线程已经是 EDT，invokeAndWait 会立即同步执行，不会产生嵌套死锁。
+     */
+    private fun executeEdt(
+        toolUse: BetaToolUseBlock,
+        block: () -> String
+    ): String {
+        val resultRef = Ref("")
+        ApplicationManager.getApplication().invokeAndWait {
+            resultRef.value = block()
+        }
+        return resultRef.value
+    }
+
+    /** 简单的引用容器，用于在 invokeAndWait 闭包中捕获返回值 */
+    private class Ref<T>(var value: T)
+
+    // ── Read ──
+    private fun read(toolUse: BetaToolUseBlock): String {
+        val input = toolUse._input()
+        val path = ToolInput.string(input, "filePath") ?: return "错误: 缺少 filePath 参数"
+        val startLine = ToolInput.int(input, "startLine")
+        val endLine = ToolInput.int(input, "endLine")
+
+        val basePath = project.basePath ?: return "错误: 项目路径不可用"
+        val file = File(basePath, path)
+        if (!file.exists()) return "错误: 文件 \"$path\" 不存在。请检查路径是否正确。\n提示: 使用 Glob 工具查看目录结构。"
+
+        val lines = file.readLines()
+        val from = (startLine?.minus(1))?.coerceAtLeast(0) ?: 0
+        val to = (endLine?.coerceAtMost(lines.size)) ?: lines.size
+
+        // 记录 modificationStamp 供 Edit/Write 冲突检测
+        session.fileStamps[path] = file.lastModified()
+        // 记录当前 turn 已 Read 过该文件，供 Edit/Write 前置校验
+        readFilesInTurn.add(path)
+
+        val content = lines.subList(from, to).joinToString("\n")
+        val totalLines = lines.size
+        val returnedLines = to - from
+        val maxLines = 500
+
+        val body = if (returnedLines <= maxLines) {
+            "[文件: $path ($totalLines 行 total, $returnedLines 行已返回)]\n$content\n[文件结束: $path]"
+        } else {
+            val truncated = lines.subList(from, from + maxLines).joinToString("\n")
+            "[文件: $path ($totalLines 行 total, 已截断到 $maxLines 行)]\n$truncated\n... (共 $totalLines 行，已截断到 $maxLines 行。如需查看剩余内容，请用 startLine 参数分页读取)\n[文件结束: $path]"
+        }
+
+        // 同类代码自动参考（correctness.md §三 方案三）
+        val styleRef = buildStyleReference(file, path, basePath)
+        return if (styleRef != null) "$body\n\n$styleRef" else body
+    }
+
+    /**
+     * 构建同类代码风格参考。分析文件的缩进风格和命名模式，并搜索项目中的同类文件。
+     * 文档要求（correctness.md §三 方案三）：Read 新文件时自动附加风格参考到 tool result，
+     * 帮助 LLM 保持代码风格一致。
+     *
+     * @return 风格参考字符串，如果无需附加则返回 null
+     */
+    private fun buildStyleReference(file: File, relativePath: String, basePath: String): String? {
+        // 仅在文件扩展名为源码文件时附加风格参考
+        val sourceExtensions = setOf("kt", "java", "kts", "py", "ts", "tsx", "js", "jsx", "swift")
+        val ext = file.extension
+        if (ext !in sourceExtensions) return null
+
+        try {
+            val sb = StringBuilder()
+            sb.append("📋 风格参考: ")
+
+            // 分析缩进风格
+            val indentStyle = detectIndentStyle(file)
+            sb.append("该文件使用 $indentStyle")
+
+            // 分析方法名命名模式
+            val namingMode = detectNamingMode(file)
+            if (namingMode != null) {
+                sb.append("，$namingMode")
+            }
+
+            // 分析依赖注入模式（Kotlin/Java 特化）
+            if (ext in setOf("kt", "java")) {
+                val diPattern = detectDependencyInjectionPattern(file)
+                if (diPattern != null) {
+                    sb.append("，$diPattern")
+                }
+            }
+
+            sb.append("。")
+
+            // 搜索项目中同类文件
+            val similarFiles = findSimilarFiles(file, relativePath, basePath, ext)
+            if (similarFiles.isNotEmpty()) {
+                sb.append("\n项目中同类的文件有: ")
+                sb.append(similarFiles.take(5).joinToString(", ") { it })
+                sb.append("（可用 Read 查看）")
+            }
+
+            return sb.toString()
+        } catch (_: Exception) {
+            return null
+        }
+    }
+
+    /**
+     * 检测文件的缩进风格。采样前 N 行非空行的前导空格/制表符。
+     */
+    private fun detectIndentStyle(file: File): String {
+        val lines = file.readLines().take(100)
+        var spaceCount = 0
+        var tabCount = 0
+        var totalIndented = 0
+
+        for (line in lines) {
+            if (line.isBlank()) continue
+            val leading = line.takeWhile { it == ' ' || it == '\t' }
+            if (leading.isEmpty()) continue
+            totalIndented++
+            if (leading.startsWith('\t')) {
+                tabCount++
+            } else if (leading.startsWith("  ")) {
+                val spaceWidth = leading.length
+                if (spaceWidth % 4 == 0 && spaceWidth >= 4) {
+                    spaceCount++
+                } else if (spaceWidth % 2 == 0) {
+                    spaceCount++
+                }
+            }
+        }
+
+        if (totalIndented == 0) return "无缩进"
+        // 判断主流缩进方式
+        val tabRatio = tabCount.toDouble() / totalIndented
+        return when {
+            tabRatio > 0.5 -> "制表符缩进"
+            tabRatio > 0.2 -> "混合缩进（空格+制表符）"
+            else -> {
+                // 采样空间宽度判断 2/4 空格
+                val sampleLines = lines.take(50).filter { it.startsWith(" ") && it.isNotBlank() }
+                val spaceWidths = sampleLines.map { it.takeWhile { c -> c == ' ' }.length }
+                val avgWidth = if (spaceWidths.isEmpty()) 0.0 else spaceWidths.average()
+                when {
+                    avgWidth in 1.5..3.0 -> "2 空格缩进"
+                    avgWidth in 3.0..5.0 -> "4 空格缩进"
+                    else -> "空格缩进"
+                }
+            }
+        }
+    }
+
+    /**
+     * 检测文件中的方法名命名模式（驼峰/下划线）。
+     * 通过在文件内容中搜索 fun/def/function 关键字后的名称模式来检测。
+     */
+    private fun detectNamingMode(file: File): String? {
+        val content = file.readText()
+        // 匹配 Kotlin fun name、Java 方法名、Python def name、TypeScript/JavaScript function name
+        val methodPattern = Regex("""(?:\bfun\s+|\bdef\s+|\bfunction\s+|\bpublic\s*(?:\w+\s+)*|\bprivate\s*(?:\w+\s+)*|\bprotected\s*(?:\w+\s+)*)([a-zA-Z_]\w*)\s*[\(\<]""")
+        val names = methodPattern.findAll(content).map { it.groupValues[1] }.filter { it.length > 1 }.toList()
+
+        if (names.isEmpty()) return null
+
+        val camelCount = names.count { it.contains(Regex("[a-z][A-Z]")) || it.first().isLowerCase() }
+        val snakeCount = names.count { it.contains('_') }
+
+        return when {
+            camelCount > snakeCount -> "方法名驼峰式"
+            snakeCount > camelCount -> "方法名下划线式"
+            else -> null
+        }
+    }
+
+    /**
+     * 检测 Kotlin/Java 文件的依赖注入模式。
+     */
+    private fun detectDependencyInjectionPattern(file: File): String? {
+        val content = file.readText()
+        val hasConstructorInjection = content.contains(Regex("""class\s+\w+\s*\(.*private\s+(val|var)\s+\w+""")) ||
+                content.contains(Regex("""class\s+\w+\s*@Inject\s*constructor"""))
+        val hasFieldInjection = content.contains(Regex("""@Autowired\s+""")) ||
+                content.contains(Regex("""@Inject\s+lateinit"""))
+        val hasServiceAnnotation = content.contains("@Service") || content.contains("@Component") ||
+                content.contains("@Repository") || content.contains("@Controller")
+
+        return when {
+            hasConstructorInjection -> "依赖通过构造器注入"
+            hasFieldInjection -> "依赖通过字段注入"
+            hasServiceAnnotation -> "使用 Spring 注解"
+            else -> null
+        }
+    }
+
+    /**
+     * 搜索项目中与被读文件同类的文件。
+     * 策略：根据文件名关键词（去掉后缀后的单词）搜索同名模式文件。
+     * 例如 UserService.kt → 搜索 *Service.kt。
+     */
+    private fun findSimilarFiles(
+        currentFile: File,
+        relativePath: String,
+        basePath: String,
+        ext: String
+    ): List<String> {
+        val results = mutableListOf<String>()
+        val nameWithoutExt = currentFile.nameWithoutExtension
+
+        // 提取文件名中的关键词后缀（如 Service, Controller, Repository, Manager, ViewModel 等）
+        val suffixKeywords = listOf(
+            "Service", "Controller", "Repository", "Manager", "ViewModel",
+            "ViewModel", "Component", "Module", "Provider", "Handler",
+            "Interceptor", "Filter", "Listener", "Adapter", "Factory",
+            "Builder", "Mapper", "Converter", "Validator", "Helper",
+            "Util", "Utils", "Config", "Configuration", "Model", "Entity",
+            "Dto", "DTO", "Request", "Response", "Screen", "Page",
+            "Dao", "DAO", "Executor", "Resolver", "Strategy", "Observer",
+            "Extension", "Extensions", "Plugin", "Middleware", "Router",
+            "Store", "Reducer", "Action", "Effect", "State"
+        )
+
+        val matchedSuffix = suffixKeywords.firstOrNull { kw ->
+            nameWithoutExt.endsWith(kw)
+        }
+
+        if (matchedSuffix == null) {
+            // 无关键词后缀：基于扩展名搜索同目录文件
+            val parentDir = currentFile.parentFile
+            if (parentDir != null && parentDir.exists()) {
+                parentDir.listFiles()
+                    ?.filter {
+                        it.isFile && it.extension == ext &&
+                            it.absolutePath != currentFile.absolutePath &&
+                            !it.name.startsWith(".")
+                    }
+                    ?.take(5)
+                    ?.forEach { results.add(File(basePath).toURI().relativize(it.toURI()).path) }
+            }
+            return results
+        }
+
+        // 基于关键词后缀搜索全项目同类文件
+        val suffixPattern = "*$matchedSuffix.$ext"
+        try {
+            File(basePath).walkTopDown()
+                .filter {
+                    it.isFile && it.extension == ext &&
+                        it.absolutePath != currentFile.absolutePath &&
+                        it.name.endsWith(suffixPattern) &&
+                        !it.path.contains("/build/") &&
+                        !it.path.contains("/.git/") &&
+                        !it.path.contains("/.idea/") &&
+                        !it.path.contains("/node_modules/")
+                }
+                .take(5)
+                .forEach { results.add(File(basePath).toURI().relativize(it.toURI()).path) }
+        } catch (_: Exception) {
+            // 搜索失败则忽略
+        }
+
+        return results
+    }
+
+    // ── Write ──
+    private fun write(toolUse: BetaToolUseBlock): String {
+        val input = toolUse._input()
+        val path = ToolInput.string(input, "filePath") ?: return "错误: 缺少 filePath 参数"
+        val content = ToolInput.string(input, "content") ?: return "错误: 缺少 content 参数"
+
+        val maxLines = 3000
+        val lineCount = content.lines().size
+        if (lineCount > maxLines) return "错误: 内容过长 ($lineCount 行，上限 $maxLines 行)"
+
+        val basePath = project.basePath ?: return "错误: 项目路径不可用"
+        val file = File(basePath, path)
+        val isNew = !file.exists()
+
+
+        // 前置校验：覆盖模式下必须当前 turn Read 过该文件
+        if (!isNew && path !in readFilesInTurn) {
+            return "错误: 请先用 Read 读取 $path 后再修改"
+        }
+
+        // modificationStamp 冲突检测（覆盖模式）
+        if (!isNew) {
+            val lastReadStamp = session.fileStamps[path]
+            val currentStamp = file.lastModified()
+            if (lastReadStamp != null && lastReadStamp != currentStamp) {
+                return "错误: \"$path\" 已被外部修改（上次读取 stamp=$lastReadStamp，当前 stamp=$currentStamp）。\n请使用 Read 重新读取文件后再试。"
+            }
+        }
+
+        WriteCommandAction.runWriteCommandAction(project) {
+            file.parentFile?.mkdirs()
+            file.writeText(content)
+        }
+
+        // 更新 stamp
+        session.fileStamps[path] = file.lastModified()
+
+        val result = "✅ 文件已写入: $path ($lineCount 行, ${content.length} 字节)\n操作类型: ${if (isNew) "新建" else "覆盖"}"
+
+        // 修改后自动 readLints（文档 correctness.md §二 方案二）
+        return appendAutoLintResult(path, result)
+    }
+
+    // ── Edit (含 modificationStamp 校验) ──
+    private fun edit(toolUse: BetaToolUseBlock): String {
+        val input = toolUse._input()
+        val path = ToolInput.string(input, "filePath") ?: return "错误: 缺少 filePath 参数"
+        val oldString = ToolInput.string(input, "oldString") ?: return "错误: 缺少 oldString 参数"
+        val newString = ToolInput.string(input, "newString") ?: return "错误: 缺少 newString 参数"
+
+        val basePath = project.basePath ?: return "错误: 项目路径不可用"
+        val file = File(basePath, path)
+        if (!file.exists()) {
+            if (oldString.isEmpty()) {
+                file.parentFile?.mkdirs()
+                file.writeText(newString)
+                session.fileStamps[path] = file.lastModified()
+                val result = "✅ 文件已创建: $path (${newString.lines().size} 行)"
+                return appendAutoLintResult(path, result)
+            }
+            return "错误: 文件 \"$path\" 不存在"
+        }
+
+        // Read 前置校验：当前 turn 中该文件必须被 Read 过
+        if (path !in readFilesInTurn) {
+            return "错误: 请先用 Read 读取 $path 后再修改"
+        }
+
+        // modificationStamp 冲突检测
+        val lastReadStamp = session.fileStamps[path]
+        val currentStamp = file.lastModified()
+        if (lastReadStamp != null && lastReadStamp != currentStamp) {
+            return "错误: \"$path\" 已被外部修改（上次读取 stamp=$lastReadStamp，当前 stamp=$currentStamp）。\n请使用 Read 重新读取文件后再试。"
+        }
+
+        val currentContent = file.readText()
+        val count = currentContent.split(oldString).size - 1
+
+        if (count == 0) {
+            val lines = currentContent.lines()
+            return "错误: 在 \"$path\" 中未找到 oldString。\n提示: 请使用 Read 确认文件内容。\n文件共 ${lines.size} 行。"
+        }
+        if (count > 1) {
+            return "错误: oldString 在 \"$path\" 中匹配到 $count 处，必须唯一。\n请使用更长的 oldString 使其唯一。"
+        }
+
+        val newContent = currentContent.replace(oldString, newString)
+
+        WriteCommandAction.runWriteCommandAction(project) {
+            file.writeText(newContent)
+        }
+
+        // 更新 stamp
+        session.fileStamps[path] = file.lastModified()
+
+        val replacedLines = oldString.lines().size
+        val newLines = newString.lines().size
+        val result = "✅ 已修改: $path\n替换了 $replacedLines 行 → $newLines 行"
+
+        // 修改后自动 readLints（文档 correctness.md §二 方案二）
+        return appendAutoLintResult(path, result)
+    }
+
+    // ── Bash ──
+    private fun runShell(toolUse: BetaToolUseBlock, timeoutSec: Int): String {
+        val input = toolUse._input()
+        val command = ToolInput.string(input, "command") ?: return "错误: 缺少 command 参数"
+        val workDir = ToolInput.string(input, "workDir") ?: project.basePath
+
+        val dir = File(workDir ?: ".")
+        val start = System.currentTimeMillis()
+        val process = Runtime.getRuntime().exec(arrayOf("/bin/bash", "-c", command), null, dir)
+        session.runningProcesses.add(process)
+
+        val stdoutFuture = java.util.concurrent.CompletableFuture.supplyAsync {
+            process.inputStream.bufferedReader().use { it.readText() }
+        }
+        val stderrFuture = java.util.concurrent.CompletableFuture.supplyAsync {
+            process.errorStream.bufferedReader().use { it.readText() }
+        }
+
+        val (stdout, stderr) = if (timeoutSec > 0) {
+            try {
+                val out =
+                    stdoutFuture.get(timeoutSec.toLong(), java.util.concurrent.TimeUnit.SECONDS)
+                val err = stderrFuture.get(1, java.util.concurrent.TimeUnit.SECONDS)
+                process.waitFor(1, java.util.concurrent.TimeUnit.SECONDS)
+                if (process.isAlive) {
+                    process.destroyForcibly(); session.runningProcesses.remove(process)
+                    return "超时: 命令执行超过 ${timeoutSec}s，已强制终止\n\$ $command"
+                }
+                Pair(out, err)
+            } catch (e: java.util.concurrent.TimeoutException) {
+                process.destroyForcibly(); session.runningProcesses.remove(process)
+                return "超时: 命令执行超过 ${timeoutSec}s，已强制终止\n\$ $command"
+            }
+        } else {
+            val out = stdoutFuture.get()
+            val err = stderrFuture.get()
+            process.waitFor()
+            Pair(out, err)
+        }
+
+        val elapsed = (System.currentTimeMillis() - start) / 1000
+        val exitCode = process.exitValue()
+
+        // 输出截断：中段截断，对齐 Claude Code
+        val stdoutLines = stdout.lines()
+        val stderrLines = stderr.lines()
+        val totalLines = stdoutLines.size + stderrLines.size
+        val MAX_LINES = 200
+        if (totalLines > MAX_LINES) {
+            val stdoutHead = stdoutLines.take(30).joinToString("\n")
+            val stdoutTail = stdoutLines.takeLast(30).joinToString("\n")
+            val omittedLines = totalLines - 60
+            return "\$ $command\n" +
+                    "$stdoutHead\n" +
+                    "... (省略 $omittedLines 行) ...\n" +
+                    "$stdoutTail\n" +
+                    "退出码: $exitCode | 耗时: ${elapsed}s | 共 $totalLines 行"
+        }
+
+        return if (exitCode == 0) {
+            if (stderr.isBlank()) {
+                "\$ $command\n$stdout\n退出码: 0 | 耗时: ${elapsed}s | $totalLines 行输出"
+            } else {
+                "\$ $command\n$stdout\n⚠️ 命令成功但有以下输出（stderr）:\n$stderr\n退出码: 0 | 耗时: ${elapsed}s"
+            }
+        } else {
+            "⚠️ 命令执行失败 (退出码: $exitCode)\n" +
+                    "STDERR:\n$stderr\n" +
+                    "STDOUT:\n$stdout\n" +
+                    "耗时: ${elapsed}s\n" +
+                    "提示: 检查命令参数是否正确，路径是否存在。"
+        }
+    }
+
+    // ── Glob ──
+    private fun glob(toolUse: BetaToolUseBlock): String {
+        val input = toolUse._input()
+        val dirPath = ToolInput.string(input, "dirPath") ?: "."
+        val maxDepth = ToolInput.int(input, "maxDepth") ?: 2
+        val offset = ToolInput.int(input, "offset") ?: 0
+
+        val basePath = project.basePath ?: return "错误: 项目路径不可用"
+        val dir = File(basePath, dirPath)
+        if (!dir.exists() || !dir.isDirectory) return "错误: 目录 \"$dirPath\" 不存在"
+
+        val allEntries = mutableListOf<String>()
+        collectEntries(dir, maxDepth, allEntries)
+
+        val maxEntries = 50
+        val paginated = allEntries.drop(offset).take(maxEntries)
+        val total = allEntries.size
+
+        val sb = StringBuilder()
+        sb.appendLine("$dirPath/")
+        paginated.forEach { sb.appendLine(it) }
+
+        if (total > offset + maxEntries) {
+            val nextOffset = offset + maxEntries
+            sb.appendLine("... (共 $total 条目，已截断到 $maxEntries。用 dirPath/maxDepth 缩小范围，或用 offset=$nextOffset 翻页获取更多)")
+        }
+
+        return sb.toString()
+    }
+
+    /** 先序遍历收集所有目录和文件条目（目录在前、文件在后，按名称排序） */
+    private fun collectEntries(
+        dir: File,
+        maxDepth: Int,
+        result: MutableList<String>,
+        prefix: String = "",
+        depth: Int = 0
+    ) {
+        if (depth >= maxDepth) return
+        val children = dir.listFiles()?.sortedBy { it.name } ?: return
+        children.forEach { f ->
+            if (f.isDirectory) {
+                result.add("$prefix├── ${f.name}/")
+                collectEntries(f, maxDepth, result, "$prefix│   ", depth + 1)
+            } else {
+                result.add("$prefix├── ${f.name}")
+            }
+        }
+    }
+
+    // ── Grep ──
+    private fun grep(toolUse: BetaToolUseBlock): String {
+        val input = toolUse._input()
+        val query = ToolInput.string(input, "query") ?: return "错误: 缺少 query 参数"
+        val basePath = project.basePath ?: return "错误: 项目路径不可用"
+        val results = mutableListOf<String>()
+        val sourceExtensions =
+            setOf("kt", "java", "kts", "xml", "json", "md", "gradle", "properties", "yml", "yaml")
+
+        // ponytail: 正则优先，非法正则回退到字面子串匹配
+        val regex = try {
+            Regex(query, setOf(RegexOption.IGNORE_CASE))
+        } catch (_: Exception) {
+            Regex(Regex.escape(query), setOf(RegexOption.IGNORE_CASE))
+        }
+
+        File(basePath).walkTopDown()
+            .filter {
+                it.isFile && !it.path.contains("/build/") && !it.path.contains("/.git/") && !it.path.contains(
+                    "/.idea/"
+                ) && !it.path.contains("/node_modules/") && it.extension in sourceExtensions
+            }
+            .take(800)
+            .forEach { file ->
+                file.readLines().forEachIndexed { idx, line ->
+                    if (regex.containsMatchIn(line) && results.size < 50) {
+                        results.add(
+                            "${file.relativeTo(File(basePath))}:${idx + 1}: ${
+                                line.trim().take(120)
+                            }"
+                        )
+                    }
+                }
+            }
+        return if (results.isEmpty()) "未找到匹配 \"$query\" 的内容。"
+        else if (results.size >= 50) "找到 ${results.size}+ 条匹配，已截断到 50 条:\n${
+            results.joinToString("\n")
+        }\n如有必要，请使用更精确的搜索词缩小范围。"
+        else "找到 ${results.size} 条匹配:\n${results.joinToString("\n")}"
+    }
+
+    /**
+     * Edit/Write 成功后自动静默运行 readLints，将诊断结果追加到 tool result。
+     * 文档要求（correctness.md §二 方案二、tool-return-formats.md §Edit）：
+     * - 静默执行，不显示额外的 ToolCallCard
+     * - 有新 ERROR → 尾部追加 "⚠️ 该文件修改后存在 N 个编译错误"
+     * - 无新问题 → 不追加额外内容
+     */
+    private fun appendAutoLintResult(filePath: String, originalResult: String): String {
+        val lintResult = runLintsSilently(filePath) ?: return originalResult
+        val errorCount = extractErrorCount(lintResult)
+        if (errorCount == 0) return originalResult
+        return "$originalResult\n\n⚠️ 该文件修改后存在 $errorCount 个编译错误，请检查并修复"
+    }
+
+    // ── readLints ──
+    private fun readLints(toolUse: BetaToolUseBlock): String {
+        val input = toolUse._input()
+        val path = ToolInput.string(input, "filePath") ?: return "错误: 缺少 filePath 参数"
+        return readLintsForFile(path)
+    }
+
+    /**
+     * 静默运行 readLints 诊断并返回结果字符串。
+     * 供 Edit/Write 成功后自动 lint 使用。失败时返回 null。
+     */
+    private fun runLintsSilently(filePath: String): String? {
+        return try {
+            readLintsForFile(filePath)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
+     * 从 lint 结果字符串中提取 ERROR 数量。
+     * 结果字符串格式: "文件: xxx\nN 个错误, M 个警告, K 个提示\n..."
+     */
+    private fun extractErrorCount(lintResult: String): Int {
+        val match = Regex("""(\d+)\s*个错误""").find(lintResult)
+        return match?.groupValues?.get(1)?.toIntOrNull() ?: 0
+    }
+
+    /**
+     * readLints 核心逻辑：对指定文件运行 IDE DaemonCodeAnalyzer 诊断。
+     * 文档要求（tools.md §一）：最多返回 50 条诊断，按 severity 排序。
+     */
+    private fun readLintsForFile(path: String): String {
+        val basePath = project.basePath ?: return "错误: 项目路径不可用"
+        val file = File(basePath, path)
+        if (!file.exists()) return "错误: 文件 \"$path\" 不存在"
+
+        val vFile = LocalFileSystem.getInstance().findFileByIoFile(file)
+            ?: return "错误: 无法定位 VirtualFile: \"$path\""
+
+        // 确保文档已提交到 PSI
+        val doc = FileDocumentManager.getInstance().getDocument(vFile)
+        if (doc != null) {
+            com.intellij.psi.PsiDocumentManager.getInstance(project).commitDocument(doc)
+        }
+
+        // 通过 DaemonCodeAnalyzerEx 获取文件的所有 HighlightInfo
+        val analyzer = com.intellij.codeInsight.daemon.DaemonCodeAnalyzer.getInstance(project)
+            as? DaemonCodeAnalyzerEx
+            ?: return "错误: DaemonCodeAnalyzer 不可用"
+
+        val highlights: List<HighlightInfo> = analyzer.runMainPassesAndGetInfos(vFile)
+
+        // 按 severity 排序: ERROR > WARNING > WEAK_WARNING > INFO (INFORMATION)
+        val severityOrder = mapOf(
+            HighlightInfo.HighlightInfoType.ERROR to 0,
+            HighlightInfo.HighlightInfoType.WARNING to 1,
+            HighlightInfo.HighlightInfoType.WEAK_WARNING to 2,
+            HighlightInfo.HighlightInfoType.INFORMATION to 3
+        )
+
+        val sorted = highlights.sortedWith(compareBy { info ->
+            severityOrder[info.type] ?: Int.MAX_VALUE
+        })
+
+        val maxResults = 50
+        val totalCount = sorted.size
+        val limited = sorted.take(maxResults)
+
+        val errorCount = sorted.count { it.type == HighlightInfo.HighlightInfoType.ERROR }
+        val warningCount = sorted.count {
+            it.type == HighlightInfo.HighlightInfoType.WARNING ||
+                it.type == HighlightInfo.HighlightInfoType.WEAK_WARNING
+        }
+        val infoCount = sorted.count { it.type == HighlightInfo.HighlightInfoType.INFORMATION }
+
+        val sb = StringBuilder()
+        sb.appendLine("文件: $path")
+        sb.appendLine("$errorCount 个错误, $warningCount 个警告, $infoCount 个提示")
+
+        if (totalCount > maxResults) {
+            sb.appendLine("(共 $totalCount 条诊断，已截断到 $maxResults 条，按 severity 排序)")
+        }
+
+        if (limited.isEmpty()) {
+            return sb.toString()
+        }
+
+        sb.appendLine()
+        limited.forEachIndexed { idx, info ->
+            val lineNum = info.startLine + 1  // HighlightInfo 使用 0-based 行号，转为 1-based
+            val severityLabel = when (info.type) {
+                HighlightInfo.HighlightInfoType.ERROR -> "ERROR"
+                HighlightInfo.HighlightInfoType.WARNING -> "WARNING"
+                HighlightInfo.HighlightInfoType.WEAK_WARNING -> "WEAK_WARNING"
+                HighlightInfo.HighlightInfoType.INFORMATION -> "INFO"
+                else -> "UNKNOWN"
+            }
+            sb.appendLine(
+                "$lineNum: $severityLabel: ${info.description.take(200)}"
+            )
+        }
+
+        if (totalCount > maxResults) {
+            val remainingErrors = sorted.drop(maxResults).count {
+                it.type == HighlightInfo.HighlightInfoType.ERROR
+            }
+            sb.appendLine()
+            if (remainingErrors > 0) {
+                sb.appendLine("还有 $remainingErrors 条 ERROR 未显示，优先展示 error 级别")
+            } else {
+                sb.appendLine("还有 ${totalCount - maxResults} 条未显示，优先展示 error 级别")
+            }
+        }
+
+        return sb.toString()
+    }
+
+    // ── Skill ──
+    private val skillManager = SkillManager(project)
+
+    private fun skill(toolUse: BetaToolUseBlock): String {
+        val input = toolUse._input()
+        val skillName = ToolInput.string(input, "skill") ?: return "错误: 缺少 skill 参数"
+
+        val skills = skillManager.loadSkills()
+        val skill = skills.find { it.name == skillName || it.command == skillName }
+            ?: return "错误: Skill \"$skillName\" 不存在。可用 Skills: ${skills.joinToString { "${it.name}(/${it.command})" }}"
+
+        if (!skill.enabled) return "错误: Skill \"$skillName\" 已被禁用"
+
+        if (skill.hasMissingTools) return "错误: Skill \"$skillName\" 声明了不存在的工具: ${skill.missingTools.joinToString()}，无法调用"
+
+        // 记录到 session 中，供 compact 后重新注入
+        // 文档要求（skills.md §五）：compact 时被调用过的 skill 重新注入
+        session.calledSkills.add(skill.name)
+
+        return "Skill 已加载: ${skill.name}\n\n${skill.content}"
+    }
+
+    // ── Agent ──
+    private val multiAgent = MultiAgentManager(project)
+
+    /**
+     * 子 Agent Flow 回调：当 Agent 工具 spawn 子 Agent 时，通过此回调将
+     * Flow<MultiAgentManager.AgentEvent> 传递给 ChatViewModel 进行流式渲染。
+     * 文档要求（multi-agent.md §四）：子 Agent 的 Flow<AgentEvent> 直接 collect
+     * 到父 ChatViewModel 渲染，不经过 MultiAgentManager 转发。
+     */
+    var onSubAgentFlow: ((subSessionId: String, flow: kotlinx.coroutines.flow.Flow<MultiAgentManager.AgentEvent>) -> Unit)? = null
+
+    private fun agent(toolUse: BetaToolUseBlock): String {
+        val input = toolUse._input()
+        val prompt = ToolInput.string(input, "prompt") ?: return "错误: 缺少 prompt 参数"
+        val timeoutSec = ToolInput.int(input, "timeout") ?: return "错误: 缺少 timeout 参数"
+        val runInBackground = ToolInput.bool(input, "run_in_background") ?: false
+        val disallowedTools = parseStringList(input, "disallowedTools") ?: emptyList()
+
+        // 子 Agent 不可再 spawn 孙 Agent
+        if (session.isSubAgent) {
+            return "错误: 子 Agent 不可再启动子 Agent（最多 1 层嵌套）。请直接执行该子任务。"
+        }
+
+        // 使用 Flow 模式：返回 Pair<确认消息, Flow>，确认消息给 LLM，Flow 给 ChatViewModel
+        val (confirmMessage, eventFlow) = multiAgent.spawnAgentFlow(prompt, session, disallowedTools)
+        // 将 Flow 传递给 ChatViewModel 进行流式渲染
+        onSubAgentFlow?.invoke(session.id, eventFlow)
+
+        return if (runInBackground) {
+            confirmMessage
+        } else {
+            // 同步模式：仍然返回确认消息给 LLM，
+            // 但实际渲染由 ChatViewModel 通过 Flow collect 完成
+            confirmMessage
+        }
+    }
+
+    // ── WebSearch ──
+    private fun webSearch(toolUse: BetaToolUseBlock): String {
+        val input = toolUse._input()
+        val query = ToolInput.string(input, "query") ?: return "错误: 缺少 query 参数"
+        if (query.length < 2) return "错误: query 至少需要 2 个字符"
+
+        val allowedDomains = parseStringList(input, "allowedDomains")
+        val blockedDomains = parseStringList(input, "blockedDomains")
+        val offset = ToolInput.int(input, "offset") ?: 0
+        val pageSize = 10
+
+        // 构建 DuckDuckGo HTML 搜索 URL（无需 API Key）
+        val searchUrl = buildString {
+            append("https://html.duckduckgo.com/html/?q=")
+            append(java.net.URLEncoder.encode(query, "UTF-8"))
+            if (allowedDomains != null) {
+                allowedDomains.forEach { domain ->
+                    append("+site:").append(java.net.URLEncoder.encode(domain, "UTF-8"))
+                }
+            }
+            if (blockedDomains != null) {
+                blockedDomains.forEach { domain ->
+                    append("+-site:").append(java.net.URLEncoder.encode(domain, "UTF-8"))
+                }
+            }
+        }
+
+        return try {
+            val connection = java.net.URL(searchUrl).openConnection() as java.net.HttpURLConnection
+            connection.setRequestProperty(
+                "User-Agent",
+                "Mozilla/5.0 (compatible; CodeAssistant/1.0)"
+            )
+            connection.connectTimeout = 10_000
+            connection.readTimeout = 10_000
+
+            val html = connection.inputStream.bufferedReader().use { it.readText() }
+
+            // 解析 DuckDuckGo HTML 搜索结果：提取标题和 URL
+            val results = mutableListOf<Pair<String, String>>()
+            val resultPattern =
+                Regex(
+                    """<a[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>\s*(.*?)\s*</a>""",
+                    RegexOption.DOT_MATCHES_ALL
+                )
+            resultPattern.findAll(html).forEach { match ->
+                val rawUrl = match.groupValues[1]
+                val url = extractDuckDuckGoUrl(rawUrl) ?: rawUrl
+                val title = match.groupValues[2]
+                    .replace(Regex("<[^>]*>"), "")
+                    .replace("&amp;", "&")
+                    .replace("&lt;", "<")
+                    .replace("&gt;", ">")
+                    .replace("&quot;", "\"")
+                    .trim()
+                results.add(Pair(title, url))
+            }
+
+            val totalCount = results.size
+            if (totalCount == 0) {
+                return "未找到 \"$query\" 的搜索结果。"
+            }
+
+            // 分页：offset 起始，最多 pageSize 条
+            val paged = results.drop(offset).take(pageSize)
+            val sb = StringBuilder()
+
+            paged.forEachIndexed { idx, (title, url) ->
+                sb.appendLine("${offset + idx + 1}. $title")
+                sb.appendLine("   $url")
+                sb.appendLine()
+            }
+
+            val returnedCount = paged.size
+            if (totalCount > offset + pageSize) {
+                sb.append(
+                    "... (共 $totalCount 条，已返回 $returnedCount 条。用 offset=${offset + pageSize} 翻页获取更多)"
+                )
+            } else if (offset > 0) {
+                sb.append("(共 $totalCount 条，已返回 $returnedCount 条)")
+            }
+
+            sb.toString().trimEnd()
+        } catch (e: java.net.SocketTimeoutException) {
+            "错误: WebSearch 请求超时"
+        } catch (e: Exception) {
+            "错误: WebSearch 请求失败: ${e.message}"
+        }
+    }
+
+    /**
+     * 从 tool input 中解析字符串列表参数。
+     * 支持 JsonArray 和逗号分隔字符串两种格式。
+     */
+    private fun parseStringList(input: Any?, key: String): List<String>? {
+        val raw = when (input) {
+            is com.anthropic.core.JsonObject -> input.values[key]
+            is Map<*, *> -> input[key]
+            else -> return null
+        } ?: return null
+
+        return when (raw) {
+            is List<*> -> raw.mapNotNull { it?.toString() }.ifEmpty { null }
+            is String -> raw.split(",").map { it.trim() }.filter { it.isNotEmpty() }.ifEmpty { null }
+            else -> null
+        }
+    }
+
+    /**
+     * 从 DuckDuckGo 搜索结果链接中提取真实 URL。
+     * DuckDuckGo HTML 版本的链接格式为 //duckduckgo.com/l/?uddg=<encoded_url>&rut=...
+     */
+    private fun extractDuckDuckGoUrl(rawUrl: String): String? {
+        if (rawUrl.startsWith("//duckduckgo.com/l/?")) {
+            val uddg = Regex("uddg=([^&]*)").find(rawUrl)?.groupValues?.get(1) ?: return null
+            return try {
+                java.net.URLDecoder.decode(uddg, "UTF-8")
+            } catch (_: Exception) {
+                null
+            }
+        }
+        return null
+    }
+
+    // ── WebFetch ──
+    /** OkHttp 客户端单例，用于 WebFetch 的 HTTP 请求 */
+    private val webFetchClient: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectionPool(ConnectionPool(maxIdleConnections = 3, keepAliveDuration = 5, timeUnit = TimeUnit.MINUTES))
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .followRedirects(false)
+            .build()
+    }
+
+    /**
+     * 抓取 URL 内容，转为文本后按 prompt 提取信息。核心行为：
+     * - HTTP 自动升级为 HTTPS
+     * - 跨主机重定向不自动跟随，返回给 LLM 决定
+     * - 不支持需认证的页面
+     */
+    private fun webFetch(toolUse: BetaToolUseBlock): String {
+        val input = toolUse._input()
+        val rawUrl = ToolInput.string(input, "url") ?: return "错误: 缺少 url 参数"
+        val prompt = ToolInput.string(input, "prompt") ?: return "错误: 缺少 prompt 参数"
+
+        // HTTP 自动升级为 HTTPS
+        val url = if (rawUrl.startsWith("http://")) {
+            rawUrl.replaceFirst("http://", "https://")
+        } else if (!rawUrl.startsWith("https://")) {
+            "https://$rawUrl"
+        } else {
+            rawUrl
+        }
+
+        try {
+            val request = Request.Builder()
+                .url(url)
+                .header("User-Agent", "Mozilla/5.0 (compatible; CodeAssistant/1.0)")
+                .build()
+
+            val response = webFetchClient.newCall(request).execute()
+
+            // 检查重定向
+            if (response.isRedirect) {
+                val location = response.header("Location")
+                    ?: return "错误: 重定向响应缺少 Location 头"
+                val redirectUrl = resolveRedirectUrl(url, location)
+
+                // 比较重定向前后的主机名，跨主机重定向返回给 LLM
+                val originalHost = URI(url).host
+                val redirectHost = try {
+                    URI(redirectUrl).host
+                } catch (_: Exception) {
+                    null
+                }
+
+                val isCrossHost = redirectHost != null &&
+                    !originalHost.equals(redirectHost, ignoreCase = true)
+                response.close()
+
+                return if (isCrossHost) {
+                    "重定向: $url → $redirectUrl\n请使用重定向后的 URL 重新调用 WebFetch。"
+                } else {
+                    // 同主机重定向，自动跟随一次
+                    fetchContent(redirectUrl, prompt)
+                }
+            }
+
+            // HTTP 错误
+            if (!response.isSuccessful) {
+                val statusCode = response.code
+                response.close()
+                return "错误: 无法获取 \"$url\" (HTTP $statusCode)。页面可能不存在或需要认证。"
+            }
+
+            // 检查 content-type，排除非文本内容
+            val contentType = response.header("Content-Type", "")
+            if (contentType.startsWith("application/pdf") ||
+                contentType.startsWith("application/octet-stream") ||
+                contentType.startsWith("image/") ||
+                contentType.startsWith("video/") ||
+                contentType.startsWith("audio/")
+            ) {
+                response.close()
+                return "错误: 无法从 \"$url\" 提取内容。页面可能为 PDF、二进制文件或需要 JavaScript 渲染。"
+            }
+
+            val body = response.body?.string() ?: ""
+            response.close()
+
+            if (body.isBlank()) {
+                return "错误: 无法从 \"$url\" 提取内容。页面可能为 PDF、二进制文件或需要 JavaScript 渲染。"
+            }
+
+            // 将 HTML 转为纯文本，然后返回结果
+            val plainText = stripHtml(body)
+            return formatWebFetchResult(url, prompt, plainText)
+        } catch (e: java.net.SocketTimeoutException) {
+            return "错误: 无法获取 \"$url\"：请求超时"
+        } catch (e: java.net.UnknownHostException) {
+            return "错误: 无法获取 \"$url\"：无法解析主机名"
+        } catch (e: java.net.ConnectException) {
+            return "错误: 无法连接 \"$url\"：连接被拒绝"
+        } catch (e: javax.net.ssl.SSLHandshakeException) {
+            return "错误: 无法获取 \"$url\"：SSL 握手失败，可能需要 HTTP 协议"
+        } catch (e: Exception) {
+            return "错误: 无法获取 \"$url\": ${e.javaClass.simpleName}: ${e.message}"
+        }
+    }
+
+    /** 获取 URL 内容并基于 prompt 返回结果（同主机重定向后使用） */
+    private fun fetchContent(url: String, prompt: String): String {
+        try {
+            val request = Request.Builder()
+                .url(url)
+                .header("User-Agent", "Mozilla/5.0 (compatible; CodeAssistant/1.0)")
+                .build()
+
+            val response = webFetchClient.newCall(request).execute()
+
+            if (!response.isSuccessful) {
+                val statusCode = response.code
+                response.close()
+                return "错误: 无法获取 \"$url\" (HTTP $statusCode)。页面可能不存在或需要认证。"
+            }
+
+            val body = response.body?.string() ?: ""
+            response.close()
+
+            if (body.isBlank()) {
+                return "错误: 无法从 \"$url\" 提取内容。页面可能为 PDF、二进制文件或需要 JavaScript 渲染。"
+            }
+
+            val plainText = stripHtml(body)
+            return formatWebFetchResult(url, prompt, plainText)
+        } catch (e: Exception) {
+            return "错误: 无法获取 \"$url\": ${e.javaClass.simpleName}: ${e.message}"
+        }
+    }
+
+    /** 解析重定向 URL：如果是相对路径则基于当前 URL 拼接 */
+    private fun resolveRedirectUrl(currentUrl: String, location: String): String {
+        return try {
+            val base = URI(currentUrl)
+            val resolved = base.resolve(location)
+            resolved.toString()
+        } catch (_: Exception) {
+            location
+        }
+    }
+
+    /**
+     * 简单 HTML 标签剥离：移除 script/style 标签和所有 HTML 标签，保留纯文本。
+     */
+    private fun stripHtml(html: String): String {
+        return html
+            .replace(Regex("<script[^>]*>.*?</script>", RegexOption.DOT_MATCHES_ALL), "")
+            .replace(Regex("<style[^>]*>.*?</style>", RegexOption.DOT_MATCHES_ALL), "")
+            .replace(Regex("<[^>]+>"), " ")
+            .replace("&amp;", "&")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&quot;", "\"")
+            .replace("&#39;", "'")
+            .replace("&nbsp;", " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+    }
+
+    /**
+     * 格式化 WebFetch 返回值：将页面文本截取到合理长度并附加元信息。
+     * 大页面自动截断，不额外标注上限（按文档约定无硬性上限）。
+     */
+    private fun formatWebFetchResult(url: String, prompt: String, plainText: String): String {
+        val maxChars = 8000
+        val truncated = if (plainText.length > maxChars) {
+            plainText.take(maxChars) + "\n\n... (页面内容过长，已自动截断)"
+        } else {
+            plainText
+        }
+
+        return buildString {
+            appendLine("页面 URL: $url")
+            appendLine("提取需求: $prompt")
+            appendLine()
+            appendLine("页面内容:")
+            appendLine(truncated)
+        }
+    }
+
+    // -- Symbol --
+    // 对齐 docs/specs/tool-return-formats.md §Symbol 和 docs/agent/tools.md §Symbol
+    private fun symbol(toolUse: BetaToolUseBlock): String {
+        val input = toolUse._input()
+        val operation = ToolInput.string(input, "operation") ?: return "错误: 缺少 operation 参数"
+        val filePath = ToolInput.string(input, "filePath") ?: ""
+        val line = ToolInput.int(input, "line") ?: 0
+        val character = ToolInput.int(input, "character") ?: 0
+        val query = ToolInput.string(input, "query")
+
+        // workspaceSymbol 需要 query 参数
+        if (operation == "workspaceSymbol") {
+            if (query.isNullOrBlank()) return "错误: workspaceSymbol 操作需要 query 参数"
+            return workspaceSymbol(query)
+        }
+
+        // documentSymbol 只需要 filePath
+        if (operation == "documentSymbol") {
+            if (filePath.isBlank()) return "错误: documentSymbol 操作需要 filePath 参数"
+            return documentSymbol(filePath)
+        }
+
+        // 其他操作需要 filePath/line/character
+        if (filePath.isBlank()) return "错误: 缺少 filePath 参数"
+        if (line <= 0 || character <= 0) return "错误: 缺少 line/character 参数"
+
+        return when (operation) {
+            "goToDefinition" -> goToDefinition(filePath, line, character)
+            "goToImplementation" -> goToImplementation(filePath, line, character)
+            "findReferences" -> findReferences(filePath, line, character)
+            "hover" -> hover(filePath, line, character)
+            "incomingCalls" -> incomingCalls(filePath, line, character)
+            "outgoingCalls" -> outgoingCalls(filePath, line, character)
+            else -> "错误: 未知 Symbol 操作 \"$operation\"，可选: goToDefinition, goToImplementation, findReferences, hover, documentSymbol, workspaceSymbol, incomingCalls, outgoingCalls"
+        }
+    }
+    // -- workspaceSymbol：全局符号搜索 --
+    // 对齐 docs/specs/tool-return-formats.md §Symbol workspaceSymbol
+    private fun workspaceSymbol(query: String): String {
+        val projectBase = project.basePath ?: return "错误: 项目路径不可用"
+        val results = mutableListOf<Triple<String, String, String>>() // name, type, filePath
+
+        try {
+            // 通过 PsiShortNamesCache 搜索类名
+            val cache = com.intellij.psi.search.PsiShortNamesCache.getInstance(project)
+            val classes = cache.getClassesByName(query, com.intellij.psi.search.GlobalSearchScope.projectScope(project))
+            classes.take(20).forEach { psiClass ->
+                val file = psiClass.containingFile?.virtualFile
+                val relPath = file?.let { vf -> resolveRelativePath(vf.path) } ?: "未知"
+                val lineNum = getPsiLineNumber(psiClass)
+                val kind = if (psiClass.isInterface) "interface" else "class"
+                results.add(Triple(psiClass.name ?: "匿名", kind, "$relPath:$lineNum"))
+            }
+
+            // 通过 FilenameIndex 搜索文件名
+            for (ext in arrayOf("kt", "java", "kts")) {
+                com.intellij.psi.search.FilenameIndex.getAllFilesByExt(project, ext).forEach { vf ->
+                    if (vf.nameWithoutExtension.contains(query, ignoreCase = true) && results.size < 20) {
+                        val name = vf.nameWithoutExtension
+                        val relPath = resolveRelativePath(vf.path)
+                        if (results.none { it.first == name && it.third.startsWith(relPath) }) {
+                            results.add(Triple(name, "file", relPath))
+                        }
+                    }
+                }
+            }
+
+            val maxResults = 20
+            if (results.isEmpty()) {
+                return "未找到匹配 \"$query\" 的符号。请检查名称拼写。"
+            }
+
+            val totalCount = results.size
+            val limited = results.take(maxResults)
+            val sb = StringBuilder()
+            sb.appendLine("🔍 搜索 \"$query\" 找到 $totalCount 个匹配:")
+            limited.forEachIndexed { idx, (name, kind, path) ->
+                sb.appendLine("${idx + 1}. $kind $name — $path")
+            }
+            if (totalCount > maxResults) {
+                sb.appendLine("... (还有 ${totalCount - maxResults} 个未显示)")
+                sb.append("请使用更精确的符号名缩小范围。")
+            }
+            return sb.toString()
+        } catch (e: Exception) {
+            return "错误: workspaceSymbol 失败: ${e.message}"
+        }
+    }
+
+    // -- documentSymbol：文件符号层次结构 --
+    // 对齐 docs/specs/tool-return-formats.md §Symbol documentSymbol
+    private fun documentSymbol(filePath: String): String {
+        val vFile = resolveVirtualFile(filePath) ?: return "错误: 文件 \"$filePath\" 不存在"
+
+        // 确保 PSI 已提交
+        val doc = FileDocumentManager.getInstance().getDocument(vFile)
+        if (doc != null) {
+            com.intellij.psi.PsiDocumentManager.getInstance(project).commitDocument(doc)
+        }
+
+        val psiFile = com.intellij.psi.PsiManager.getInstance(project).findFile(vFile)
+            ?: return "错误: 无法解析 PSI 文件"
+
+        val symbols = mutableListOf<Pair<String, String>>() // display, prefix
+
+        // 遍历文件中的类及其成员
+        psiFile.accept(object : com.intellij.psi.PsiRecursiveElementVisitor() {
+            override fun visitClass(psiClass: com.intellij.psi.PsiClass) {
+                val kind = when {
+                    psiClass.isInterface -> "interface"
+                    psiClass.isEnum -> "enum"
+                    else -> "class"
+                }
+                val lineNum = getPsiLineNumber(psiClass)
+                symbols.add(Pair("├── $kind ${psiClass.name ?: "匿名"} ($lineNum)", "│ "))
+                // 遍历类内方法
+                psiClass.methods.forEach { method ->
+                    val mLine = getPsiLineNumber(method)
+                    symbols.add(Pair("│ ├── fun ${method.name}() ($mLine)", "│ │ "))
+                }
+                // 遍历类内字段
+                psiClass.fields.forEach { field ->
+                    val fLine = getPsiLineNumber(field)
+                    symbols.add(Pair("│ └── val ${field.name}: ${field.type?.presentableText ?: "?"} ($fLine)", "│   "))
+                }
+            }
+        })
+
+        val maxSymbols = 100
+        val fileName = vFile.name
+        if (symbols.isEmpty()) {
+            return "📄 $fileName: 无符号（空文件或仅含注释）"
+        }
+
+        val totalCount = symbols.size
+        val sb = StringBuilder()
+        if (totalCount <= maxSymbols) {
+            sb.appendLine("📄 $fileName ($totalCount 个符号):")
+        } else {
+            sb.appendLine("📄 $fileName ($totalCount 个符号，已截断到 $maxSymbols):")
+        }
+        symbols.take(maxSymbols).forEach { (display, _) ->
+            sb.appendLine(display)
+        }
+        if (totalCount > maxSymbols) {
+            sb.appendLine("... (还有 ${totalCount - maxSymbols} 个未显示)")
+        }
+        return sb.toString()
+    }
+
+    // -- goToDefinition：跳转到符号定义 --
+    // 对齐 docs/specs/tool-return-formats.md §Symbol goToDefinition
+    private fun goToDefinition(filePath: String, line: Int, character: Int): String {
+        val element = resolveElementAt(filePath, line, character)
+            ?: return "未找到位于 $filePath:$line:$character 处符号的定义。该符号可能为外部依赖或动态引用。"
+
+        val symbolName = when (element) {
+            is com.intellij.psi.PsiNamedElement -> element.name ?: element.text.take(30)
+            else -> element.text.take(30)
+        }
+
+        // 获取目标元素：如果是引用则解析，否则取 navigationElement
+        val target = when {
+            element is com.intellij.psi.PsiReference -> element.resolve()
+            else -> element.navigationElement ?: element
+        } ?: return "未找到 \"$symbolName\" 的定义。该符号可能为外部依赖或动态引用。"
+
+        val targetFile = target.containingFile?.virtualFile
+            ?: return "未找到 \"$symbolName\" 的定义。"
+        val targetLine = getPsiLineNumber(target)
+        val relPath = resolveRelativePath(targetFile.path)
+
+        // 获取所在函数/类名作为上下文
+        val contextName = getContainingElementName(target)
+
+        // 获取定义源码片段（前后 3 行）
+        val sourceSnippet = getSourceSnippet(target, 3)
+
+        val sb = StringBuilder()
+        sb.appendLine("📍 $symbolName 定义于 $relPath:$targetLine")
+        sb.appendLine("```kotlin")
+        sb.appendLine(sourceSnippet ?: target.text.take(500))
+        sb.appendLine("```")
+        if (contextName != null) {
+            sb.appendLine()
+            sb.append("所在: $contextName")
+        }
+        return sb.toString()
+    }
+
+    // -- goToImplementation：查找实现类/方法 --
+    // 对齐 docs/specs/tool-return-formats.md §Symbol goToImplementation
+    private fun goToImplementation(filePath: String, line: Int, character: Int): String {
+        val element = resolveElementAt(filePath, line, character)
+            ?: return "错误: 无法在 \"$filePath\" 第 $line 行 $character 列定位到符号"
+
+        val psiElement = when (element) {
+            is com.intellij.psi.PsiReference -> element.resolve()
+            else -> element
+        } ?: return "错误: 无法解析该符号"
+
+        val symbolName = when (psiElement) {
+            is com.intellij.psi.PsiNamedElement -> psiElement.name ?: psiElement.text.take(50)
+            else -> psiElement.text.take(50)
+        }
+        val results = mutableListOf<Triple<String, Int, String>>() // filePath, line, snippet
+
+        when (psiElement) {
+            is com.intellij.psi.PsiClass -> {
+                // 查找所有继承类/实现类
+                val inheritors = com.intellij.psi.search.searches.ClassInheritorsSearch
+                    .search(psiElement, com.intellij.psi.search.GlobalSearchScope.projectScope(project), true)
+                    .findAll()
+                inheritors.take(50).forEach { impl ->
+                    val implFile = impl.containingFile?.virtualFile
+                    val relPath = if (implFile != null) resolveRelativePath(implFile.path) else "未知"
+                    val implLine = getPsiLineNumber(impl)
+                    val implName = (impl as? com.intellij.psi.PsiNamedElement)?.name ?: impl.text.take(50)
+                    results.add(Triple(relPath, implLine, implName))
+                }
+            }
+            is com.intellij.psi.PsiMethod -> {
+                // 查找所有重写方法
+                val overriders = com.intellij.psi.search.searches.OverridingMethodsSearch
+                    .search(psiElement, com.intellij.psi.search.GlobalSearchScope.projectScope(project), true)
+                    .findAll()
+                overriders.take(50).forEach { method ->
+                    val methodFile = method.containingFile?.virtualFile
+                    val relPath = if (methodFile != null) resolveRelativePath(methodFile.path) else "未知"
+                    val methodLine = getPsiLineNumber(method)
+                    val methodName = (method as? com.intellij.psi.PsiNamedElement)?.name ?: method.text.take(50)
+                    results.add(Triple(relPath, methodLine, methodName))
+                }
+            }
+            else -> return "未找到 \"$symbolName\" 的实现。该符号可能为具体类或非虚方法。"
+        }
+
+        if (results.isEmpty()) {
+            return "未找到 \"$symbolName\" 的实现。该符号可能为具体类或非虚方法。"
+        }
+
+        val count = results.size
+        val sb = StringBuilder()
+        sb.appendLine("🔍 $symbolName 有 $count 个实现:")
+        results.forEachIndexed { idx, (path, l, snippet) ->
+            sb.appendLine("${idx + 1}. $snippet 位于 $path:$l")
+        }
+        return sb.toString()
+    }
+
+    // -- findReferences：查找所有引用 --
+    // 对齐 docs/specs/tool-return-formats.md §Symbol findReferences
+    private fun findReferences(filePath: String, line: Int, character: Int): String {
+        val element = resolveElementAt(filePath, line, character)
+            ?: return "错误: 无法在 \"$filePath\" 第 $line 行 $character 列定位到符号"
+
+        val psiElement = when (element) {
+            is com.intellij.psi.PsiReference -> element.resolve()
+            else -> element
+        } ?: return "错误: 无法解析该符号"
+
+        val symbolName = when (psiElement) {
+            is com.intellij.psi.PsiNamedElement -> psiElement.name ?: psiElement.text.take(50)
+            else -> psiElement.text.take(50)
+        }
+
+        val references = com.intellij.psi.search.searches.ReferencesSearch
+            .search(psiElement, com.intellij.psi.search.GlobalSearchScope.projectScope(project))
+            .findAll()
+
+        val totalCount = references.size
+
+        if (totalCount == 0) {
+            return "未找到 \"$symbolName\" 的引用。该符号可能未被使用或为私有引用。"
+        }
+
+        val maxResults = 50
+        val results = references.take(maxResults).map { ref ->
+            val refFile = ref.element.containingFile?.virtualFile
+            val relPath = if (refFile != null) resolveRelativePath(refFile.path) else "未知"
+            val refLine = getPsiLineNumber(ref.element)
+            val refText = getRefLineText(ref.element)
+            val contextName = getContainingElementName(ref.element)
+            Triple(relPath, refLine, "$refText${if (contextName != null) " // $contextName" else ""}")
+        }
+
+        val sb = StringBuilder()
+        if (totalCount <= maxResults) {
+            sb.appendLine("🔍 $symbolName 在 $totalCount 处被引用:")
+        } else {
+            sb.appendLine("🔍 $symbolName 在 $totalCount 处被引用，已截断到 $maxResults 条:")
+        }
+        results.forEachIndexed { idx, (path, l, text) ->
+            sb.appendLine("${idx + 1}. $path:$l: $text")
+        }
+        if (totalCount > maxResults) {
+            sb.appendLine("还有 ${totalCount - maxResults} 处未显示。请缩小搜索范围或指定文件。")
+        }
+        return sb.toString()
+    }
+
+    /** 获取引用元素所在行的文本 */
+    private fun getRefLineText(element: com.intellij.psi.PsiElement): String {
+        return try {
+            val doc = com.intellij.psi.PsiDocumentManager.getInstance(project)
+                .getDocument(element.containingFile) ?: return element.text.take(200)
+            val offset = element.textRange?.startOffset ?: return element.text.take(200)
+            val lineNum = doc.getLineNumber(offset)
+            val lineStart = doc.getLineStartOffset(lineNum)
+            val lineEnd = doc.getLineEndOffset(lineNum)
+            val lineText = doc.getText(com.intellij.openapi.util.TextRange(lineStart, lineEnd)).trim()
+            lineText.take(200)
+        } catch (_: Exception) {
+            element.text.take(200)
+        }
+    }
+
+    // -- hover：类型提示和文档 --
+    // 对齐 docs/specs/tool-return-formats.md §Symbol hover
+    private fun hover(filePath: String, line: Int, character: Int): String {
+        val element = resolveElementAt(filePath, line, character)
+            ?: return "未找到位于 $filePath:$line:$character 的符号。"
+
+        val psiElement = when (element) {
+            is com.intellij.psi.PsiReference -> element.resolve()
+            else -> element
+        }
+
+        if (psiElement == null) {
+            // 尝试类型推断（表达式类型）
+            val ref = resolveReferenceAt(filePath, line, character)
+            if (ref != null && ref is com.intellij.psi.PsiReferenceExpression) {
+                val resolvedType = ref.type?.presentableText
+                if (resolvedType != null) {
+                    return "ℹ️ ${ref.text.take(30)}: $resolvedType\n位置: $filePath:$line"
+                }
+            }
+            return "ℹ️ ${element.text.take(30)}: ${element.javaClass.simpleName}\n位置: $filePath:$line"
+        }
+
+        val symbolName = when (psiElement) {
+            is com.intellij.psi.PsiNamedElement -> psiElement.name ?: psiElement.text.take(30)
+            else -> psiElement.text.take(30)
+        }
+        val typeName = when (psiElement) {
+            is com.intellij.psi.PsiMethod -> "方法"
+            is com.intellij.psi.PsiField -> "字段 (${(psiElement as com.intellij.psi.PsiField).type?.presentableText ?: "未知"})"
+            is com.intellij.psi.PsiClass -> {
+                when {
+                    psiElement.isInterface -> "接口"
+                    psiElement.isEnum -> "枚举"
+                    else -> "类"
+                }
+            }
+            is com.intellij.psi.PsiVariable -> "变量 (${(psiElement as com.intellij.psi.PsiVariable).type?.presentableText ?: "未知"})"
+            else -> psiElement.javaClass.simpleName
+        }
+
+        val sb = StringBuilder()
+
+        // 文档注释（KDoc/JavaDoc）
+        val docText = when (psiElement) {
+            is com.intellij.psi.PsiDocCommentOwner -> psiElement.docComment?.text?.take(500)
+            else -> null
+        }
+        if (!docText.isNullOrBlank()) {
+            val firstLine = docText.lines().firstOrNull()?.trim()?.removePrefix("*")?.trimStart() ?: ""
+            sb.appendLine("ℹ️ $symbolName: $typeName")
+            sb.appendLine(firstLine.take(200))
+        } else {
+            sb.appendLine("ℹ️ $symbolName: $typeName")
+        }
+
+        // 完整签名
+        val signature = when (psiElement) {
+            is com.intellij.psi.PsiMethod -> psiElement.text?.take(300)?.replace("\n", " ") ?: ""
+            is com.intellij.psi.PsiClass -> {
+                val modifiers = when {
+                    psiElement.isInterface -> "interface ${psiElement.name}"
+                    else -> "class ${psiElement.name}"
+                }
+                modifiers
+            }
+            else -> psiElement.text?.take(300) ?: ""
+        }
+        if (signature.isNotBlank()) {
+            sb.appendLine(signature)
+        }
+
+        sb.append("位置: $filePath:$line")
+        return sb.toString()
+    }
+
+    // -- incomingCalls：谁调用了这个函数 --
+    // 对齐 docs/specs/tool-return-formats.md §Symbol incomingCalls
+    private fun incomingCalls(filePath: String, line: Int, character: Int): String {
+        val element = resolveElementAt(filePath, line, character)
+            ?: return "错误: 无法在 \"$filePath\" 第 $line 行 $character 列定位到符号"
+
+        val psiElement = when (element) {
+            is com.intellij.psi.PsiReference -> element.resolve()
+            else -> element
+        } ?: return "错误: 无法解析该符号"
+
+        if (psiElement !is com.intellij.psi.PsiMethod) {
+            return "错误: incomingCalls 操作仅支持方法/函数，当前符号类型: ${psiElement.javaClass.simpleName}"
+        }
+
+        try {
+            // 使用 ReferencesSearch 查找调用者
+            val references = com.intellij.psi.search.searches.ReferencesSearch
+                .search(psiElement, com.intellij.psi.search.GlobalSearchScope.projectScope(project))
+                .findAll()
+
+            val totalCount = references.size
+            if (totalCount == 0) {
+                return "函数 \"${psiElement.name}\" 为入口函数或未被直接调用。"
+            }
+
+            val maxResults = 50
+            val callers = references.take(maxResults).map { ref ->
+                val refFile = ref.element.containingFile?.virtualFile
+                val relPath = if (refFile != null) resolveRelativePath(refFile.path) else "未知"
+                val refLine = getPsiLineNumber(ref.element)
+                val contextName = getContainingElementName(ref.element) ?: "(顶层)"
+                Triple(relPath, refLine, "$contextName")
+            }
+
+            val sb = StringBuilder()
+            if (totalCount <= maxResults) {
+                sb.appendLine("📞 ${psiElement.name} 被 $totalCount 处调用:")
+            } else {
+                sb.appendLine("📞 ${psiElement.name} 被 $totalCount 处调用，已截断到 $maxResults:")
+            }
+            callers.forEachIndexed { idx, (path, l, caller) ->
+                sb.appendLine("${idx + 1}. $caller — $path:$l")
+            }
+            if (totalCount > maxResults) {
+                sb.appendLine("还有 ${totalCount - maxResults} 处未显示。")
+            }
+            return sb.toString()
+        } catch (e: Exception) {
+            return "错误: incomingCalls 失败: ${e.message}"
+        }
+    }
+
+    // -- outgoingCalls：这个函数调用了谁 --
+    // 对齐 docs/specs/tool-return-formats.md §Symbol outgoingCalls
+    private fun outgoingCalls(filePath: String, line: Int, character: Int): String {
+        val element = resolveElementAt(filePath, line, character)
+            ?: return "错误: 无法在 \"$filePath\" 第 $line 行 $character 列定位到符号"
+
+        val psiElement = when (element) {
+            is com.intellij.psi.PsiReference -> element.resolve()
+            else -> element
+        } ?: return "错误: 无法解析该符号"
+
+        if (psiElement !is com.intellij.psi.PsiMethod && psiElement !is com.intellij.psi.PsiClass) {
+            return "错误: outgoingCalls 操作仅支持方法/函数或类，当前符号类型: ${psiElement.javaClass.simpleName}"
+        }
+
+        try {
+            val symbolName = when (psiElement) {
+                is com.intellij.psi.PsiNamedElement -> psiElement.name ?: psiElement.text.take(50)
+                else -> psiElement.text.take(50)
+            }
+
+            // 遍历元素内部的所有方法调用引用
+            val callees = mutableListOf<Triple<String, Int, String>>() // filePath, line, display
+            val processed = mutableSetOf<String>()
+
+            psiElement.accept(object : com.intellij.psi.PsiRecursiveElementVisitor() {
+                override fun visitReferenceExpression(expression: com.intellij.psi.PsiReferenceExpression) {
+                    val resolved = expression.resolve()
+                    if (resolved is com.intellij.psi.PsiMethod && resolved != psiElement) {
+                        val key = "${resolved.containingFile?.virtualFile?.path}:${getPsiLineNumber(resolved)}:${resolved.name}"
+                        if (key !in processed && callees.size < 50) {
+                            processed.add(key)
+                            val refFile = resolved.containingFile?.virtualFile
+                            val relPath = if (refFile != null) resolveRelativePath(refFile.path) else "未知"
+                            val refLine = getPsiLineNumber(resolved)
+                            callees.add(Triple(relPath, refLine, "${resolved.name}()"))
+                        }
+                    }
+                    super.visitReferenceExpression(expression)
+                }
+
+                override fun visitCallExpression(call: com.intellij.psi.PsiCallExpression) {
+                    val resolved = call.resolveMethod()
+                    if (resolved != null && resolved != psiElement) {
+                        val key = "${resolved.containingFile?.virtualFile?.path}:${getPsiLineNumber(resolved)}:${resolved.name}"
+                        if (key !in processed && callees.size < 50) {
+                            processed.add(key)
+                            val refFile = resolved.containingFile?.virtualFile
+                            val relPath = if (refFile != null) resolveRelativePath(refFile.path) else "未知"
+                            val refLine = getPsiLineNumber(resolved)
+                            callees.add(Triple(relPath, refLine, "${resolved.name}()"))
+                        }
+                    }
+                    super.visitCallExpression(call)
+                }
+            })
+
+            val totalCount = callees.size
+            if (totalCount == 0) {
+                return "函数体为空或仅含简单表达式。"
+            }
+
+            val maxResults = 50
+            val sb = StringBuilder()
+            if (totalCount <= maxResults) {
+                sb.appendLine("📞 $symbolName 调用了 $totalCount 个方法:")
+            } else {
+                sb.appendLine("📞 $symbolName 调用了 $totalCount 个方法，已截断到 $maxResults:")
+            }
+            callees.forEachIndexed { idx, (path, l, callee) ->
+                sb.appendLine("${idx + 1}. $callee — $path:$l")
+            }
+            if (totalCount > maxResults) {
+                sb.appendLine("还有 ${totalCount - maxResults} 处未显示。")
+            }
+            return sb.toString()
+        } catch (e: Exception) {
+            return "错误: outgoingCalls 失败: ${e.message}"
+        }
+    }
+    // -- Symbol 工具辅助方法 --
+
+    /** 将相对路径解析为 VirtualFile */
+    private fun resolveVirtualFile(filePath: String): com.intellij.openapi.vfs.VirtualFile? {
+        val basePath = project.basePath ?: return null
+        val file = File(basePath, filePath)
+        if (!file.exists()) return null
+        return LocalFileSystem.getInstance().findFileByIoFile(file)
+    }
+
+    /** 获取 VirtualFile 相对项目路径 */
+    private fun resolveRelativePath(absolutePath: String): String {
+        val basePath = project.basePath ?: return absolutePath
+        val f = File(absolutePath)
+        val base = File(basePath)
+        return if (f.startsWith(base)) f.relativeTo(base).path else absolutePath
+    }
+
+    /** 获取 PSI 元素的 1-based 行号 */
+    private fun getPsiLineNumber(element: com.intellij.psi.PsiElement): Int {
+        return try {
+            val doc = com.intellij.psi.PsiDocumentManager.getInstance(project)
+                .getDocument(element.containingFile)
+                ?: return 1
+            val offset = element.textRange?.startOffset ?: return 1
+            doc.getLineNumber(offset) + 1 // Document.getLineNumber 是 0-based
+        } catch (_: Exception) {
+            1
+        }
+    }
+
+    /** 获取元素所在的函数/类名上下文 */
+    private fun getContainingElementName(element: com.intellij.psi.PsiElement): String? {
+        var parent: com.intellij.psi.PsiElement? = element.parent
+        while (parent != null) {
+            when (parent) {
+                is com.intellij.psi.PsiMethod -> return "${parent.name}()"
+                is com.intellij.psi.PsiClass -> return parent.name
+                is com.intellij.psi.PsiFile -> return null
+            }
+            parent = parent.parent
+        }
+        return null
+    }
+
+    /** 获取元素周围的源码片段（前后各 contextLines 行） */
+    private fun getSourceSnippet(element: com.intellij.psi.PsiElement, contextLines: Int): String? {
+        return try {
+            val file = element.containingFile ?: return null
+            val doc = com.intellij.psi.PsiDocumentManager.getInstance(project).getDocument(file)
+                ?: return null
+            val offset = element.textRange?.startOffset ?: return null
+            val lineNum = doc.getLineNumber(offset) // 0-based
+            val totalLines = doc.lineCount
+            val startLine = (lineNum - contextLines).coerceAtLeast(0)
+            val endLine = (lineNum + contextLines + 1).coerceAtMost(totalLines)
+            val sb = StringBuilder()
+            for (i in startLine until endLine) {
+                val lineStart = doc.getLineStartOffset(i)
+                val lineEnd = doc.getLineEndOffset(i)
+                val lineText = doc.text.substring(lineStart, lineEnd).take(200)
+                val marker = if (i == lineNum) ">" else " "
+                sb.appendLine("$marker ${i + 1}: $lineText")
+            }
+            sb.toString()
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /** 解析文件指定位置的 PSI 元素 */
+    private fun resolveElementAt(filePath: String, line: Int, character: Int): com.intellij.psi.PsiElement? {
+        val vFile = resolveVirtualFile(filePath) ?: return null
+        val doc = FileDocumentManager.getInstance().getDocument(vFile)
+        if (doc != null) {
+            com.intellij.psi.PsiDocumentManager.getInstance(project).commitDocument(doc)
+        }
+        val psiFile = com.intellij.psi.PsiManager.getInstance(project).findFile(vFile) ?: return null
+        val offset = try {
+            doc?.getLineStartOffset(line - 1)?.plus(character - 1)?.coerceAtMost(doc.textLength)
+        } catch (_: Exception) {
+            null
+        } ?: return null
+        return psiFile.findElementAt(offset)
+    }
+
+    /** 解析文件指定位置的引用 */
+    private fun resolveReferenceAt(
+        filePath: String, line: Int, character: Int
+    ): com.intellij.psi.PsiElement? {
+        val element = resolveElementAt(filePath, line, character) ?: return null
+        return when (element) {
+            is com.intellij.psi.PsiReference -> element
+            else -> element.parent?.reference ?: element.reference
+        }
+    }
+
+    // ── Plan Management Tools ──
+    /** PlanExecutor 惰性创建，供 Plan 管理工具使用（D-03: 创建后自动执行） */
+    private val planExecutor: PlanExecutor by lazy {
+        PlanExecutor(session) { AgentLoop(project, session) }
+    }
+
+    private fun createPlan(toolUse: BetaToolUseBlock): String {
+        val input = toolUse._input()
+        val task = ToolInput.string(input, "task") ?: return "错误: 缺少 task 参数"
+        val planStepsInput = parsePlanStepsInput(input)
+        if (planStepsInput.size > 20) return "错误: 计划步骤数量超过 20 上限"
+
+        val steps = planStepsInput.map { item ->
+            PlanExecutor.PlanStep(
+                description = item.description,
+                tool = item.tool.takeIf { it.isNotEmpty() } ?: "Read",
+                files = item.files
+            )
+        }
+
+        val plan = planExecutor.createPlanFromTool(task, steps)
+        session.plan = plan
+
+        val sb = StringBuilder()
+        sb.appendLine("计划已创建")
+        sb.appendLine("Plan ID: ${plan.id}")
+        sb.appendLine("任务: ${plan.summary}")
+        sb.appendLine("状态: ${plan.status}")
+        sb.appendLine("计划步骤: ${plan.steps.size} 项")
+        plan.steps.forEachIndexed { index, step ->
+            sb.appendLine("  ${index + 1}. [${step.id}] ${step.status} | ${step.description}")
+            if (step.tool.isNotEmpty()) sb.appendLine("     建议工具: ${step.tool}")
+            if (step.files.isNotEmpty()) sb.appendLine("     涉及文件: ${step.files.joinToString(", ")}")
+        }
+        return sb.toString()
+    }
+
+    /** 从 tool input 解析 PlanStepInput 列表 */
+    private fun parsePlanStepsInput(input: Any?): List<PlanStepInput> {
+        val plansRaw = when (input) {
+            is com.anthropic.core.JsonObject -> input.values["plans"]
+            is Map<*, *> -> input["plans"]
+            else -> return emptyList()
+        } ?: return emptyList()
+
+        if (plansRaw !is List<*>) return emptyList()
+        return plansRaw.mapNotNull { item ->
+            when (item) {
+                is Map<*, *> -> PlanStepInput(
+                    description = item["description"]?.toString() ?: "",
+                    tool = item["tool"]?.toString() ?: "",
+                    files = (item["files"] as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
+                )
+                else -> null
+            }
+        }
+    }
+
+    private fun listPlans(toolUse: BetaToolUseBlock): String {
+        val plan = session.plan
+        if (plan == null) return "当前无活跃计划"
+
+        val sb = StringBuilder()
+        sb.appendLine("当前计划")
+        sb.appendLine("Plan ID: ${plan.id}")
+        sb.appendLine("任务: ${plan.summary}")
+        sb.appendLine("状态: ${plan.status}")
+        sb.appendLine("当前执行步骤索引: ${plan.currentStepIndex}")
+        sb.appendLine("计划步骤 (共 ${plan.steps.size} 项):")
+        plan.steps.forEachIndexed { index, step ->
+            val marker = if (index == plan.currentStepIndex) " ← 当前" else ""
+            sb.appendLine("  ${index + 1}. [${step.id}] ${step.status} | ${step.description}$marker")
+            if (step.tool.isNotEmpty()) sb.appendLine("     建议工具: ${step.tool}")
+            if (step.files.isNotEmpty()) sb.appendLine("     涉及文件: ${step.files.joinToString(", ")}")
+            if (!step.result.isNullOrBlank()) sb.appendLine("     结果: ${step.result.take(100)}")
+        }
+        return sb.toString()
+    }
+
+    private fun removePlan(toolUse: BetaToolUseBlock): String {
+        val input = toolUse._input()
+        val planId = ToolInput.string(input, "planId") ?: return "错误: 缺少 planId 参数"
+        return planExecutor.removePlanStep(planId)
+    }
+
+    private fun reorderPlans(toolUse: BetaToolUseBlock): String {
+        val input = toolUse._input()
+        val planIds = parseStringList(input, "planIds")
+            ?: return "错误: 缺少 planIds 参数"
+        return planExecutor.reorderSteps(planIds)
+    }
+
+    private fun markPlanDone(toolUse: BetaToolUseBlock): String {
+        val input = toolUse._input()
+        val planId = ToolInput.string(input, "planId") ?: return "错误: 缺少 planId 参数"
+        return planExecutor.markStepDone(planId)
+    }
+
+
+    // ── MCP Tools (动态注册) ──
+
+    /**
+     * MCP 工具连续失败计数器。
+     * Key: 工具名 (格式: "mcp/serverName/toolName")，Value: 当轮连续失败次数。
+     * 每轮（new turn）结束时清零。
+     */
+    private val mcpToolFailureCounts = mutableMapOf<String, Int>()
+
+    /**
+     * MCP 工具执行调度。
+     * 负责：错误传播 (G-10) + 同工具连续失败 3 次自动跳过 (G-10) + 结果截断 200 行 (G-11)。
+     */
+    private fun runMcpTool(toolUse: BetaToolUseBlock): String {
+        val toolName = toolUse.name() // 格式: "mcp/serverName/toolName"
+        val input = toolUse._input()
+
+        // 拆解 serverName/toolName
+        val parts = toolName.removePrefix("mcp/").split("/", limit = 2)
+        val serverName = parts.getOrElse(0) { "unknown" }
+        val actualToolName = parts.getOrElse(1) { toolName }
+
+        // 检查是否已连续失败 3 次 → 自动跳过
+        val failureCount = mcpToolFailureCounts[toolName] ?: 0
+        if (failureCount >= 3) {
+            return "MCP 工具 $serverName/$actualToolName 已连续失败 3 次，请检查 MCP Server 状态"
+        }
+
+        // 获取 MCP Manager，发送 JSON-RPC 请求
+        val mcpManager = getMcpManager()
+        val server = mcpManager?.getServer(serverName)
+
+        if (server == null || server.state != com.aiassistant.mcp.McpManager.State.RUNNING) {
+            val errorMsg = buildMcpErrorResult(serverName, actualToolName,
+                if (server == null) "Server 不存在" else "Server 状态为 ${server.state}"
+            )
+            recordMcpFailure(toolName)
+            return errorMsg
+        }
+
+        val process = server.process
+        if (process == null || !process.isAlive) {
+            val errorMsg = buildMcpErrorResult(serverName, actualToolName, "进程未运行或已退出")
+            recordMcpFailure(toolName)
+            return errorMsg
+        }
+
+        return try {
+            // 构建并发送 JSON-RPC tools/call 请求
+            val params = ToolInput.map(input)
+            val requestJson = buildMcpToolCallRequest(actualToolName, params)
+            val processInput = process.outputStream
+            val processOutput = process.inputStream
+
+            processInput.write(requestJson.toByteArray())
+            processInput.flush()
+
+            // 读取响应，30s 超时（对齐文档：JSON-RPC 请求超过 30s → DISCONNECTED）
+            val buf = ByteArray(4096)
+            val deadline = System.currentTimeMillis() + 30_000
+            val response = StringBuilder()
+            while (System.currentTimeMillis() < deadline) {
+                if (processOutput.available() > 0) {
+                    val n = processOutput.read(buf, 0, minOf(buf.size, processOutput.available()))
+                    if (n == -1) break
+                    response.append(String(buf, 0, n))
+                    // 读取到完整 JSON 响应就停止
+                    if (response.contains("\"id\":2") && response.endsWith("}")) break
+                } else {
+                    Thread.sleep(50)
+                }
+            }
+
+            if (response.isEmpty()) {
+                // 超时 → 交给 McpManager 处理状态变更
+                mcpManager.handleRequestTimeout(serverName)
+                val errorMsg = buildMcpErrorResult(serverName, actualToolName, "请求超时 (30s)")
+                recordMcpFailure(toolName)
+                return errorMsg
+            }
+
+            // 解析 JSON-RPC 响应
+            val responseObj = try {
+                gson.fromJson(response.toString(), Map::class.java) as? Map<*, *>
+            } catch (e: Exception) {
+                null
+            }
+
+            if (responseObj == null) {
+                val errorMsg = buildMcpErrorResult(serverName, actualToolName, "响应 JSON 解析失败")
+                recordMcpFailure(toolName)
+                return errorMsg
+            }
+
+            // 检查是否为 JSON-RPC error 响应
+            val error = responseObj["error"]
+            if (error != null) {
+                val errorMap = error as? Map<*, *>
+                val errorMessage = errorMap?.get("message")?.toString() ?: "未知错误"
+                val errorMsg = buildMcpErrorResult(serverName, actualToolName, errorMessage)
+                recordMcpFailure(toolName)
+                return errorMsg
+            }
+
+            // 成功：提取 result → content 数组 → 拼接文本
+            val result = responseObj["result"] as? Map<*, *>
+            val content = result?.get("content") as? List<*>
+            val toolOutput = if (content != null) {
+                content.joinToString("\n") { item ->
+                    when (item) {
+                        is Map<*, *> -> item["text"]?.toString() ?: item.toString()
+                        else -> item.toString()
+                    }
+                }
+            } else {
+                result?.toString() ?: response.toString()
+            }
+
+            // G-11: 结果截断 200 行
+            val truncated = truncateMcpResult(toolOutput)
+
+            // 成功 → 清零失败计数
+            mcpToolFailureCounts.remove(toolName)
+            truncated
+        } catch (e: Exception) {
+            val errorMsg = buildMcpErrorResult(serverName, actualToolName,
+                "${e.javaClass.simpleName}: ${e.message}"
+            )
+            recordMcpFailure(toolName)
+            errorMsg
+        }
+    }
+
+    /**
+     * G-10: 记录 MCP 工具调用失败，单轮内同一工具连续失败 3 次自动跳过。
+     */
+    private fun recordMcpFailure(toolName: String) {
+        val count = (mcpToolFailureCounts[toolName] ?: 0) + 1
+        mcpToolFailureCounts[toolName] = count
+        if (count >= 3) {
+            AppLogger.warn("MCP 工具 $toolName 已连续失败 3 次，本轮后续调用将自动跳过")
+        }
+    }
+
+    /**
+     * 清零所有 MCP 工具失败计数（每个新 turn 开始时调用）。
+     */
+    fun resetMcpToolFailureCounts() {
+        mcpToolFailureCounts.clear()
+    }
+
+    /**
+     * G-10: 构建 MCP 工具失败的标准错误消息。
+     */
+    private fun buildMcpErrorResult(serverName: String, toolName: String, errorMessage: String): String {
+        return "MCP 工具 $serverName/$toolName 执行失败: $errorMessage"
+    }
+
+    /**
+     * G-11: 截断 MCP 工具结果到最多 200 行。
+     * 保留头部 200 行，超出截断并标注。
+     */
+    private fun truncateMcpResult(result: String): String {
+        val lines = result.lines()
+        if (lines.size <= McpManager.MCP_RESULT_MAX_LINES) {
+            return result
+        }
+        val truncated = lines.take(McpManager.MCP_RESULT_MAX_LINES).joinToString("\n")
+        return "$truncated\n... (共 ${lines.size} 行，已截断到 ${McpManager.MCP_RESULT_MAX_LINES} 行)"
+    }
+
+    /** 获取 McpManager 实例（优先使用构造注入的实例） */
+    private fun getMcpManager(): McpManager? {
+        return mcpManager ?: try {
+            com.aiassistant.mcp.McpManager(project)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** Gson 实例用于 JSON-RPC 解析 */
+    private val gson = com.google.gson.Gson()
+
+    /** 构建 MCP tools/call JSON-RPC 请求 */
+    private fun buildMcpToolCallRequest(toolName: String, arguments: Map<String, Any?>): String {
+        val argsJson = gson.toJson(arguments)
+        return """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"$toolName","arguments":$argsJson}}"""
+    }
+
+    // ── AskUserQuestion ──
+    private fun askUserQuestion(toolUse: BetaToolUseBlock): String {
+        val input = toolUse._input()
+        val rawQuestions = ToolInput.map(input)["questions"]
+        if (rawQuestions == null || (rawQuestions is List<*> && rawQuestions.isEmpty())) {
+            return "错误: 缺少 questions 参数（至少 1 个问题）"
+        }
+
+        // 解析问题列表
+        val questions = when (rawQuestions) {
+            is List<*> -> rawQuestions.take(4).mapNotNull { parseQuestionItem(it) }
+            else -> return "错误: questions 参数格式不正确"
+        }
+
+        if (questions.isEmpty()) {
+            return "错误: questions 参数解析失败"
+        }
+        if (questions.size > 4) {
+            return "错误: 最多支持 4 个问题"
+        }
+
+        // 验证每个问题的选项数量（2-4 个）
+        questions.forEachIndexed { idx, q ->
+            if (q.options.size < 2 || q.options.size > 4) {
+                return "错误: 问题 ${idx + 1} (${q.question}) 的选项数量必须在 2-4 个之间，当前为 ${q.options.size} 个"
+            }
+        }
+
+        // 在 EDT 上弹出 MODAL 对话框，阻塞 Agent Loop 等待用户回答
+        val answers = AtomicReference<Map<Int, List<String>>>()
+        val app = ApplicationManager.getApplication()
+        app.invokeAndWait {
+            answers.set(showQuestionDialog(questions))
+        }
+
+        // 格式化用户回答作为返回值
+        val result = answers.get() ?: emptyMap()
+        return formatAnswers(questions, result)
+    }
+
+    /**
+     * 解析单个问题，支持 JsonNode 和 Map 两种格式。
+     */
+    private fun parseQuestionItem(raw: Any?): QuestionData? {
+        val map = when (raw) {
+            is Map<*, *> -> raw.entries.associate { it.key.toString() to it.value }
+            is com.anthropic.core.JsonObject -> raw.values.mapValues { (_, v) -> v }
+            else -> return null
+        }
+        val question = map["question"]?.toString() ?: return null
+        val header = map["header"]?.toString() ?: ""
+        val multiSelect = when (val ms = map["multiSelect"]) {
+            is Boolean -> ms
+            is String -> ms.toBooleanStrictOrNull() ?: false
+            else -> false
+        }
+        val rawOptions = map["options"]
+        val options = when (rawOptions) {
+            is List<*> -> rawOptions.take(4).mapNotNull { parseOptionItem(it) }
+            else -> emptyList()
+        }
+        if (options.size < 2) return null
+        return QuestionData(question, header, options, multiSelect)
+    }
+
+    /**
+     * 解析单个选项，支持 JsonNode 和 Map 两种格式。
+     */
+    private fun parseOptionItem(raw: Any?): OptionData? {
+        val map = when (raw) {
+            is Map<*, *> -> raw.entries.associate { it.key.toString() to it.value }
+            is com.anthropic.core.JsonObject -> raw.values.mapValues { (_, v) -> v }
+            else -> return null
+        }
+        val label = map["label"]?.toString() ?: return null
+        val description = map["description"]?.toString() ?: ""
+        return OptionData(label, description)
+    }
+
+    /**
+     * 弹出 MODAL 问题对话框，阻塞等待用户回答。
+     * 文档要求：MODAL dialog，阻塞 Agent Loop 等待用户操作。
+     */
+    private fun showQuestionDialog(questions: List<QuestionData>): Map<Int, List<String>> {
+        val answers = mutableMapOf<Int, List<String>>()
+        // 可选备注文本
+        val notes = StringBuilder()
+
+        for ((index, q) in questions.withIndex()) {
+            val title = q.header.ifEmpty { "问题 ${index + 1}" }
+            val headerText = buildString {
+                append(title)
+                if (q.multiSelect) append("（可多选）")
+            }
+
+            val optionLabels = q.options.map { it.label }.toTypedArray()
+            val result = AtomicReference<List<String>?>()
+
+            if (q.multiSelect) {
+                val dialog = MultiSelectQuestionDialog(project, headerText, q.question, q.options)
+                result.set(dialog.showAndWait())
+            } else {
+                val choice = Messages.showEditableChooseDialog(
+                    q.question,
+                    headerText,
+                    Messages.getQuestionIcon(),
+                    optionLabels,
+                    optionLabels.firstOrNull() ?: "",
+                    null
+                )
+                result.set(if (choice != null) listOf(choice) else emptyList())
+            }
+
+            val selected = result.get() ?: emptyList()
+            answers[index] = selected
+
+            // 添加备注输入（最后一个问题后）
+            if (index == questions.size - 1) {
+                val noteResult = AtomicReference<String?>()
+                noteResult.set(
+                    Messages.showInputDialog(
+                        project,
+                        "可选的额外备注（回车跳过）:",
+                        "备注",
+                        Messages.getQuestionIcon(),
+                        null,
+                        null
+                    )
+                )
+                val note = noteResult.get()
+                if (!note.isNullOrBlank()) notes.append(note)
+            }
+        }
+
+        // 将备注附在结果中（通过一个特殊 key）
+        if (notes.isNotEmpty()) {
+            answers[-1] = listOf(notes.toString())
+        }
+
+        return answers
+    }
+
+    /**
+     * 格式化用户回答为返回给 LLM 的文本。
+     */
+    private fun formatAnswers(questions: List<QuestionData>, answers: Map<Int, List<String>>): String {
+        val sb = StringBuilder()
+        sb.appendLine("用户回答:")
+
+        for ((index, q) in questions.withIndex()) {
+            val selected = answers[index] ?: emptyList()
+            val header = q.header.ifEmpty { "问题 ${index + 1}" }
+            if (selected.isEmpty()) {
+                sb.appendLine("- ${header}: (未选择)")
+            } else {
+                val selectedText = selected.joinToString("、")
+                sb.appendLine("- ${header}: $selectedText")
+                // 附加选项描述
+                selected.forEach { label ->
+                    val desc = q.options.find { it.label == label }?.description
+                    if (!desc.isNullOrBlank()) {
+                        sb.appendLine("  ($label: $desc)")
+                    }
+                }
+            }
+        }
+
+        val notes = answers[-1]
+        if (notes != null && notes.isNotEmpty()) {
+            sb.appendLine("用户备注: ${notes.first()}")
+        }
+
+        return sb.toString().trimEnd()
+    }
+}
+
+/** AskUserQuestion 解析后的内部数据结构 */
+internal data class QuestionData(
+    val question: String,
+    val header: String,
+    val options: List<OptionData>,
+    val multiSelect: Boolean
+)
+
+/** AskUserQuestion 解析后的选项数据 */
+internal data class OptionData(
+    val label: String,
+    val description: String
+)
+
+/** Plan 管理工具：createPlan 步骤输入（D-03） */
+internal data class PlanStepInput(
+    val description: String,
+    val tool: String = "",
+    val files: List<String> = emptyList()
+)

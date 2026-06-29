@@ -33,9 +33,10 @@ object ToolRegistry {
     }
 
     fun get(name: String): Class<*>? = tools[name]
+    fun getToolInfo(name: String): ToolInfo? = infoMap[name]
     fun listAll(): List<Class<*>> = tools.values.toList()
     fun listNames(): List<String> = tools.keys.toList()
-    fun listBuiltin(): List<Class<*>> = tools.filter { !it.key.startsWith("mcp/") }.values.toList()
+    fun listBuiltin(): List<String> = tools.filter { !it.key.startsWith("mcp/") }.keys.toList()
     fun listMcp(): List<Class<*>> = tools.filter { it.key.startsWith("mcp/") }.values.toList()
     fun toToolDefinitions(): List<String> = tools.keys.toList()
 
@@ -117,12 +118,102 @@ object ToolRegistry {
             )
         )
         register(
-            "Task",
-            Task::class.java,
+            "Agent",
+            Agent::class.java,
             ToolInfo(
-                "Task",
+                "Agent",
                 "启动子代理处理独立子任务",
                 "子代理有独立上下文窗口，不会污染当前上下文。用于并行处理独立任务。"
+            )
+        )
+        register(
+            "WebSearch",
+            WebSearch::class.java,
+            ToolInfo(
+                "WebSearch",
+                "搜索网页，返回标题和 URL 列表",
+                "≤ 10 条/页，超出时用 offset 参数翻页。不支持缓存。"
+            )
+        )
+        register(
+            "WebFetch",
+            WebFetch::class.java,
+            ToolInfo(
+                "WebFetch",
+                "抓取 URL 内容并按提示提取信息",
+                "HTTP 自动升级为 HTTPS。不支持需认证的页面。"
+            )
+        )
+        register(
+            "AskUserQuestion",
+            AskUserQuestion::class.java,
+            ToolInfo(
+                "AskUserQuestion",
+                "向用户发起问题以澄清需求",
+                "一次 1-4 个问题，每题 2-4 个选项。支持多选。"
+            )
+        )
+        register(
+            "Symbol",
+            Symbol::class.java,
+            ToolInfo(
+                "Symbol",
+                "基于 IDE PSI 的语义导航（8 种操作）",
+                "goToDefinition/goToImplementation/findReferences/hover/documentSymbol/workspaceSymbol/incomingCalls/outgoingCalls"
+            )
+        )
+        register(
+            "Skill",
+            Skill::class.java,
+            ToolInfo(
+                "Skill",
+                "执行指定 Skill，将 SKILL.md 内容作为消息注入 conversation",
+                "LLM 根据用户需求自主判断触发时机。skill 参数为 Skill 名称或命令。"
+            )
+        )
+        register(
+            "createPlan",
+            CreatePlan::class.java,
+            ToolInfo(
+                "createPlan",
+                "创建/更新执行计划",
+                "任务涉及 3+ 文件或预计 5 轮以上完成时，在执行关键修改前先创建计划。执行中可随时用 listPlans/removePlan/reorderPlans/markPlanDone 管理。"
+            )
+        )
+        register(
+            "listPlans",
+            ListPlans::class.java,
+            ToolInfo(
+                "listPlans",
+                "查看当前计划状态",
+                "返回所有计划项及其当前状态。"
+            )
+        )
+        register(
+            "removePlan",
+            RemovePlan::class.java,
+            ToolInfo(
+                "removePlan",
+                "删除指定计划项（仅 PAUSED 状态可删）",
+                "传入 planId 删除对应计划项。"
+            )
+        )
+        register(
+            "reorderPlans",
+            ReorderPlans::class.java,
+            ToolInfo(
+                "reorderPlans",
+                "重排 PAUSED 计划项的顺序",
+                "传入新的 planId 序列，调整剩余 PAUSED 项的执��顺序。"
+            )
+        )
+        register(
+            "markPlanDone",
+            MarkPlanDone::class.java,
+            ToolInfo(
+                "markPlanDone",
+                "将指定计划项标记为完成",
+                "传入 planId，将对应计划项标记为 COMPLETED。"
             )
         )
     }

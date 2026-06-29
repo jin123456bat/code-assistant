@@ -1,6 +1,6 @@
 # 事件总线契约
 
-> **原始来源：** `docs/tech-spec.md`（已拆分，内容归入 `docs/specs/` 各文件）
+> **原始来源：** `tech-spec.md`（已拆分，内容归入 `specs/` 各文件）
 
 本文档定义 `MessageBus` 的所有事件 Topic、消息类型、字段、发布者和订阅者。事件通过 IntelliJ
 `project.messageBus.syncPublisher` 同步发布，所有订阅者在 EDT 上接收。

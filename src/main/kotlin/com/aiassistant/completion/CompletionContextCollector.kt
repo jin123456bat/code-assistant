@@ -14,7 +14,7 @@ import com.intellij.psi.PsiFile
  * - suffix: 光标后的纯文本
  * - language: 文件语言标识
  * - fileName: 文件名
- * - smartContext: PSI 增强上下文（import/namespace/父元素等），可能为 null
+ * - smartContext: 增强上下文（PSI 语义 + 兄弟文件风格，预算层合并）。PSI 在前，sibling 在后。
  */
 data class CompletionContext(
     val prefix: String,
@@ -28,7 +28,8 @@ data class CompletionContext(
  * 补全上下文采集器。
  * 负责从当前编辑器提取 FIM（Fill-in-the-Middle）所需的双层上下文：
  * 1. 核心层：纯文本 prefix + suffix，受 CharBudgetManager 预算约束
- * 2. PSI 增强层：通过 [selectPsiStrategy] 选择语言策略提取结构化信息
+ * 2. 增强层：PSI 语义上下文（函数签名、类型信息）+ 兄弟文件 smartContext（编码风格）
+ *    二者并行采集后在预算层合并，PSI 优先保留（体积小、信息密度高）。
  */
 class CompletionContextCollector {
     companion object {
@@ -58,8 +59,18 @@ class CompletionContextCollector {
         // 2. suffix：光标后全部内容
         var suffix = text.subSequence(caretOffset, text.length).toString()
 
-        // 3. 兄弟文件增强：仅当上下文 < 8K 时触发，避免 I/O 拖慢补全延迟
-        //    （8K 对 FIM 已足够，兄弟文件搜索的 Jaccard 相似度计算耗时不可控）
+        // 3. PSI 语义上下文：体积小（函数签名 + use/import）、信息密度高，始终采集
+        val psiFile = ReadAction.compute<PsiFile?, Throwable> {
+            PsiDocumentManager.getInstance(project).getPsiFile(document)
+        }
+        val psiContext = if (psiFile != null) {
+            ReadAction.compute<String?, Throwable> {
+                PsiCompletionStrategy.collectContext(editor, project, psiFile, language)
+            }
+        } else null
+
+        // 4. 兄弟文件增强：仅当上下文 < 8K 时触发，避免 I/O 拖慢补全延迟
+        //    兄弟文件提供编码风格、项目模式，与 PSI 语义互补
         var smartContext: String? = null
         if (prefix.length + suffix.length < 8192 && virtualFile != null) {
             val currentImports = ContextEnhancer.extractImportLinesFromText(prefix, language)
@@ -70,40 +81,40 @@ class CompletionContextCollector {
                 project
             )
             if (siblingPaths.isNotEmpty()) {
-                smartContext = try {
-                    java.io.File(siblingPaths.first()).readText().take(
-                        MAX_CHARS - prefix.length - suffix.length
-                    )
-                } catch (_: Exception) { null }
+                // 预算分配：PSI 优先保留，兄弟文件填充剩余空间
+                val psiLen = psiContext?.length ?: 0
+                val budget = MAX_CHARS - prefix.length - suffix.length - psiLen
+                if (budget > 0) {
+                    smartContext = try {
+                        siblingPaths.joinToString(separator = "\n") { path ->
+                            java.io.File(path).readText()
+                        }.take(budget)
+                    } catch (_: Exception) {
+                        null
+                    }
+                }
             }
         }
 
-        // 4. 如果超过 16K，截断（prefix 占 2/3，suffix 占 1/3）
-        val total = prefix.length + suffix.length + (smartContext?.length ?: 0)
+        // 5. 合并增强上下文：PSI 在前（语义优先）+ smartContext 在后（风格参考）
+        val mergedContext = listOfNotNull(psiContext, smartContext)
+            .joinToString(separator = "\n").takeIf { it.isNotBlank() }
+
+        // 6. 如果超过 16K，截断（prefix 占 2/3，suffix 占 1/3。增强上下文已在上一步预算控制中处理）
+        val total = prefix.length + suffix.length + (mergedContext?.length ?: 0)
         if (total > MAX_CHARS) {
             val prefixBudget = (MAX_CHARS * CharBudgetManager.PREFIX_RATIO).toInt()
             prefix = prefix.takeLast(prefixBudget)
             val remaining = MAX_CHARS - prefix.length
             suffix = suffix.take(remaining.coerceAtLeast(0))
-            smartContext = null
         }
-
-        // 5. PSI 增强层
-        val psiFile = ReadAction.compute<PsiFile?, Throwable> {
-            PsiDocumentManager.getInstance(project).getPsiFile(document)
-        }
-        val psiContext = if (psiFile != null) {
-            ReadAction.compute<String?, Throwable> {
-                PsiCompletionStrategy.collectContext(editor, project, psiFile, language)
-            }
-        } else null
 
         return CompletionContext(
             prefix = prefix,
             suffix = suffix,
             language = language,
             fileName = fileName,
-            smartContext = smartContext ?: psiContext
+            smartContext = mergedContext
         )
     }
 

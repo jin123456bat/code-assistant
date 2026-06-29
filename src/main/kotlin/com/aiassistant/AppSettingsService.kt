@@ -30,8 +30,9 @@ class AppSettingsService {
         private const val PROMPT_KEY = "$SERVICE_NAME.PROMPT"
         private const val COMPLETION_ENABLED_KEY = "$SERVICE_NAME.COMPLETION.ENABLED"
         private const val COMPLETION_MAX_TOKENS_KEY = "$SERVICE_NAME.COMPLETION.MAX_TOKENS"
-        private const val TOKEN_DISPLAY_KEY = "$SERVICE_NAME.TOKEN_DISPLAY"
-
+        private const val AGENT_MAX_LOOPS_KEY = "$SERVICE_NAME.AGENT.MAX_LOOPS"
+        private const val AGENT_MAX_CONCURRENCY_KEY = "$SERVICE_NAME.AGENT.MAX_CONCURRENCY"
+        private const val COMMIT_ENABLED_KEY = "$SERVICE_NAME.COMMIT.ENABLED"
         val AVAILABLE_MODELS = listOf(
             "deepseek-v4-flash" to "DeepSeek V4 Flash",
             "deepseek-v4-pro" to "DeepSeek V4 Pro"
@@ -43,12 +44,13 @@ class AppSettingsService {
         val DEFAULT_COMMIT_PROMPT_ZH =
             """根据以下 git diff 生成简洁的中文 git commit message，遵循 Conventional Commits 规范（feat:/fix:/refactor:/chore:/docs:/test:）。只输出 commit message，不要解释。Diff 在用户消息中提供。""".trimIndent()
 
-        fun getInstance(): AppSettingsService = service()
+        val DEFAULT_MERGE_COMMIT_PROMPT =
+            """Generate a concise merge commit message describing the merged content.""".trimIndent()
 
-        fun isTokenDisplayEnabled(): Boolean {
-            return com.intellij.ide.util.PropertiesComponent.getInstance()
-                .getBoolean(TOKEN_DISPLAY_KEY, false)
-        }
+        val DEFAULT_MERGE_COMMIT_PROMPT_ZH =
+            """生成一个简洁的 merge commit message，描述合并的内容。""".trimIndent()
+
+        fun getInstance(): AppSettingsService = service()
     }
 
     fun getApiKey(): String? {
@@ -93,4 +95,42 @@ class AppSettingsService {
         val raw = com.intellij.ide.util.PropertiesComponent.getInstance().getValue(COMPLETION_MAX_TOKENS_KEY)
         return raw?.toIntOrNull()?.coerceIn(1, 1024) ?: 256
     }
+
+    fun setCompletionMaxTokens(tokens: Int) =
+        com.intellij.ide.util.PropertiesComponent.getInstance()
+            .setValue(COMPLETION_MAX_TOKENS_KEY, tokens.coerceIn(1, 1024).toString())
+
+    fun getAgentMaxLoops(): Int {
+        val raw =
+            com.intellij.ide.util.PropertiesComponent.getInstance().getValue(AGENT_MAX_LOOPS_KEY)
+        return raw?.toIntOrNull()?.coerceAtLeast(0) ?: 20
+    }
+
+    fun setAgentMaxLoops(loops: Int) =
+        com.intellij.ide.util.PropertiesComponent.getInstance()
+            .setValue(AGENT_MAX_LOOPS_KEY, loops.coerceAtLeast(0).toString())
+
+    fun getAgentMaxConcurrency(): Int {
+        val raw = com.intellij.ide.util.PropertiesComponent.getInstance()
+            .getValue(AGENT_MAX_CONCURRENCY_KEY)
+        return raw?.toIntOrNull()?.coerceIn(1, 10) ?: 3
+    }
+
+    fun setAgentMaxConcurrency(concurrency: Int) =
+        com.intellij.ide.util.PropertiesComponent.getInstance()
+            .setValue(AGENT_MAX_CONCURRENCY_KEY, concurrency.coerceIn(1, 10).toString())
+
+    /**
+     * GenerateCommitAction 启用开关，默认 true。
+     * 文档 §九 未要求暴露此开关到 Settings UI，但代码需要此配置项支撑功能。
+     */
+    fun isCommitEnabled(): Boolean {
+        val raw =
+            com.intellij.ide.util.PropertiesComponent.getInstance().getValue(COMMIT_ENABLED_KEY)
+        return raw == null || raw.toBooleanStrictOrNull() != false
+    }
+
+    fun setCommitEnabled(enabled: Boolean) =
+        com.intellij.ide.util.PropertiesComponent.getInstance()
+            .setValue(COMMIT_ENABLED_KEY, enabled.toString())
 }

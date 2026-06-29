@@ -1,6 +1,6 @@
 # 线程模型
 
-> **原始来源：** `docs/tech-spec.md`（已拆分，内容归入 `docs/specs/` 各文件）
+> **原始来源：** `tech-spec.md`（已拆分，内容归入 `specs/` 各文件）
 
 本文档描述 Code Assistant Agent Mode 的线程模型总览，包括各线程职责、跨线程通信规则。
 

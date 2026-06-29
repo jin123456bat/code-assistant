@@ -34,8 +34,8 @@ class SettingsPage : JPanel(BorderLayout()) {
         content.add(
             card(
                 "快捷键参考",
-                "打开面板: Ctrl+Shift+K / ⌘⇧K",
-                "发送消息: Enter    换行: Shift+Enter    停止生成: Escape"
+                "打开面板: Ctrl+Shift+K / Cmd+Shift+K    发送消息: Enter（换行: Shift+Enter）    关闭 Popup: Escape    新建会话: Ctrl+Shift+N / Cmd+Shift+N",
+                ""
             )
         )
         content.add(Box.createVerticalStrut(10))

@@ -25,6 +25,16 @@ internal object ToolInput {
         }
     }
 
+    fun bool(input: Any?, key: String): Boolean? {
+        val value = value(input, key) ?: return null
+        return when (value) {
+            is Boolean -> value
+            is String -> value.toBooleanStrictOrNull()
+            is JsonValue -> runCatching { value.convert(Boolean::class.java) }.getOrNull()
+            else -> value.toString().removeSurrounding("\"").toBooleanStrictOrNull()
+        }
+    }
+
     fun map(input: Any?): Map<String, Any?> {
         return when (input) {
             is JsonObject -> input.values.mapValues { (_, value) -> jsonAny(value) }

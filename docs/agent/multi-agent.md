@@ -41,25 +41,15 @@
 - 子 Agent 的工具范围受白名单/黑名单限制，不会越权操作
 - 对齐 Claude Code：子 Agent 继承父会话的权限模式，父 Agent 处于高权限模式时子 Agent 强制继承
 
-### 权限继承
+### 实现机制
 
-父 Agent 在审批过程中可进入两种高权限模式：
+**子 Agent 在 `ToolApprovalPolicy.needsUserApproval()`
+最顶部（危险命令检测之前）通过 `session.isSubAgent` 守卫直接返回 `false`，跳过所有审批检查。**
 
-| 权限模式                | 触发条件              | 行为                                    |
-|---------------------|-------------------|---------------------------------------|
-| `bypassPermissions` | 用户在审批弹窗中选择"允许此会话" | 当前会话内所有后续工具调用跳过审批，全部自动放行              |
-| `acceptEdits`       | 用户授予编辑权限          | 当前会话内文件编辑类操作（Write/Edit）自动批准，其余工具仍需审批 |
+`AgentSession.isSubAgent` 为计算属性（`parentId != null`），无需额外状态维护。这意味着子 Agent
+创建时就自动获得免审批权限——无论父 Agent 当前处于什么权限状态。
 
-父 Agent 的权限状态决定子 Agent行为：
-
-| 父权限状态              | 子 Agent行为              |
-|--------------------|------------------------|
-| 首次使用已确认            | 子 Agent内所有工具自动放行，不弹审批窗 |
-| 父处于 bypass 模式      | 子 Agent强制继承，全部操作跳过审批   |
-| 父处于 acceptEdits 模式 | 子 Agent强制继承，编辑类操作自动批准  |
-
-> 对齐 Claude Code：父 Agent 处于高权限模式（`bypassPermissions`、`acceptEdits`）时，子 Agent强制继承该模式且
-**不可被子 Agent覆盖**。子 Agent可能有不同的 system prompt 和行为约束，因此继承高权限模式意味着它们获得完全的自主执行权限。
+> 对齐 Claude Code：子 Agent 继承父会话的权限模式。当前实现为最简策略——只要是子 Agent 就全部放行，不做细粒度权限区分。
 
 ### 工具白名单
 
@@ -105,6 +95,9 @@
 | MCP 工具           | 首次需审批                                       | 一律放行（可整体禁用）                        |
 | 危险命令（`rm -rf` 等） | 强制二次确认                                      | 一律放行（父 Agent 已建立信任，子 Agent 工具范围受限） |
 
+**实现要点：** 子 Agent 免审批通过 `ToolApprovalPolicy.needsUserApproval()` 顶部守卫实现，无需在子
+Agent 的 `AgentLoop` 或 `ToolExecutor` 中做额外判断。审批跳过发生在策略层，对工具执行路径透明。
+
 ---
 
 ## 四、父子通信
@@ -137,9 +130,11 @@
 - **文件修改通知**：子 Agent 完成时，`MultiAgentManager` 自动失效父 Agent 中被子 Agent 修改过的文件的
   `modificationStamp`，迫使父 Agent 下次 `Edit` 前必须重新 `Read`
   。参见 [前置校验](../agent/tools.md#七前置校验)
-- **数据流路径**：子 Agent 的 `Flow<AgentEvent>` 直接 collect 到父 `ChatViewModel` 渲染（不经过
-  `MultiAgentManager` 转发）。子 Agent 的 `ToolCallCard` 锁在 `MultiAgentBlock` 卡片内部独立渲染，
-  不混入父的 `messageContainer`。
+- **数据流路径**：子 Agent 的 `AgentLoop` 回调（`onToken`, `onToolCall`, `onToolCallStateChanged`）由
+  `MultiAgentManager` 封装为 `SubAgentEvent` 密封类事件，通过回调链
+  `MultiAgentManager → ToolExecutor → AgentLoop → ChatViewModel → ChatPage` 传递到
+  `MultiAgentBlock` UI 组件。`ChatViewModel` 负责 EDT 线程调度（`SwingUtilities.invokeLater`）。
+  子 Agent 的 `ToolCallCard` 在 `MultiAgentBlock` 卡片内部独立渲染，不混入父的 `messageContainer`。
 - **Chat 页面展示**：仅显示 `🤖 Agent: 重构 UserService → 已完成 (sub-session #42)，摘要: ...`。子 Agent
   的 ToolCallCard 出现在自己的 Session 视图中，不嵌入父的 ChatPage。
 

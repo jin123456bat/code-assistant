@@ -47,9 +47,8 @@
         </action>
         <action
             id="AiAssistant.GenerateCommit"
-            class="com.aiassistant.actions.GenerateCommitAction"
-            text="action.generate.commit"
-            description="action.generate.commit.desc"
+            class="com.aiassistant.actions.GenerateCommitAction" text="Generate Commit Message"
+                description="Generate commit message from pending changes using AI"
             icon="/icons/icon.svg">
             <add-to-group group-id="Vcs.MessageActionGroup" anchor="last"/>
         </action>

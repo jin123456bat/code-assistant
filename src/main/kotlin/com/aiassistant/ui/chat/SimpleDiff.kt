@@ -1,10 +1,10 @@
-package com.aiassistant.ui
+package com.aiassistant.ui.chat
 
 /** diff 行的类型：新增、删除、上下文（未变） */
 enum class DiffKind { ADD, DEL, CTX }
 
 /** 单行 diff 记录 */
-data class DiffLine(val kind: DiffKind, val text: String)
+data class DiffLine(val kind: DiffKind, val content: String)
 
 /**
  * 纯函数行级 diff 工具。
@@ -23,11 +23,7 @@ object SimpleDiff {
      *
      * DEL 在对应位置的 ADD 之前出现，符合标准 diff 习惯。
      */
-    fun diff(oldText: String, newText: String): List<DiffLine> {
-        // 空文本特殊处理：split("") 会产生一个空字符串元素，需要过滤
-        val oldLines = if (oldText.isEmpty()) emptyList() else oldText.split("\n")
-        val newLines = if (newText.isEmpty()) emptyList() else newText.split("\n")
-
+    fun diff(oldLines: List<String>, newLines: List<String>): List<DiffLine> {
         if (oldLines.isEmpty() && newLines.isEmpty()) return emptyList()
 
         // 计算 LCS 长度矩阵（DP）
@@ -83,6 +79,7 @@ object SimpleDiff {
                     reversed.add(DiffLine(DiffKind.CTX, oldLines[i - 1]))
                     i--; j--
                 }
+
                 j > 0 && (i == 0 || lcs[i][j - 1] >= lcs[i - 1][j]) -> {
                     // 新版本多出的行：ADD（逆序，ADD 在 DEL 后面 → 反转后在前面？
                     // 逆序回溯时先遇到 ADD，反转后 ADD 会在 DEL 之后；
@@ -92,6 +89,7 @@ object SimpleDiff {
                     reversed.add(DiffLine(DiffKind.ADD, newLines[j - 1]))
                     j--
                 }
+
                 else -> {
                     // 旧版本独有的行：DEL
                     reversed.add(DiffLine(DiffKind.DEL, oldLines[i - 1]))
@@ -128,7 +126,8 @@ object SimpleDiff {
                     when (lines[i].kind) {
                         DiffKind.DEL -> dels.add(lines[i])
                         DiffKind.ADD -> adds.add(lines[i])
-                        DiffKind.CTX -> { /* 不会走到这里 */ }
+                        DiffKind.CTX -> { /* 不会走到这里 */
+                        }
                     }
                     i++
                 }
@@ -138,5 +137,27 @@ object SimpleDiff {
             }
         }
         return result
+    }
+
+    /**
+     * 将 [DiffLine] 列表格式化为 unified diff 字符串。
+     *
+     * 输出格式与 `git diff` 一致：
+     * - 头部为 `--- oldName` / `+++ newName`
+     * - 每行前缀：` ` (CTX)、`-` (DEL)、`+` (ADD)
+     */
+    fun toUnifiedDiff(oldName: String, newName: String, diff: List<DiffLine>): String {
+        if (diff.isEmpty()) return ""
+        return buildString {
+            append("--- $oldName\n")
+            append("+++ $newName\n")
+            for (line in diff) {
+                when (line.kind) {
+                    DiffKind.CTX -> append(" ${line.content}\n")
+                    DiffKind.DEL -> append("-${line.content}\n")
+                    DiffKind.ADD -> append("+${line.content}\n")
+                }
+            }
+        }
     }
 }

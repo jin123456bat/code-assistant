@@ -3,8 +3,9 @@ package com.aiassistant.agent
 import com.fasterxml.jackson.annotation.JsonClassDescription
 import com.fasterxml.jackson.annotation.JsonPropertyDescription
 
-// ponytail: 8 Tool 类，Anthropic SDK 自动从类注解生成 JSON Schema。每个工具都包含 timeout（秒，0=不限）
-// 工具名对齐 Claude Code：Read / Write / Edit / Bash / Glob / Grep / ReadLints / Task
+// ponytail: Tool 数据类，Anthropic SDK 自动从类注解生成 JSON Schema。每个工具都包含 timeout（秒，0=不限）
+// 工具名对齐文档 tools.md §一：Read / Write / Edit / Bash / Glob / Grep / readLints / Agent /
+//   WebSearch / WebFetch / AskUserQuestion / Skill / Symbol + 5 个 Plan 管理工具
 
 @JsonClassDescription("读取项目内指定文件的内容")
 class Read {
@@ -58,15 +59,21 @@ class Bash {
 
     @JsonPropertyDescription("超时秒数，必填。快速命令设 10-30s，构建/测试设 120-300s，长时间任务设 600s，0=不限")
     var timeout: Int = 0
+
+    @JsonPropertyDescription("是否为危险命令（如 rm -rf /、git push --force、sudo、chmod 777），bool 类型，必填。dangerous=true 时始终弹窗二次确认，无视白名单")
+    var dangerous: Boolean = false
 }
 
-@JsonClassDescription("列出项目目录结构")
+@JsonClassDescription("列出项目目录结构。最多返回 50 个条目（文件+目录）。如果超出此限制，结果会被截断并在返回值中标注。请用 dirPath/maxDepth 缩小范围，或用 offset 参数翻页获取更多条目。")
 class Glob {
     @JsonPropertyDescription("目录相对路径，可选，默认项目根目录")
     var dirPath: String? = null
 
     @JsonPropertyDescription("最大递归深度，默认 2 层")
     var maxDepth: Int? = null
+
+    @JsonPropertyDescription("翻页起始偏移，默认 0。超出 50 条目时用 offset=50 翻页获取后续条目")
+    var offset: Int? = null
 
     @JsonPropertyDescription("超时秒数，必填。建议 5-10s，大项目设 15-30s，0=不限")
     var timeout: Int = 0
@@ -76,6 +83,9 @@ class Glob {
 class Grep {
     @JsonPropertyDescription("搜索关键词")
     var query: String = ""
+
+    @JsonPropertyDescription("文件名过滤模式，可选，如 *.kt、*.java")
+    var filePattern: String? = null
 
     @JsonPropertyDescription("超时秒数，必填。建议 5-15s，大项目设 20-30s，0=不限")
     var timeout: Int = 0
@@ -90,11 +100,135 @@ class ReadLints {
     var timeout: Int = 0
 }
 
+@JsonClassDescription("执行指定 Skill。LLM 根据用户需求自主判断触发时机，将 SKILL.md 内容作为消息注入 conversation。")
+class Skill {
+    @JsonPropertyDescription("Skill 名称或命令，如 code-review 或 /review")
+    var skill: String = ""
+
+    @JsonPropertyDescription("可选参数字符串，传递给 Skill")
+    var args: String? = null
+
+    @JsonPropertyDescription("超时秒数，必填。建议 5-10s，0=不限")
+    var timeout: Int = 0
+}
+
 @JsonClassDescription("启动子代理处理子任务，子代理完成后返回结果摘要")
-class Task {
-    @JsonPropertyDescription("子代理的任务描述")
-    var task: String = ""
+class Agent {
+    @JsonPropertyDescription("子代理的任务描述，必填")
+    var prompt: String = ""
 
     @JsonPropertyDescription("超时秒数，必填。简单任务设 30-60s，复杂任务设 120-300s，0=不限")
+    var timeout: Int = 0
+
+    @JsonPropertyDescription("是否在后台异步执行，必填。true=异步（父代理立即返回），false=同步（父代理阻塞等待子完成）")
+    var run_in_background: Boolean = false
+}
+
+// ── 扩展工具：WebSearch / WebFetch / AskUserQuestion / Symbol ──
+
+@JsonClassDescription("搜索网页，返回标题和 URL 列表。≤ 10 条/页，超出时用 offset 参数翻页。不支持缓存。")
+class WebSearch {
+    @JsonPropertyDescription("搜索关键词")
+    var query: String = ""
+
+    @JsonPropertyDescription("限定域名，可选")
+    var allowedDomains: List<String>? = null
+
+    @JsonPropertyDescription("排除域名，可选")
+    var blockedDomains: List<String>? = null
+
+    @JsonPropertyDescription("翻页起始位置，默认 0")
+    var offset: Int? = null
+
+    @JsonPropertyDescription("超时秒数，必填。建议 10-30s，0=不限")
+    var timeout: Int = 0
+}
+
+@JsonClassDescription("抓取 URL 内容并按提示提取信息。HTTP 自动升级为 HTTPS。不支持需认证的页面。不支持缓存。")
+class WebFetch {
+    @JsonPropertyDescription("要抓取的 URL")
+    var url: String = ""
+
+    @JsonPropertyDescription("描述要提取的内容")
+    var prompt: String = ""
+
+    @JsonPropertyDescription("超时秒数，必填。建议 10-30s，0=不限")
+    var timeout: Int = 0
+}
+
+@JsonClassDescription("向用户发起问题以澄清需求。一次 1-4 个问题，每题 2-4 个选项。支持多选。")
+class AskUserQuestion {
+    @JsonPropertyDescription("问题列表，1-4 个")
+    var questions: List<Map<String, Any>> = emptyList()
+
+    @JsonPropertyDescription("超时秒数，必填。建议 120-300s（等待用户手动操作），0=不限")
+    var timeout: Int = 0
+}
+
+@JsonClassDescription("基于 IDE PSI 的语义导航（8 种操作）。goToDefinition 跳转定义、goToImplementation 查实现、findReferences 查引用（≤50）、hover 类型提示、documentSymbol 文件结构（≤100）、workspaceSymbol 全局搜索（≤20，需 query）、incomingCalls/outgoingCalls 调用链（≤50）。")
+class Symbol {
+    @JsonPropertyDescription("操作类型: goToDefinition, goToImplementation, findReferences, hover, documentSymbol, workspaceSymbol, incomingCalls, outgoingCalls")
+    var operation: String = ""
+
+    @JsonPropertyDescription("项目内相对路径（workspaceSymbol 不需要）")
+    var filePath: String = ""
+
+    @JsonPropertyDescription("行号 1-based（workspaceSymbol 不需要）")
+    var line: Int = 0
+
+    @JsonPropertyDescription("字符位置 1-based（workspaceSymbol 不需要）")
+    var character: Int = 0
+
+    @JsonPropertyDescription("符号名查询（仅 workspaceSymbol 需要）")
+    var query: String? = null
+
+    @JsonPropertyDescription("超时秒数，必填。建议 5-15s，0=不限")
+    var timeout: Int = 0
+}
+
+// ── Plan 管理工具 ──
+
+@JsonClassDescription("创建/更新执行计划。当任务涉及 3 个以上文件或预计需要 5 轮以上完成时，在执行关键修改前先创建执行计划")
+class CreatePlan {
+    @JsonPropertyDescription("任务描述，一句话概括总体目标")
+    var task: String = ""
+
+    @JsonPropertyDescription("计划项列表，每项含 description(描述)、tool(建议工具名)、files(涉及文件路径列表)")
+    var plans: List<Map<String, Any>> = emptyList()
+
+    @JsonPropertyDescription("超时秒数，必填。建议 10-20s，0=不限")
+    var timeout: Int = 0
+}
+
+@JsonClassDescription("查看当前计划的所有计划项及状态")
+class ListPlans {
+    @JsonPropertyDescription("超时秒数，必填。建议 5s，0=不限")
+    var timeout: Int = 0
+}
+
+@JsonClassDescription("删除指定计划项，仅 PAUSED 状态可删除")
+class RemovePlan {
+    @JsonPropertyDescription("要删除的计划项 ID")
+    var planId: String = ""
+
+    @JsonPropertyDescription("超时秒数，必填。建议 5s，0=不限")
+    var timeout: Int = 0
+}
+
+@JsonClassDescription("重排剩余 PAUSED 计划项的执行顺序，传入新的 planId 序列")
+class ReorderPlans {
+    @JsonPropertyDescription("新的 planId 顺序列表，按需要的执行顺序排列")
+    var planIds: List<String> = emptyList()
+
+    @JsonPropertyDescription("超时秒数，必填。建议 5s，0=不限")
+    var timeout: Int = 0
+}
+
+@JsonClassDescription("将指定计划项标记为 COMPLETED")
+class MarkPlanDone {
+    @JsonPropertyDescription("要标记为完成的计划项 ID")
+    var planId: String = ""
+
+    @JsonPropertyDescription("超时秒数，必填。建议 5s，0=不限")
     var timeout: Int = 0
 }

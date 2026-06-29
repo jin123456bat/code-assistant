@@ -35,6 +35,7 @@ GenerateCommitAction.actionPerformed()
         │     ├── 未自定义 → 根据系统语言选择中/英文默认 prompt
         │     └── 拆分: systemPrompt（指令）+ userPrompt（diff 数据）
         │
+        ├── indicator.checkCanceled()  // 清空前检查取消，防止编辑器内容被清空后任务取消导致数据丢失
         ├── invokeAndWait { editor.document.setText("") }  // 清空
         │
         └── callDeepSeek(apiKey, systemPrompt, userPrompt, onDelta)
@@ -81,6 +82,10 @@ GenerateCommitAction.actionPerformed()
 | 总大小上限           | 50,000 字符          |
 | 二进制文件           | 不处理（检测 null 字符后跳过） |
 
+**路径列表截断说明**：当用户勾选文件数超过 50 个时，路径列表按用户勾选文件的原始顺序取前 50 个。该截断发生在
+git diff 命令执行前，仅影响传递给 `git diff` 的路径参数数量，不影响 diff 内容的后续截断策略（详见 §九
+超大 Diff）。
+
 ## 四、Prompt 模板
 
 ### 英文默认 Prompt（系统语言非中文时）
@@ -118,7 +123,8 @@ The diff is provided in the user message.
 
 API 调用时，prompt 被拆分为两个角色：
 
-- **`system`** — 指令部分（`{diff}` 之前的文本）
+- **`system`** — 指令部分（`{diff}` 之前和之后的文本拼接，中间的 `{diff}` 占位符被替换为 diff 内容后放入
+  `user`）
 - **`user`** — 数据部分（diff 内容本身）
 
 这样分离能让 LLM 更好地区分"指令"和"数据"，减少 prompt injection 风险。
@@ -176,7 +182,8 @@ Content-Type: application/json
 ```xml
 
 <action id="AiAssistant.GenerateCommit" class="com.aiassistant.actions.GenerateCommitAction"
-        text="Generate Commit Message">
+        text="%action.generate.commit">
+    <!-- 实际文本值来自 messages_*.properties 中的 action.generate.commit 键 -->
     <add-to-group group-id="Vcs.MessageActionGroup" anchor="last" />
 </action>
 ```

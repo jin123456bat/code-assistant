@@ -112,27 +112,48 @@ class McpPage(project: Project) : JPanel(BorderLayout()) {
         val dimHex = AppColors.textSecondary.toHtmlColor()
 
         // 状态指示灯 + 名称 + 状态
+        // 文档 §六 定义: 🟢 RUNNING / 🟡 INITIALIZING / 🔴 CRASHED / ERROR
         val (dotColor, stateLabel) = when (server.state) {
             McpManager.State.RUNNING -> greenHex to "RUNNING"
             McpManager.State.INITIALIZING -> amberHex to "INITIALIZING"
-            McpManager.State.CONFIGURED -> amberHex to "CONFIGURED"
+            McpManager.State.CONFIGURED -> dimHex to "CONFIGURED"
             McpManager.State.CRASHED -> redHex to "CRASHED"
             McpManager.State.ERROR -> redHex to "ERROR"
+            McpManager.State.INIT_ERROR -> redHex to "ERROR"
             else -> dimHex to "${server.state}"
         }
-        val info = JLabel(
-            "<html>" +
-                    "<span style='display:inline-block;width:8px;height:8px;border-radius:50%;background:$dotColor;margin-right:6px'>&nbsp;</span>" +
-                    "<b>${server.config.id}</b>" +
-                    " <span style='color:$dotColor;font-size:11px'>$stateLabel</span>" +
-                    "<br><span style='color:$dimHex;font-size:11px'>command: ${server.config.command}</span>" +
-                    "<br><span style='color:$dimHex;font-size:11px'>tools: ${
-                        server.tools.joinToString(
-                            ", "
-                        ).ifEmpty { "(none)" }
-                    } (${server.tools.size})</span>" +
-                    "</html>"
-        )
+
+        // 构建卡片 HTML，包含状态指示灯、名称、状态、命令、工具列表等
+        val htmlBuilder = StringBuilder().apply {
+            append("<html>")
+            append("<span style='display:inline-block;width:8px;height:8px;border-radius:50%;background:$dotColor;margin-right:6px'>&nbsp;</span>")
+            append("<b>${server.config.id}</b>")
+            append(" <span style='color:$dotColor;font-size:11px'>$stateLabel</span>")
+            append("<br><span style='color:$dimHex;font-size:11px'>command: ${server.config.command}</span>")
+            append(
+                "<br><span style='color:$dimHex;font-size:11px'>tools: ${
+                server.registeredToolNames.joinToString(
+                    ", "
+                ).ifEmpty { "(none)" }
+            } (${server.registeredToolNames.size})</span>")
+
+            // 初始化中：显示"最多等待 3 分钟"提示
+            if (server.state == McpManager.State.INITIALIZING) {
+                append("<br><span style='color:$dimHex;font-size:11px'>正在安装依赖 (npm install)...</span>")
+                append("<br><span style='color:$dimHex;font-size:11px'>最多等待 3 分钟</span>")
+            }
+
+            // 崩溃/错误状态：显示错误详情
+            val showErrorDetail = server.state == McpManager.State.CRASHED
+                    || server.state == McpManager.State.ERROR
+                    || server.state == McpManager.State.INIT_ERROR
+            if (showErrorDetail && server.lastErrorMessage != null) {
+                append("<br><span style='color:$redHex;font-size:11px'>错误: ${server.lastErrorMessage}</span>")
+            }
+
+            append("</html>")
+        }
+        val info = JLabel(htmlBuilder.toString())
         card.add(info, BorderLayout.CENTER)
 
         // 操作按钮
@@ -140,12 +161,17 @@ class McpPage(project: Project) : JPanel(BorderLayout()) {
         actions.add(JButton("▶ 测试连接").apply {
             font = font.deriveFont(11f)
             addActionListener {
-                val message = manager.testConnection(server.config.id)
+                val result = manager.testConnection(server.config.id)
+                val message = if (result.success) {
+                    "🟢 连接正常，发现 ${result.toolCount ?: 0} 个工具 (${result.latencyMs}ms)"
+                } else {
+                    "🔴 连接失败: ${result.errorMessage ?: "未知错误"}"
+                }
                 JOptionPane.showMessageDialog(
                     this@McpPage,
                     message,
                     "MCP 测试连接",
-                    if (message.startsWith("🟢")) JOptionPane.INFORMATION_MESSAGE else JOptionPane.WARNING_MESSAGE
+                    if (result.success) JOptionPane.INFORMATION_MESSAGE else JOptionPane.WARNING_MESSAGE
                 )
             }
         })
@@ -199,7 +225,7 @@ class McpPage(project: Project) : JPanel(BorderLayout()) {
     private fun McpManager.McpServer.primaryActionLabel(): String =
         when (state) {
             McpManager.State.RUNNING, McpManager.State.INITIALIZING -> "⏹ 停止"
-            McpManager.State.ERROR, McpManager.State.CRASHED -> "🔄 重连"
+            McpManager.State.ERROR, McpManager.State.CRASHED, McpManager.State.INIT_ERROR -> "🔄 重连"
             else -> "▶ 启动"
         }
 }

@@ -32,11 +32,13 @@ class McpManagerTest {
         Proxy.newProxyInstance(
             Project::class.java.classLoader,
             arrayOf(Project::class.java)
-        ) { _, method, _ ->
+        ) { proxy, method, args ->
             when (method.name) {
                 "getBasePath" -> basePath
                 "isDisposed" -> false
                 "toString" -> "TestProject($basePath)"
+                "hashCode" -> System.identityHashCode(proxy)
+                "equals" -> proxy === (args?.getOrNull(0))
                 else -> null
             }
         } as Project

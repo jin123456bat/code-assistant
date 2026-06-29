@@ -126,7 +126,7 @@ Danger Button（终止计划、删除会话）:
 │          │ border-bottom=2px #3B82F6       │
 │          │ font-weight=Semibold            │
 ├──────────┼─────────────────────────────────┤
-│ Hidden   │ display:none                    │
+│ Hidden   │ Swing setVisible(false)          │
 │          │ 无 API Key 时隐藏 Welcome 以外   │
 │          │ 有 API Key 时隐藏 Welcome        │
 ├──────────┼─────────────────────────────────┤

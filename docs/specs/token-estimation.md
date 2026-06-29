@@ -1,6 +1,6 @@
 # Token 估算规范
 
-> **原始来源：** `docs/tech-spec.md`（已拆分，内容归入 `docs/specs/` 各文件）
+> **原始来源：** `tech-spec.md`（已拆分，内容归入 `specs/` 各文件）
 
 整个项目使用统一的 Token 估算方法，所有依赖 token 计数的场景均调用此方法。
 

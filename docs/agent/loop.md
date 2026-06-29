@@ -13,7 +13,7 @@ val effectiveMaxTurns = if (maxTurns == 0) Int.MAX_VALUE else maxTurns  // 0=不
 var continueStreak = 0                           // 当前轮续写链长度（仅 max_tokens 时累加，其余退出路径归零）
 while (turn < effectiveMaxTurns && !cancelled):
   ├─ if (stop_reason != "max_tokens") turn++       ← 仅用户消息触发的 API 调用计数，续写不增加 turn
-  ├─ compactIfNeeded(system, messages, tools, modelLimit) ← 估算实际总 token，超 modelLimit × 0.7 阈值则压缩 messages
+  ├─ compactIfNeeded(builder, mode) ← 估算实际总 token，超 modelLimit × 0.7 阈值则压缩 messages
   ├─ if (turn >= effectiveMaxTurns * 0.6):            ← 轮次预警。effectiveMaxTurns == Int.MAX_VALUE（不限轮次）时跳过预警
   │    附加系统提示"已执行 N 轮，评估剩余工作量"
   ├─ client.messages().createStreaming(params)    ← OkHttp, background
@@ -195,7 +195,7 @@ AgentLoop
 ├── cancel()
 ├── isRunning: Boolean
 ├── currentState: AgentState            // 从 AgentSession 读取
-├── compactIfNeeded(system: String, messages: List, tools: String, modelLimit): Boolean
+├── compactIfNeeded(builder: MessageCreateParams.Builder, mode: AgentMode): Boolean
 │                         // 估算实际总 token = system + messages + tools。超过 compactThreshold × modelLimit 则压缩。
 ├── compactThreshold: Double = 0.7      // 触发压缩的上下文使用率阈值
 ├── modelContextLimit: Int = 1_000_000  // 模型上下文窗口大小（DeepSeek V4 的 1M tokens，写死）

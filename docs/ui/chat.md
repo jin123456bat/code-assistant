@@ -399,8 +399,8 @@ ChatViewModel
 ├── session: AgentSession                  // 当前绑定的会话
 ├── inputState: InputState                 // 输入区域状态
 │
-├── sendMessage(text: String, attachments: List<FileRef>, images: List<ImageRef>)
-│   → 调用 AgentLoop.run() → collect AgentEvent → 更新 messages/streamingToken
+├── sendMessage(text: String)
+│   → attachments/images 通过 ChatInputArea.inputState 收集，在构建 prompt 时合并
 ├── cancelGeneration()                     // 停止按钮
 ├── addFileRef(ref: FileRef)               // 添加文件引用（手动或选中）
 ├── removeFileRef(ref: FileRef)
@@ -414,6 +414,7 @@ ChatViewModel
 │   → session.compactSummary = null, session.compactCount = 0
 │   → session.plan = null
 │   → session.totalTokens 归零
+│   → session.approvedTools 保留（不清除审批信任）
 │   → 复用当前 session.id，不新建文件
 │
 ├── rollbackToMessage(messageId: String)     // 回退：标记 messageId 之后的消息 deleted=true

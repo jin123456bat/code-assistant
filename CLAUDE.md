@@ -28,11 +28,11 @@ docs/
 | 层          | 核心文件                                                                                                              | 要点                                                                                                                        |
 |------------|-------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------|
 | Agent      | `AgentLoop`, `AgentSession`, `ToolRegistry`, `ToolExecutor`, `ToolModels`, `PlanExecutor`, `MultiAgentManager`    | 13 个内置工具（Read/Write/Edit/Bash/Glob/Grep/readLints/Agent/Skill/WebSearch/WebFetch/AskUserQuestion/Symbol）+ 审批策略 + while 循环 |
-| Completion | `CompletionProvider`, `DeepSeekFimClient`, `CompletionContextCollector`, `CompletionCache`, `CompletionStats`     | FIM 补全 + PSI 增强上下文                                                                                                        |
+| Completion | `AiCompletionProvider`, `DeepSeekFimClient`, `CompletionContextCollector`, `CompletionCache`, `CompletionStats`   | FIM 补全 + PSI 增强上下文                                                                                                        |
 | Session    | `SessionManager`, `SessionStore`                                                                                  | JSON 持久化：.tmp → ATOMIC_MOVE + FileLock                                                                                    |
 | Skills     | `SkillManager`                                                                                                    | SKILL.md 扫描/解析/交叉验证工具声明                                                                                                   |
 | MCP        | `McpManager`                                                                                                      | MCP Server 生命周期（启动/握手/心跳/崩溃重启）                                                                                            |
-| UI         | `AppColors`, `ChatToolWindow`, `TabBar`, `MessageBus`, `SelectionListener`, `OpenChatAction` + 7 page + 5 chat 组件 | 统一颜色令牌，亮/暗主题；详细设计见 [`docs/ui.md`](docs/ui.md)                                                                             |
+| UI         | `AppColors`, `ChatToolWindow`, `TabBar`, `MessageBus`, `SelectionListener`, `OpenChatAction` + 7 page + 5 chat 组件 | 统一颜色令牌，亮/暗主题；详细设计见 `ui.md`ui.md)                                                                                          |
 
 ## Skill routing
 
@@ -72,7 +72,7 @@ bug（[#1069](https://github.com/deepseek-ai/DeepSeek-V3/issues/1069)），`stri
 `closed-as-stale` / `closed as not planned`（不再计划修复）。当前 `/anthropic` 端点不受影响，
 继续使用该端点即可。如需切换到原生 `/beta` API，需自行验证该 bug 是否已在后续版本中修复。
 
-详细 Schema 生成流程见 [`docs/specs/system-prompt.md`](docs/specs/system-prompt.md)。
+详细 Schema 生成流程见 `specs/system-prompt.md`specs/system-prompt.md)。
 
 **参考文档：**
 

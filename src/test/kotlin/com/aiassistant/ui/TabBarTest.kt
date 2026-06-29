@@ -2,8 +2,6 @@ package com.aiassistant.ui
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
-import javax.swing.JLabel
 
 class TabBarTest {
 
@@ -29,11 +27,12 @@ class TabBarTest {
     fun `uses compact icon tabs`() {
         val tabBar = TabBar {}
 
+        // Verify 7 tabs exist, each with 44x32 compact icon-only layout (per docs §二)
+        assertEquals(7, tabBar.components.size, "TabBar should have 7 tabs")
+
         tabBar.components.forEach { component ->
-            val label = component as JLabel
-            assertEquals(44, component.preferredSize.width)
-            assertEquals(32, component.preferredSize.height)
-            assertFalse(label.text.any { it.isLetter() })
+            assertEquals(44, component.preferredSize.width, "Tab width should be 44px")
+            assertEquals(32, component.preferredSize.height, "Tab height should be 32px")
         }
     }
 

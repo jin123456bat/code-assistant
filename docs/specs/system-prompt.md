@@ -1,6 +1,6 @@
 # System Prompt 规范
 
-> **原始来源：** `docs/tech-spec.md`（已拆分，内容归入 `docs/specs/` 各文件）
+> **原始来源：** `tech-spec.md`（已拆分，内容归入 `specs/` 各文件）
 
 本文档定义 Agent Mode 的完整 System Prompt 内容、组装逻辑和 `buildContext()` 伪代码。
 
