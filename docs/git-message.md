@@ -190,11 +190,12 @@ Content-Type: application/json
 
 ### 按钮状态
 
-| 状态  | 行为                                  |
-|-----|-------------------------------------|
-| 可见  | `changes.isNotEmpty()`（有待提交变更时显示）   |
-| 启用  | `hasCommitControl && !isGenerating` |
-| 生成中 | 按钮文字变为 "正在生成提交信息..."，禁用             |
+| 状态  | 行为                                                               |
+|-----|------------------------------------------------------------------|
+| 可见  | 有 commit 对话框时始终显示                                                |
+| 启用  | `getCheckedChanges().isNotEmpty() && !isGenerating`（已勾选文件且未在生成中） |
+| 禁用  | 未勾选任何文件时灰色不可点击                                                   |
+| 生成中 | 按钮文字变为 "正在生成提交信息..."，禁用                                          |
 
 ### 用户勾选文件
 
@@ -202,7 +203,8 @@ Content-Type: application/json
 
 1. 反射遍历组件树 → 找到 `CheckinProjectPanel` 类（`vcs-impl` 模块，仅运行时访问）
 2. 调用 `getSelectedChanges()` 方法获取勾选文件列表
-3. 如反射失败（新版 Commit UI） → 降级到 `ChangeListManager.defaultChangeList.changes`
+3. 如反射失败（新版 Commit UI） → 尝试 `ChangesBrowser` / `CommitChangeListPanel`
+4. 所有反射路径失败 → 降级到 `ChangeListManager.defaultChangeList.changes`
 
 ### 流式写入
 

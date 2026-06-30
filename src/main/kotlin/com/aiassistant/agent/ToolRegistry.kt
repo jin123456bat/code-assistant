@@ -1,5 +1,7 @@
 package com.aiassistant.agent
 
+import com.anthropic.models.beta.messages.BetaTool
+
 // ponytail: tool registry — 统一管理工具注册、元数据和 system prompt 生成
 
 object ToolRegistry {
@@ -7,7 +9,14 @@ object ToolRegistry {
     data class ToolInfo(
         val name: String,
         val description: String,
-        val usage: String  // system prompt 中的使用提示
+        val usage: String,  // system prompt 中的使用提示
+        val betaTool: BetaTool? = null
+    )
+
+    data class RegisteredTool(
+        val name: String,
+        val toolClass: Class<*>,
+        val info: ToolInfo
     )
 
     private val tools = mutableMapOf<String, Class<*>>()
@@ -35,6 +44,10 @@ object ToolRegistry {
     fun get(name: String): Class<*>? = tools[name]
     fun getToolInfo(name: String): ToolInfo? = infoMap[name]
     fun listAll(): List<Class<*>> = tools.values.toList()
+    fun listRegistered(): List<RegisteredTool> =
+        tools.mapNotNull { (name, clazz) ->
+            infoMap[name]?.let { RegisteredTool(name, clazz, it) }
+        }
     fun listNames(): List<String> = tools.keys.toList()
     fun listBuiltin(): List<String> = tools.filter { !it.key.startsWith("mcp/") }.keys.toList()
     fun listMcp(): List<Class<*>> = tools.filter { it.key.startsWith("mcp/") }.values.toList()

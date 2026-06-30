@@ -3,6 +3,7 @@ package com.aiassistant.session
 import com.aiassistant.agent.AgentSession
 import com.aiassistant.agent.ContentType
 import com.aiassistant.agent.Message
+import com.aiassistant.agent.PlanExecutor
 import com.aiassistant.agent.Role
 import com.aiassistant.agent.ToolCallRecord
 import com.aiassistant.agent.ToolCallState
@@ -68,6 +69,31 @@ class SessionStoreTest {
         assertContains(exported, """"sessionCount": 1""")
         assertContains(exported, """"id": "first-session"""")
         assertFalse(exported.contains("second-session"))
+    }
+
+    @Test
+    fun `loading session resets executing plan state to paused`() {
+        val project = projectAt(createTempDirectory().toString())
+        val session = AgentSession(id = "session-with-running-plan")
+        session.plan = PlanExecutor.Plan(
+            summary = "Half finished plan",
+            status = PlanExecutor.Plan.Status.EXECUTING,
+            plans = mutableListOf(
+                PlanExecutor.PlanItem(
+                    description = "Running step",
+                    tool = "Read",
+                    files = emptyList(),
+                    status = PlanExecutor.PlanItem.ItemStatus.EXECUTING
+                )
+            )
+        )
+
+        val store = SessionStore(project)
+        store.save(session)
+
+        val restoredPlan = assertNotNull(store.load(session.id)?.plan)
+        assertEquals(PlanExecutor.Plan.Status.PAUSED, restoredPlan.status)
+        assertEquals(PlanExecutor.PlanItem.ItemStatus.PAUSED, restoredPlan.plans.single().status)
     }
 
     private fun projectAt(basePath: String): Project =

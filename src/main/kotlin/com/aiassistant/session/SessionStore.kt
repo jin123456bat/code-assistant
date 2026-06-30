@@ -63,6 +63,24 @@ private fun mapLegacyStepStatus(status: String): com.aiassistant.agent.PlanExecu
     }
 }
 
+private fun restorePlanStatus(status: String): com.aiassistant.agent.PlanExecutor.Plan.Status {
+    val restored = com.aiassistant.agent.PlanExecutor.Plan.Status.valueOf(status)
+    return if (restored == com.aiassistant.agent.PlanExecutor.Plan.Status.EXECUTING) {
+        com.aiassistant.agent.PlanExecutor.Plan.Status.PAUSED
+    } else {
+        restored
+    }
+}
+
+private fun restorePlanItemStatus(status: String): com.aiassistant.agent.PlanExecutor.PlanItem.ItemStatus {
+    val restored = mapLegacyStepStatus(status)
+    return if (restored == com.aiassistant.agent.PlanExecutor.PlanItem.ItemStatus.EXECUTING) {
+        com.aiassistant.agent.PlanExecutor.PlanItem.ItemStatus.PAUSED
+    } else {
+        restored
+    }
+}
+
 class SessionStore(private val project: Project) {
 
     private val gson = SessionJson.gson
@@ -172,7 +190,7 @@ class SessionStore(private val project: Project) {
                 com.aiassistant.agent.PlanExecutor.Plan(
                     id = plan.id,
                     summary = plan.summary,
-                    status = com.aiassistant.agent.PlanExecutor.Plan.Status.valueOf(plan.status),
+                    status = restorePlanStatus(plan.status),
                     currentPlanIndex = plan.currentPlanIndex,
                     createdAt = plan.createdAt,
                     updatedAt = plan.updatedAt,
@@ -182,7 +200,7 @@ class SessionStore(private val project: Project) {
                             description = step.description,
                             tool = step.tool,
                             files = step.files,
-                            status = mapLegacyStepStatus(step.status),
+                            status = restorePlanItemStatus(step.status),
                             result = step.result,
                             retryCount = step.retryCount
                         )

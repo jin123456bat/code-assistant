@@ -8,10 +8,12 @@ import com.aiassistant.agent.MultiAgentManager
 import com.aiassistant.agent.Role
 import com.aiassistant.agent.TokenEstimator
 import com.aiassistant.agent.TokenUsage
+import com.aiassistant.agent.ToolApprovalRequest
 import com.aiassistant.agent.ToolCallState
 import com.aiassistant.agent.ToolCallRecord
 import com.aiassistant.session.SessionManager
 import com.aiassistant.session.SessionStore
+import com.aiassistant.skills.SkillManager
 import com.aiassistant.ui.MessageBus
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.fileEditor.FileDocumentManager
@@ -125,6 +127,7 @@ class ChatViewModel(
 ) {
     private val store = SessionStore(project)
     private val sessionManager = SessionManager(project)
+    private val skillManager = SkillManager(project)
     internal var session = if (restoreSessionId != null) store.load(restoreSessionId)
         ?: AgentSession() else AgentSession()
     private var loop = AgentLoop(project, session)
@@ -144,6 +147,7 @@ class ChatViewModel(
         null
     var onToolCallStateChanged: ((toolUseId: String, state: ToolCallState, result: String?, durationMs: Long?) -> Unit)? =
         null
+    var onApprovalRequested: ((ToolApprovalRequest) -> Unit)? = null
     var onStateChanged: (() -> Unit)? = null
     var onTurnCompleted: (() -> Unit)? = null
     var onSubAgentEvent: ((MultiAgentManager.SubAgentEvent) -> Unit)? = null
@@ -161,6 +165,7 @@ class ChatViewModel(
     private val _messages = ObservableList.create<ChatMessage>()
     private var turnInFlight = false
     private var lastAgentText: String? = null
+    private var lastSlashCommand: String? = null
     private var lastCompletion: ((AgentLoop.Result) -> Unit)? = null
 
     private fun startFlushTimer() {
@@ -219,6 +224,11 @@ class ChatViewModel(
             SwingUtilities.invokeLater {
                 onToolCallStateChanged?.invoke(toolUseId, state, result, durationMs)
                 onStateChanged?.invoke()
+            }
+        }
+        loop.onApprovalRequested = { request ->
+            SwingUtilities.invokeLater {
+                onApprovalRequested?.invoke(request)
             }
         }
         loop.onTurnCompleted = {
@@ -334,13 +344,32 @@ class ChatViewModel(
     val sessionId: String get() = session.id
     val currentPlan: com.aiassistant.agent.PlanExecutor.Plan? get() = session.plan
 
+    fun removePlanStep(stepId: String): Boolean {
+        val plan = session.plan ?: return false
+        val step = plan.plans.find { it.id == stepId } ?: return false
+        if (step.status != com.aiassistant.agent.PlanExecutor.PlanItem.ItemStatus.PAUSED) return false
+        step.status = com.aiassistant.agent.PlanExecutor.PlanItem.ItemStatus.CANCELLED
+        if (plan.currentPlanIndex < plan.plans.size && plan.plans[plan.currentPlanIndex].id == stepId) {
+            plan.currentPlanIndex++
+        }
+        if (plan.plans.all {
+                it.status == com.aiassistant.agent.PlanExecutor.PlanItem.ItemStatus.COMPLETED ||
+                        it.status == com.aiassistant.agent.PlanExecutor.PlanItem.ItemStatus.CANCELLED
+            }) {
+            plan.status = com.aiassistant.agent.PlanExecutor.Plan.Status.COMPLETED
+        }
+        plan.updatedAt = Instant.now()
+        store.save(session)
+        MessageBus.publishPlanStateChanged(session.id, plan.status.name)
+        onStateChanged?.invoke()
+        return true
+    }
+
     // ── 输入区域状态（对齐 docs/ui/chat.md §十二）──
     /** 输入区域状态：文件引用、图片、token 估算，供 UI 绑定 */
     var inputState = InputState()
         private set
 
-    /** 输入状态变化回调，UI 层通过此回调更新输入区域显示 */
-    var onInputStateChanged: ((InputState) -> Unit)? = null
 
     /**
      * 更新输入文本的估算 token 数（不含图片），对齐 docs/ui/chat.md §十二 InputState.tokenCount。
@@ -373,7 +402,6 @@ class ChatViewModel(
             images = images,
             tokenCount = totalTokenCount
         )
-        onInputStateChanged?.invoke(inputState)
     }
 
     /**
@@ -467,7 +495,15 @@ class ChatViewModel(
             sessionManager.generateTitle(session.id)
         }
 
-        runAgentText(buildAgentText(text))
+        runAgentText(buildAgentText(text), slashCommand = resolveSlashCommand(text))
+    }
+
+    internal fun resolveSlashCommandForTest(text: String): String? = resolveSlashCommand(text)
+
+    private fun resolveSlashCommand(text: String): String? {
+        val firstToken = text.trimStart().substringBefore(' ')
+        if (!firstToken.startsWith("/") || firstToken in setOf("/clear", "/plan")) return null
+        return firstToken.takeIf { it in skillManager.enabledSlashCommands() }
     }
 
     private fun handlePlanCommand(task: String) {
@@ -511,14 +547,16 @@ class ChatViewModel(
 
     private fun runAgentText(
         agentText: String,
+        slashCommand: String? = null,
         onComplete: (AgentLoop.Result) -> Unit = ::handleResult
     ) {
         lastAgentText = agentText
+        lastSlashCommand = slashCommand
         lastCompletion = onComplete
         markTurnInFlight()
         ApplicationManager.getApplication()
             .executeOnPooledThread {
-                val result = loop.run(agentText)
+                val result = loop.run(agentText, slashCommand = slashCommand)
                 SwingUtilities.invokeLater {
                     turnInFlight = false
                     onComplete(result)
@@ -529,7 +567,7 @@ class ChatViewModel(
 
     fun retryLastTurn(): Boolean {
         val agentText = lastAgentText ?: return false
-        runAgentText(agentText, lastCompletion ?: ::handleResult)
+        runAgentText(agentText, lastSlashCommand, lastCompletion ?: ::handleResult)
         return true
     }
 
@@ -623,6 +661,7 @@ class ChatViewModel(
 
         turnInFlight = false
         lastAgentText = null
+        lastSlashCommand = null
         lastCompletion = null
         loop = AgentLoop(project, session)
         bindLoopCallbacks()
@@ -635,6 +674,7 @@ class ChatViewModel(
         val approvedTools = session.approvedTools.toMutableSet()
         turnInFlight = false
         lastAgentText = null
+        lastSlashCommand = null
         lastCompletion = null
         session = AgentSession()
         // 保留旧 session 的 approvedTools，不清除审批信任（对齐 docs/ui/components.md §4 clearSession()）
@@ -655,6 +695,7 @@ class ChatViewModel(
         store.save(session)
         turnInFlight = false
         lastAgentText = null
+        lastSlashCommand = null
         lastCompletion = null
         session = if (sessionId != null) store.load(sessionId) ?: AgentSession() else AgentSession()
         loop = AgentLoop(project, session)

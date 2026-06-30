@@ -29,4 +29,18 @@ class ToolInputTest {
         assertEquals("./gradlew test", ToolInput.string(input, "command"))
         assertEquals(3, ToolInput.int(input, "maxDepth"))
     }
+
+    @Test
+    fun `extracts string lists from Anthropic JsonValue input`() {
+        val input = JsonValue.from(
+            mapOf(
+                "allowedDomains" to listOf("example.com", "docs.example.com")
+            )
+        )
+
+        assertEquals(
+            listOf("example.com", "docs.example.com"),
+            ToolInput.stringList(input, "allowedDomains")
+        )
+    }
 }

@@ -8,6 +8,7 @@ import java.awt.BorderLayout
 import java.awt.Color
 import java.awt.Cursor
 import java.awt.Dimension
+import java.awt.FlowLayout
 import java.awt.Font
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
@@ -18,8 +19,16 @@ import javax.swing.*
 class ToolCallCard(
     val toolName: String,
     val params: String,
-    initialState: ToolCallState = ToolCallState.PENDING
+    initialState: ToolCallState = ToolCallState.PENDING,
+    approvalActions: ApprovalActions? = null
 ) : JPanel(BorderLayout()) {
+
+    data class ApprovalActions(
+        val dangerous: Boolean,
+        val onAllowOnce: () -> Unit,
+        val onAllowSession: () -> Unit,
+        val onReject: () -> Unit
+    )
 
     enum class ToolCallState(val label: String, val color: Color, val icon: Icon? = null) {
         PENDING("等待执行", AppColors.textSecondary, AllIcons.Process.Step_1),
@@ -50,6 +59,11 @@ class ToolCallCard(
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
         border = BorderFactory.createEmptyBorder(8, 12, 8, 12)
     }
+    private val approvalPanel = JPanel(FlowLayout(FlowLayout.LEFT, 8, 0)).apply {
+        isOpaque = false
+        isVisible = false
+    }
+    private var approvalActions: ApprovalActions? = approvalActions
 
     // 结果区域容器（JScrollPane），限制 max-height=240px，超出滚动
     private val resultScrollPane = JScrollPane().apply {
@@ -120,6 +134,7 @@ class ToolCallCard(
         val paramsLabel =
             JLabel("<html><span style='font-family:monospace;font-size:12px;color:$fgHex;background:$bgHex;padding:4px 8px'>$params</span></html>")
         bodyPanel.add(paramsLabel)
+        bodyPanel.add(approvalPanel)
         bodyPanel.add(progressBar)
         resultScrollPane.setViewportView(resultComponent)
         bodyPanel.add(resultScrollPane)
@@ -132,6 +147,11 @@ class ToolCallCard(
 
         setState(initialState)
         applyCollapseState()
+    }
+
+    fun setApprovalActions(actions: ApprovalActions?) {
+        approvalActions = actions
+        rebuildApprovalPanel()
     }
 
     private fun toggleCollapse() {
@@ -158,6 +178,7 @@ class ToolCallCard(
         } else {
             progressBar.isVisible = false
         }
+        rebuildApprovalPanel()
         if (result != null) {
             setResultContent(result.take(2000))
             resultComponent.isVisible = true
@@ -198,6 +219,40 @@ class ToolCallCard(
 
     fun setRejected() = setState(ToolCallState.REJECTED)
     fun setCancelled() = setState(ToolCallState.CANCELLED)
+
+    private fun rebuildApprovalPanel() {
+        approvalPanel.removeAll()
+        val actions = approvalActions
+        approvalPanel.isVisible = state == ToolCallState.AWAITING_APPROVAL && actions != null
+        if (actions != null && approvalPanel.isVisible) {
+            approvalPanel.add(JButton("允许一次").apply {
+                addActionListener {
+                    disableApprovalButtons()
+                    actions.onAllowOnce()
+                }
+            })
+            if (!actions.dangerous) {
+                approvalPanel.add(JButton("允许此会话").apply {
+                    addActionListener {
+                        disableApprovalButtons()
+                        actions.onAllowSession()
+                    }
+                })
+            }
+            approvalPanel.add(JButton("拒绝").apply {
+                addActionListener {
+                    disableApprovalButtons()
+                    actions.onReject()
+                }
+            })
+        }
+        approvalPanel.revalidate()
+        approvalPanel.repaint()
+    }
+
+    private fun disableApprovalButtons() {
+        approvalPanel.components.filterIsInstance<JButton>().forEach { it.isEnabled = false }
+    }
 
     /**
      * 使用 SimpleDiff 计算 oldText 和 newText 的行级 Diff 并在 resultArea 中渲染。

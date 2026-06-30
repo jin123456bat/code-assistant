@@ -53,14 +53,7 @@ class ChatPage(
 
     init {
         planCard = PlanCard(
-            onResume = { viewModel.sendMessage("继续执行计划") },
-            onPause = {
-                viewModel.session.plan?.status =
-                    com.aiassistant.agent.PlanExecutor.Plan.Status.PAUSED
-            },
-            onRetry = { viewModel.sendMessage("重试当前计划步骤") },
-            onSkip = { viewModel.sendMessage("跳过当前计划步骤") },
-            onAbort = { viewModel.session.plan = null; planCard.isVisible = false }
+            onDeleteStep = { stepId -> viewModel.removePlanStep(stepId) }
         ).apply { isVisible = false }
 
         // 标题行：会话标题 + 清空按钮 + 关闭按钮，对齐 docs/ui/pages.md §十二 ChatPage 组件树
@@ -155,11 +148,6 @@ class ChatPage(
         )
         add(inputArea, BorderLayout.SOUTH)
 
-        // 输入状态变化时更新 token 计数显示（对齐 docs/ui/chat.md §十二 InputState.tokenCount）
-        viewModel.onInputStateChanged = { state ->
-            inputArea.updateTokenCount(state.tokenCount)
-        }
-
         viewModel.onMessageAdded = { msg ->
             streamingBubble?.let { messageContainer.remove(it); streamingBubble = null }
             // 对齐 docs/ui/components.md §3.2 Error 状态：发送失败时输入区域标红
@@ -185,6 +173,35 @@ class ChatPage(
             toolCards[toolUseId]?.setState(uiState, result, durationMs)
             messageContainer.revalidate()
             messageContainer.repaint()
+        }
+        viewModel.onApprovalRequested = { request ->
+            val card = toolCards[request.toolUseId] ?: ToolCallCard(
+                request.toolName,
+                request.message,
+                ToolCallCard.ToolCallState.AWAITING_APPROVAL
+            ).also { newCard ->
+                toolCards[request.toolUseId] = newCard
+                animateBubbleAppear(newCard)
+                messageContainer.add(Box.createVerticalStrut(8))
+            }
+            card.setApprovalActions(
+                ToolCallCard.ApprovalActions(
+                    dangerous = request.dangerous,
+                    onAllowOnce = {
+                        request.complete(com.aiassistant.agent.ToolApprovalPolicy.ApprovalResult.ALLOW_ONCE)
+                    },
+                    onAllowSession = {
+                        request.complete(com.aiassistant.agent.ToolApprovalPolicy.ApprovalResult.ALLOW_SESSION)
+                    },
+                    onReject = {
+                        request.complete(com.aiassistant.agent.ToolApprovalPolicy.ApprovalResult.REJECTED)
+                    }
+                )
+            )
+            card.setState(ToolCallCard.ToolCallState.AWAITING_APPROVAL, request.message, null)
+            messageContainer.revalidate()
+            messageContainer.repaint()
+            scrollToBottom()
         }
         viewModel.onStreamingToken = { token ->
             streamingBuf.append(token)
@@ -216,8 +233,10 @@ class ChatPage(
             inputArea.setInputEnabled(!viewModel.isRunning)
             val plan = viewModel.session.plan
             planCard.isVisible =
-                plan != null && plan.status == com.aiassistant.agent.PlanExecutor.Plan.Status.PAUSED
+                plan != null && plan.status != com.aiassistant.agent.PlanExecutor.Plan.Status.COMPLETED &&
+                        plan.status != com.aiassistant.agent.PlanExecutor.Plan.Status.CANCELLED
             if (planCard.isVisible && plan != null) {
+                planCard.setExecutingState(plan.status == com.aiassistant.agent.PlanExecutor.Plan.Status.EXECUTING)
                 planCard.setPlan(plan.summary, plan.plans.map {
                     PlanCard.StepRow(it.id, it.description, "工具: ${it.tool}")
                 })

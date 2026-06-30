@@ -6,6 +6,7 @@ import kotlin.test.assertIs
 import java.awt.Container
 import javax.swing.JButton
 import javax.swing.JLabel
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class ChatBubbleRendererTest {
@@ -67,6 +68,53 @@ class ChatBubbleRendererTest {
     }
 
     @Test
+    fun `approval card buttons invoke approval callbacks`() {
+        var approvedOnce = false
+        var approvedSession = false
+        var rejected = false
+
+        approvalCard(
+            onAllowOnce = { approvedOnce = true },
+            onAllowSession = { approvedSession = true },
+            onReject = { rejected = true }
+        ).let { buttonsIn(it).single { button -> button.text == "允许一次" }.doClick() }
+        approvalCard(
+            onAllowOnce = { approvedOnce = true },
+            onAllowSession = { approvedSession = true },
+            onReject = { rejected = true }
+        ).let { buttonsIn(it).single { button -> button.text == "允许此会话" }.doClick() }
+        approvalCard(
+            onAllowOnce = { approvedOnce = true },
+            onAllowSession = { approvedSession = true },
+            onReject = { rejected = true }
+        ).let { buttonsIn(it).single { button -> button.text == "拒绝" }.doClick() }
+
+        assertTrue(approvedOnce)
+        assertTrue(approvedSession)
+        assertTrue(rejected)
+    }
+
+    @Test
+    fun `dangerous approval card hides allow session button`() {
+        val card = ToolCallCard(
+            toolName = "Bash",
+            params = "command=sudo rm -rf /tmp/demo",
+            initialState = ToolCallCard.ToolCallState.AWAITING_APPROVAL,
+            approvalActions = ToolCallCard.ApprovalActions(
+                dangerous = true,
+                onAllowOnce = {},
+                onAllowSession = {},
+                onReject = {}
+            )
+        )
+
+        val buttonTexts = buttonsIn(card).map { it.text }
+        assertContains(buttonTexts, "允许一次")
+        assertContains(buttonTexts, "拒绝")
+        assertFalse("允许此会话" in buttonTexts)
+    }
+
+    @Test
     fun `error copy button has an action`() {
         val component = ChatBubbleRenderer.render(
             ChatMessage(
@@ -112,4 +160,21 @@ class ChatBubbleRendererTest {
                 else -> emptyList()
             }
         }
+
+    private fun approvalCard(
+        onAllowOnce: () -> Unit,
+        onAllowSession: () -> Unit,
+        onReject: () -> Unit
+    ): ToolCallCard =
+        ToolCallCard(
+            toolName = "Bash",
+            params = "command=./gradlew test",
+            initialState = ToolCallCard.ToolCallState.AWAITING_APPROVAL,
+            approvalActions = ToolCallCard.ApprovalActions(
+                dangerous = false,
+                onAllowOnce = onAllowOnce,
+                onAllowSession = onAllowSession,
+                onReject = onReject
+            )
+        )
 }

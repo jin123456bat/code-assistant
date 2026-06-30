@@ -35,6 +35,46 @@ internal object ToolInput {
         }
     }
 
+    fun stringList(input: Any?, key: String): List<String>? {
+        val value = value(input, key) ?: return null
+        return when (value) {
+            is List<*> -> value.mapNotNull { it?.toString()?.removeSurrounding("\"") }
+            is Array<*> -> value.mapNotNull { it?.toString()?.removeSurrounding("\"") }
+            is JsonValue -> runCatching {
+                @Suppress("UNCHECKED_CAST")
+                value.convert(List::class.java) as? List<Any?>
+            }.getOrNull()?.mapNotNull { it?.toString()?.removeSurrounding("\"") }
+
+            else -> null
+        }
+    }
+
+    fun mapList(input: Any?, key: String): List<Map<String, Any?>>? {
+        val value = value(input, key) ?: return null
+        val list = when (value) {
+            is List<*> -> value
+            is Array<*> -> value.toList()
+            is JsonValue -> runCatching {
+                @Suppress("UNCHECKED_CAST")
+                value.convert(List::class.java) as? List<Any?>
+            }.getOrNull()
+
+            else -> null
+        } ?: return null
+
+        return list.mapNotNull { item ->
+            when (item) {
+                is JsonObject -> map(item)
+                is JsonValue -> map(item)
+                is Map<*, *> -> item.entries.associate { (entryKey, entryValue) ->
+                    entryKey.toString() to entryValue
+                }
+
+                else -> null
+            }
+        }
+    }
+
     fun map(input: Any?): Map<String, Any?> {
         return when (input) {
             is JsonObject -> input.values.mapValues { (_, value) -> jsonAny(value) }

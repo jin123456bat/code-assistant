@@ -2,6 +2,8 @@ package com.aiassistant.ui
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import javax.swing.JLayeredPane
+import javax.swing.JLabel
 
 class TabBarTest {
 
@@ -36,6 +38,35 @@ class TabBarTest {
         }
     }
 
+    @Test
+    fun `disabled tab cannot be selected`() {
+        val selected = mutableListOf<ChatToolWindow.Page>()
+        val tabBar = TabBar { selected.add(it) }
+
+        tabBar.setEnabled(ChatToolWindow.Page.MCP, false)
+        tabLabel(tabBar, ChatToolWindow.Page.MCP).dispatchEvent(
+            java.awt.event.MouseEvent(
+                tabLabel(tabBar, ChatToolWindow.Page.MCP),
+                java.awt.event.MouseEvent.MOUSE_CLICKED,
+                System.currentTimeMillis(),
+                0,
+                10,
+                10,
+                1,
+                false
+            )
+        )
+
+        assertEquals(emptyList(), selected)
+        assertEquals(false, tabLabel(tabBar, ChatToolWindow.Page.MCP).isEnabled)
+    }
+
     private fun visibleTabs(tabBar: TabBar): List<Boolean> =
         tabBar.components.map { it.isVisible }
+
+    private fun tabLabel(tabBar: TabBar, page: ChatToolWindow.Page): JLabel {
+        val index = ChatToolWindow.Page.entries.indexOf(page)
+        val wrapper = tabBar.components[index] as JLayeredPane
+        return wrapper.components.filterIsInstance<JLabel>().first()
+    }
 }

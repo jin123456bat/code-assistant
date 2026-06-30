@@ -35,13 +35,18 @@ class GenerateCommitAction : AnAction() {
 
     override fun update(e: AnActionEvent) {
         val project = e.project
-        val changes = project?.let {
-            ChangeListManager.getInstance(it).defaultChangeList.changes
-        } ?: emptyList()
         val hasCommitControl = e.getData(VcsDataKeys.COMMIT_MESSAGE_CONTROL) != null
 
-        e.presentation.isVisible = changes.isNotEmpty()
-        e.presentation.isEnabled = hasCommitControl && !isGenerating
+        // 可见：只要有 commit 对话框就显示；可用的前提是用户已勾选文件
+        e.presentation.isVisible = hasCommitControl
+
+        val hasSelectedChanges = if (hasCommitControl && project != null) {
+            val controlComponent = e.getData(VcsDataKeys.COMMIT_MESSAGE_CONTROL) as? Component
+            controlComponent != null && getCheckedChanges(controlComponent, project).isNotEmpty()
+        } else {
+            false
+        }
+        e.presentation.isEnabled = hasSelectedChanges && !isGenerating
         if (isGenerating) e.presentation.text = AiAssistantBundle.message("action.generate.progress")
         else e.presentation.text = AiAssistantBundle.message("action.generate.commit")
     }
@@ -602,6 +607,7 @@ class GenerateCommitAction : AnAction() {
     private fun getCheckedChanges(controlComponent: Component, project: Project): List<Change> {
         var parent: Container? = controlComponent.parent
         while (parent != null) {
+            // 旧版 Commit UI：CheckinProjectPanel.getSelectedChanges()
             if (parent.javaClass.name.contains("CheckinProjectPanel")) {
                 try {
                     val method = parent.javaClass.getMethod("getSelectedChanges")
@@ -617,10 +623,34 @@ class GenerateCommitAction : AnAction() {
                 } catch (_: Exception) { /* reflection failed, try next parent */
                 }
             }
+            // 新版 Commit UI：ChangesBrowser / CommitChangeListPanel
+            if (parent.javaClass.name.contains("ChangesBrowser") ||
+                parent.javaClass.name.contains("CommitChangeListPanel")
+            ) {
+                try {
+                    for (methodName in listOf(
+                        "getSelectedChanges",
+                        "getIncludedChanges",
+                        "getDisplayedChanges"
+                    )) {
+                        try {
+                            val method = parent.javaClass.getMethod(methodName)
+
+                            @Suppress("UNCHECKED_CAST")
+                            val changes =
+                                (method.invoke(parent) as? Collection<*>)?.filterIsInstance<Change>()
+                            if (!changes.isNullOrEmpty()) return changes
+                        } catch (_: NoSuchMethodException) {
+                            continue
+                        }
+                    }
+                } catch (_: Exception) { /* reflection failed, try next parent */
+                }
+            }
             parent = parent.parent
         }
-        // 降级：反射未找到 CheckinProjectPanel（新版 Commit UI），使用 default changelist
-        AppLogger.info("getCheckedChanges: CheckinProjectPanel not found or returned empty, falling back to defaultChangeList")
+        // 降级：所有反射路径失败（未知 Commit UI），使用 default changelist
+        AppLogger.info("getCheckedChanges: no known commit panel found, falling back to defaultChangeList")
         return ChangeListManager.getInstance(project).defaultChangeList.changes.toList()
     }
 

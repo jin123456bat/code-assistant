@@ -88,7 +88,8 @@ class McpPage(project: Project) : JPanel(BorderLayout()) {
 
     fun refreshList() {
         listContainer.removeAll()
-        val servers = manager.loadServers()
+        manager.loadServers()
+        val servers = manager.getAllServers()
         if (servers.isEmpty()) {
             listContainer.add(renderEmpty())
         } else {

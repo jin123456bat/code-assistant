@@ -33,6 +33,7 @@ class TabBar(
     private var selected: Page = Page.CHAT
     private val labels = mutableListOf<JLabel>()
     private val badgeLabels = mutableMapOf<Page, JLabel>()
+    private val enabledPages = mutableMapOf<Page, Boolean>()
 
     // 用 JLayeredPane 包裹每个 tab，以便在右上角叠加 badge
     private val tabWrappers = mutableListOf<JLayeredPane>()
@@ -49,6 +50,7 @@ class TabBar(
 
     init {
         tabs.forEach { tab ->
+            enabledPages[tab.page] = tab.enabled
             val lbl = JLabel(tab.icon, SwingConstants.CENTER).apply {
                 font = font.deriveFont(13f)
                 foreground = AppColors.textSecondary
@@ -62,11 +64,12 @@ class TabBar(
 
                 addMouseListener(object : MouseAdapter() {
                     override fun mouseClicked(e: MouseEvent) {
-                        if (tab.enabled) onSelect(tab.page)
+                        if (isPageEnabled(tab.page)) onSelect(tab.page)
                     }
 
                     override fun mouseEntered(e: MouseEvent) {
-                        if (tab.enabled && tab.page != selected) background = Color(0xF3F4F6)
+                        if (isPageEnabled(tab.page) && tab.page != selected) background =
+                            Color(0xF3F4F6)
                     }
 
                     override fun mouseExited(e: MouseEvent) {
@@ -132,7 +135,15 @@ class TabBar(
         wrapper.repaint()
     }
 
-    fun setEnabled(page: Page, enabled: Boolean) { /* ponytail: disable tabs later */
+    fun setEnabled(page: Page, enabled: Boolean) {
+        val index = tabs.indexOfFirst { it.page == page }
+        if (index < 0) return
+        enabledPages[page] = enabled
+        labels[index].isEnabled = enabled
+        labels[index].cursor = Cursor.getPredefinedCursor(
+            if (enabled) Cursor.HAND_CURSOR else Cursor.DEFAULT_CURSOR
+        )
+        updateSelection()
     }
 
     fun setApiKeyConfigured(configured: Boolean) {
@@ -147,7 +158,8 @@ class TabBar(
     private fun updateSelection() {
         labels.forEachIndexed { i, lbl ->
             if (tabs[i].page == selected) {
-                lbl.foreground = AppColors.primary
+                lbl.foreground =
+                    if (isPageEnabled(tabs[i].page)) AppColors.primary else AppColors.textSecondary
                 lbl.background = AppColors.borderTransparent
                 lbl.border = BorderFactory.createCompoundBorder(
                     BorderFactory.createMatteBorder(0, 0, 2, 0, AppColors.primary),
@@ -177,4 +189,6 @@ class TabBar(
             badge.border = BorderFactory.createLineBorder(AppColors.badgeBg, currentThickness)
         }
     }
+
+    private fun isPageEnabled(page: Page): Boolean = enabledPages[page] ?: true
 }

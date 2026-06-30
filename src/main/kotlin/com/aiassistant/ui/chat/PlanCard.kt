@@ -14,11 +14,6 @@ import javax.swing.*
 // Plan 状态样式规范见 docs/ui/chat.md §五
 
 class PlanCard(
-    private val onResume: () -> Unit,
-    private val onPause: () -> Unit,
-    private val onRetry: () -> Unit = {},
-    private val onSkip: () -> Unit = {},
-    private val onAbort: () -> Unit,
     private val onDeleteStep: (stepId: String) -> Unit = {}
 ) : JPanel(BorderLayout()) {
 
@@ -27,7 +22,6 @@ class PlanCard(
     private val summaryLabel = JLabel()
     private val progressLabel = JLabel()
     private val stepsPanel = JPanel().apply { layout = BoxLayout(this, BoxLayout.Y_AXIS) }
-    private val buttonsPanel = JPanel(FlowLayout(FlowLayout.LEFT, 8, 0))
 
     private val steps = mutableListOf<StepRow>()
     private var currentStepIndex = 0
@@ -82,27 +76,6 @@ class PlanCard(
         add(header, BorderLayout.NORTH)
 
         add(stepsPanel, BorderLayout.CENTER)
-
-        buttonsPanel.add(JButton("▶ 继续").apply {
-            accessibleContext.accessibleDescription =
-                "继续执行计划"; addActionListener { onResume() }
-        })
-        buttonsPanel.add(JButton("↻ 重试").apply {
-            accessibleContext.accessibleDescription =
-                "重试当前步骤"; addActionListener { onRetry() }
-        })
-        buttonsPanel.add(JButton("⏭ 跳过").apply {
-            accessibleContext.accessibleDescription = "跳过当前步骤"; addActionListener { onSkip() }
-        })
-        buttonsPanel.add(JButton("⏸ 暂停").apply {
-            accessibleContext.accessibleDescription =
-                "暂停计划执行"; addActionListener { onPause() }
-        })
-        buttonsPanel.add(JButton("✕ 终止").apply {
-            accessibleContext.accessibleDescription =
-                "终止计划执行"; addActionListener { onAbort() }
-        })
-        add(buttonsPanel, BorderLayout.SOUTH)
 
         // 默认折叠状态
         applyExpandedState()
@@ -239,11 +212,10 @@ class PlanCard(
      */
     private fun applyExpandedState() {
         if (isExpanded) {
-            // 展开：显示所有步骤项和按钮
+            // 展开：显示所有步骤项
             arrowLabel.text = "▾"
             steps.forEach { it.label.isVisible = true }
             stepsPanel.isVisible = true
-            buttonsPanel.isVisible = true
         } else {
             // 折叠：仅显示头部 + 当前执行中的步骤
             arrowLabel.text = "▶"
@@ -254,8 +226,6 @@ class PlanCard(
                 }
             }
             stepsPanel.isVisible = steps.isNotEmpty()
-            // 折叠时隐藏按钮面板（文档设计：折叠态仅显示头部+当前执行项）
-            buttonsPanel.isVisible = isExecuting
         }
         stepsPanel.revalidate()
         stepsPanel.repaint()

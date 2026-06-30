@@ -1,10 +1,12 @@
 package com.aiassistant.mcp
 
 import com.aiassistant.agent.ToolRegistry
+import com.anthropic.core.JsonValue
+import com.anthropic.models.beta.messages.BetaTool
 import com.google.gson.Gson
+import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
-import com.google.gson.reflect.TypeToken
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import java.io.BufferedReader
@@ -31,7 +33,7 @@ class McpManager(private val project: Project) {
     enum class State { CONFIGURED, INITIALIZING, RUNNING, CRASHED, STOPPED, DISCONNECTED, ERROR, INIT_ERROR }
 
     data class McpServer(
-        val config: McpServerConfig, var state: State = State.CONFIGURED,
+        var config: McpServerConfig, var state: State = State.CONFIGURED,
         var process: Process? = null
     ) {
         /** 已注册到 ToolRegistry 的工具名称列表（含 serverName/ 前缀），用于 disconnect 时不注销 */
@@ -88,7 +90,7 @@ class McpManager(private val project: Project) {
     var onServerStateChanged: ((serverId: String, state: State) -> Unit)? = null
 
     private val gson = Gson()
-    private val configFile: File get() = File(project.basePath, ".code-assistant/mcp-config.json")
+    private val configStore = McpConfigStore(project)
     private val servers = mutableMapOf<String, McpServer>()
 
     /** 定时任务调度器 */
@@ -102,18 +104,28 @@ class McpManager(private val project: Project) {
 
     init {
         registerInstance(project, this)
-        loadServers().forEach { servers[it.config.id] = it }
+        loadServers()
     }
 
     fun loadServers(): List<McpServer> {
-        if (!configFile.exists()) return emptyList()
-        return try {
-            val type = object : TypeToken<List<McpServerConfig>>() {}.type
-            val configs: List<McpServerConfig> = gson.fromJson(configFile.readText(), type)
-            configs.map { McpServer(it) }
-        } catch (_: Exception) {
-            emptyList()
+        val configs = configStore.load().servers
+        val ids = configs.map { it.id }.toSet()
+
+        configs.forEach { config ->
+            val existing = servers[config.id]
+            if (existing != null) {
+                existing.config = config
+            } else {
+                servers[config.id] = McpServer(config)
+            }
         }
+
+        (servers.keys - ids).forEach { id ->
+            disconnect(id)
+            servers.remove(id)
+        }
+
+        return configs.mapNotNull { servers[it.id] }
     }
 
     fun addServer(config: McpServerConfig) {
@@ -318,23 +330,101 @@ class McpManager(private val project: Project) {
                 // 注册到 ToolRegistry，前缀 `serverName/toolName`
                 val prefixedName = "$serverId/$rawName"
                 if (ToolRegistry.get(prefixedName) != null) {
-                    LOG.info("MCP 工具 [$prefixedName] 已在 ToolRegistry 中，跳过")
-                    registered.add(prefixedName)
-                    continue
+                    LOG.info("MCP 工具 [$prefixedName] 已在 ToolRegistry 中，刷新定义")
                 }
 
-                ToolRegistry.register(
-                    prefixedName,
-                    McpToolStub::class.java,
-                    ToolRegistry.ToolInfo(prefixedName, description, "")
-                )
-                server.registeredToolNames.add(prefixedName)
-                registered.add(prefixedName)
+                if (registerMcpTool(server, rawName, description, inputSchema)) {
+                    registered.add(prefixedName)
+                }
             }
         } catch (e: Exception) {
             LOG.warn("MCP Server [$serverId] tools/list 处理失败", e)
         }
         return registered
+    }
+
+    internal fun registerMcpToolForTest(
+        server: McpServer,
+        rawName: String,
+        description: String,
+        inputSchema: JsonObject
+    ): Boolean = registerMcpTool(server, rawName, description, inputSchema)
+
+    private fun registerMcpTool(
+        server: McpServer,
+        rawName: String,
+        description: String,
+        inputSchema: JsonObject
+    ): Boolean {
+        val prefixedName = "${server.config.id}/$rawName"
+        val betaTool = buildBetaTool(prefixedName, description, inputSchema)
+        ToolRegistry.register(
+            prefixedName,
+            McpToolStub::class.java,
+            ToolRegistry.ToolInfo(prefixedName, description, "", betaTool = betaTool)
+        )
+        if (prefixedName !in server.registeredToolNames) {
+            server.registeredToolNames.add(prefixedName)
+        }
+        return true
+    }
+
+    private fun buildBetaTool(
+        name: String,
+        description: String,
+        inputSchema: JsonObject
+    ): BetaTool =
+        BetaTool.builder()
+            .name(name)
+            .description(description)
+            .inputSchema(toBetaInputSchema(inputSchema))
+            .build()
+
+    private fun toBetaInputSchema(schema: JsonObject): BetaTool.InputSchema {
+        val builder = BetaTool.InputSchema.builder()
+            .type(JsonValue.from(schema.get("type")?.asString ?: "object"))
+
+        val properties = schema.getAsJsonObject("properties")
+        if (properties != null) {
+            val propertiesBuilder = BetaTool.InputSchema.Properties.builder()
+            properties.entrySet().forEach { (name, value) ->
+                propertiesBuilder.putAdditionalProperty(name, toJsonValue(value))
+            }
+            builder.properties(propertiesBuilder.build())
+        }
+
+        val required = schema.getAsJsonArray("required")
+            ?.mapNotNull { value -> value.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }?.asString }
+            ?: emptyList()
+        if (required.isNotEmpty()) builder.required(required)
+
+        schema.entrySet()
+            .filter { it.key !in setOf("type", "properties", "required") }
+            .forEach { (name, value) -> builder.putAdditionalProperty(name, toJsonValue(value)) }
+
+        return builder.build()
+    }
+
+    private fun toJsonValue(element: JsonElement): JsonValue = JsonValue.from(toPlainValue(element))
+
+    private fun toPlainValue(element: JsonElement): Any? = when {
+        element.isJsonNull -> null
+        element.isJsonObject -> element.asJsonObject.entrySet().associate { (key, value) ->
+            key to toPlainValue(value)
+        }
+
+        element.isJsonArray -> element.asJsonArray.map { toPlainValue(it) }
+        element.isJsonPrimitive -> {
+            val primitive = element.asJsonPrimitive
+            when {
+                primitive.isBoolean -> primitive.asBoolean
+                primitive.isNumber -> primitive.asNumber
+                primitive.isString -> primitive.asString
+                else -> primitive.asString
+            }
+        }
+
+        else -> null
     }
 
     /**
@@ -784,8 +874,7 @@ class McpManager(private val project: Project) {
     }
 
     private fun persist() {
-        configFile.parentFile?.mkdirs()
-        configFile.writeText(gson.toJson(servers.values.map { it.config }))
+        configStore.save(McpConfigStore.McpConfig(servers.values.map { it.config }))
     }
 
     companion object {

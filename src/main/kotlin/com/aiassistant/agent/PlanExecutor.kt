@@ -137,13 +137,12 @@ class PlanExecutor(private val session: AgentSession) {
     // ── LLM 工具方法：5 个计划管理操作 ──
 
     /** createPlan: 创建/更新执行计划。LLM 通过 createPlan 工具主动创建 */
-    fun createPlanFromTool(task: String, plans: List<Map<String, Any>>): Plan {
+    fun createPlanFromTool(task: String, plans: List<Map<String, Any?>>): Plan {
         val items = plans.map { item ->
             val desc = item["description"] as? String ?: ""
             val tool = item["tool"] as? String ?: "Read"
 
-            @Suppress("UNCHECKED_CAST")
-            val files = (item["files"] as? List<String>) ?: emptyList()
+            val files = (item["files"] as? List<*>)?.mapNotNull { it?.toString() } ?: emptyList()
             PlanItem(description = desc, tool = tool, files = files)
         }.toMutableList()
         val plan = Plan(summary = task, plans = items, status = Plan.Status.PAUSED)

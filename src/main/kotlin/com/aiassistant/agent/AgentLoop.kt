@@ -15,10 +15,10 @@ import java.net.SocketTimeoutException
 
 class AgentLoop(
     private val project: Project,
-    private val session: AgentSession
+    private val session: AgentSession,
+    private val apiKeyProvider: () -> String? = { AppSettingsService.getInstance().getApiKey() },
+    private val modelProvider: () -> String = { AppSettingsService.getInstance().getModel() }
 ) {
-    private val settings = AppSettingsService.getInstance()
-
     /** 模型上下文窗口大小（DeepSeek V4 的 1M tokens 上限），写死不动态检测 */
     val modelContextLimit: Int = 1_000_000
 
@@ -59,7 +59,7 @@ class AgentLoop(
     private var clientApiKey: String? = null
 
     private fun getClient(): AnthropicClient {
-        val apiKey = settings.getApiKey() ?: throw IllegalStateException("API Key not configured")
+        val apiKey = apiKeyProvider() ?: throw IllegalStateException("API Key not configured")
         val existing = client
         if (existing != null && clientApiKey == apiKey) return existing
         return AnthropicOkHttpClient.builder()
@@ -72,7 +72,7 @@ class AgentLoop(
             }
     }
 
-    private val model: String get() = settings.getModel()
+    private val model: String get() = modelProvider()
     private val toolExecutor = ToolExecutor(project, session)
 
     /**
@@ -90,6 +90,7 @@ class AgentLoop(
         null
     var onToolCallStateChanged: ((toolUseId: String, state: ToolCallState, result: String?, durationMs: Long?) -> Unit)? =
         null
+    var onApprovalRequested: ((ToolApprovalRequest) -> Unit)? = null
     var onTurnCompleted: (() -> Unit)? = null
     var onSubAgentEvent: ((MultiAgentManager.SubAgentEvent) -> Unit)? = null
 
@@ -135,6 +136,9 @@ class AgentLoop(
         toolExecutor.onToolStateChanged = { toolUseId, state, result, durationMs ->
             onToolCallStateChanged?.invoke(toolUseId, state, result, durationMs)
         }
+        toolExecutor.onApprovalRequested = { request ->
+            onApprovalRequested?.invoke(request)
+        }
         toolExecutor.onSubAgentEvent = { event ->
             onSubAgentEvent?.invoke(event)
         }
@@ -176,25 +180,7 @@ class AgentLoop(
             return Result.Error("请先配置 DeepSeek API Key")
         }
 
-        val builder = MessageCreateParams.builder()
-            .model(model)
-            .maxTokens(4096)
-            .addSystemMessage(buildSystemPrompt(slashCommand))
-            .apply {
-                if (mode != AgentMode.CHAT) {
-                    val tools = toolsFilter ?: ToolRegistry.listAll()
-                    tools.forEach { addTool(it) }
-                }
-            }
-
-        // 对齐 docs/agent/images.md §二：文本 block 在前，图片 blocks 在后
-        if (images.isEmpty()) {
-            builder.addUserMessage(userMessage)
-        } else {
-            builder.addUserMessageOfBetaContentBlockParams(
-                buildUserContentBlocks(userMessage, images)
-            )
-        }
+        val builder = buildRequestBuilder(userMessage, images, slashCommand, mode)
 
         session.startProcessing()
         val output = StringBuilder()
@@ -604,6 +590,72 @@ class AgentLoop(
         }
     }
 
+    internal fun buildRequestParamsForTest(
+        userMessage: String,
+        images: List<ImageRef> = emptyList(),
+        slashCommand: String? = null,
+        mode: AgentMode = AgentMode.AGENT
+    ): MessageCreateParams =
+        buildRequestBuilder(userMessage, images, slashCommand, mode).build()
+
+    private fun buildRequestBuilder(
+        userMessage: String,
+        images: List<ImageRef>,
+        slashCommand: String?,
+        mode: AgentMode
+    ): MessageCreateParams.Builder {
+        val builder = MessageCreateParams.builder()
+            .model(model)
+            .maxTokens(4096)
+            .addSystemMessage(buildSystemPrompt(slashCommand))
+            .apply {
+                if (mode != AgentMode.CHAT) {
+                    addRegisteredTools(this)
+                }
+            }
+        appendConversationHistory(builder, userMessage, images)
+        return builder
+    }
+
+    private fun appendConversationHistory(
+        builder: MessageCreateParams.Builder,
+        userMessage: String,
+        images: List<ImageRef>
+    ) {
+        val history = session.messages.filter { !it.deleted && it.content.isNotBlank() }
+        val currentAlreadyStored =
+            history.lastOrNull()?.let { it.role == Role.USER && it.content == userMessage } == true
+
+        history.forEachIndexed { index, message ->
+            val isStoredCurrent = currentAlreadyStored && index == history.lastIndex
+            when (message.role) {
+                Role.USER -> {
+                    if (isStoredCurrent && images.isNotEmpty()) {
+                        builder.addUserMessageOfBetaContentBlockParams(
+                            buildUserContentBlocks(userMessage, images)
+                        )
+                    } else {
+                        builder.addUserMessage(message.content)
+                    }
+                }
+
+                Role.ASSISTANT -> builder.addAssistantMessage(message.content)
+                Role.SYSTEM -> builder.addUserMessage("[System]\n${message.content}")
+                Role.ERROR -> Unit
+            }
+        }
+
+        if (!currentAlreadyStored) {
+            if (images.isEmpty()) {
+                builder.addUserMessage(userMessage)
+            } else {
+                builder.addUserMessageOfBetaContentBlockParams(
+                    buildUserContentBlocks(userMessage, images)
+                )
+            }
+        }
+    }
+
     /**
      * 检查是否需要 compact，如果需要则执行压缩并重建 builder。
      * 对齐 docs/agent/context.md §二：当总 token 超过 700K 时触发压缩。
@@ -619,11 +671,18 @@ class AgentLoop(
         // 对齐 docs/specs/token-estimation.md §五：使用统一 TokenEstimator.estimateTokens() 逐项估算后求和，
         // 避免 joinToString 拼接引入额外噪声（分隔符/n等）
         val toolsTokens = if (mode != AgentMode.CHAT) {
-            ToolRegistry.listAll().sumOf { clazz ->
-                val desc = clazz.annotations
-                    .filterIsInstance<com.fasterxml.jackson.annotation.JsonClassDescription>()
-                    .firstOrNull()?.value ?: clazz.simpleName
-                TokenEstimator.estimateTokens(desc)
+            val filteredTools = toolsFilter
+            if (filteredTools != null) {
+                filteredTools.sumOf { clazz ->
+                    val desc = clazz.annotations
+                        .filterIsInstance<com.fasterxml.jackson.annotation.JsonClassDescription>()
+                        .firstOrNull()?.value ?: clazz.simpleName
+                    TokenEstimator.estimateTokens(desc)
+                }
+            } else {
+                ToolRegistry.listRegistered().sumOf { tool ->
+                    TokenEstimator.estimateTokens("${tool.info.name}: ${tool.info.description} ${tool.info.usage}")
+                }
             }
         } else 0
 
@@ -841,7 +900,7 @@ $historyText
             .maxTokens(4096)
             .addSystemMessage(buildSystemPrompt(null))
             .addUserMessage(userMessage)
-            .apply { if (mode != AgentMode.CHAT) ToolRegistry.listAll().forEach { addTool(it) } }
+            .apply { if (mode != AgentMode.CHAT) addRegisteredTools(this) }
 
         // 重新注入被调用过的 Skill 正文到 System Prompt 层面（从磁盘重新注入）
         // 对齐 docs/agent/context.md §二：compact 后 Skill 正文应在 System Prompt 层面注入
@@ -862,6 +921,23 @@ $historyText
         // 不注入 @file 内容：LLM 应通过 Read 工具重新读取（避免依赖过期快照）
 
         return newBuilder
+    }
+
+    private fun addRegisteredTools(builder: MessageCreateParams.Builder) {
+        val filteredTools = toolsFilter
+        if (filteredTools != null) {
+            filteredTools.forEach { builder.addTool(it) }
+            return
+        }
+
+        ToolRegistry.listRegistered().forEach { tool ->
+            val betaTool = tool.info.betaTool
+            if (betaTool != null) {
+                builder.addTool(betaTool)
+            } else {
+                builder.addTool(tool.toolClass)
+            }
+        }
     }
 
     /**
@@ -985,7 +1061,8 @@ $historyText
         val skillBody = if (slashCommand != null) {
             val commandName = slashCommand.removePrefix("/").trim()
             val skills = skillManager.loadSkills()
-            val matched = skills.find { it.command == commandName && it.enabled }
+            val matched =
+                skills.find { it.command == commandName && it.enabled && !it.hasMissingTools }
             if (matched != null) {
                 "\n\n## Skill: ${matched.name}\n${matched.content}"
             } else ""

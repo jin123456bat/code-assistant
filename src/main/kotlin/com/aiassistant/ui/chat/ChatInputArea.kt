@@ -62,24 +62,6 @@ class ChatInputArea(
         background = AppColors.primary
     }
 
-    /** Token 计数标签，显示当前输入估算 token 数（不含图片），对齐 docs/ui/chat.md §十二 InputState.tokenCount */
-    private val tokenCountLabel = JLabel("0 tokens").apply {
-        foreground = AppColors.textSecondary
-        font = font.deriveFont(11f)
-    }
-
-    /** @ 选择文件 可点击标签，对齐 docs/ui/chat.md §一 底部栏顺序 + §七 + §十四 hintLabel */
-    private val hintLabel = JLabel("@ 选择文件").apply {
-        foreground = AppColors.textSecondary
-        font = font.deriveFont(12f)
-        cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
-        toolTipText = "点击选择项目文件（或输入 @ 触发搜索）"
-        addMouseListener(object : MouseAdapter() {
-            override fun mouseClicked(e: MouseEvent) {
-                showPopup("", getProjectFiles(""))
-            }
-        })
-    }
 
     /** 对齐 docs/ui/components.md §3.1 Primary Button Loading 状态：bg=#3B82F6, text="", 文字位置显示 spinner, 不可点击 */
     private var loadingAnimator: javax.swing.Timer? = null
@@ -283,17 +265,15 @@ class ChatInputArea(
         // 初始状态显示 placeholder
         showPlaceholder()
 
-        // 对齐 docs/ui/components.md §3.2 Focus 状态：边框加粗到 2px，颜色 #3B82F6；底部 token 计数变色
+        // 对齐 docs/ui/components.md §3.2 Focus 状态：边框加粗到 2px，颜色 #3B82F6
         textArea.addFocusListener(object : FocusAdapter() {
             override fun focusGained(e: FocusEvent?) {
                 hidePlaceholder()
                 updateInputBorder()
-                tokenCountLabel.foreground = AppColors.primary
             }
 
             override fun focusLost(e: FocusEvent?) {
                 updateInputBorder()
-                tokenCountLabel.foreground = AppColors.textSecondary
                 restorePlaceholderIfEmpty()
             }
         })
@@ -390,16 +370,12 @@ class ChatInputArea(
         topPanel.add(inputScrollPane, BorderLayout.CENTER)
 
         add(topPanel, BorderLayout.CENTER)
-        // 对齐 docs/ui/chat.md §一 底部栏顺序：[+] @ 选择文件 [→]
+        // 对齐 docs/ui/chat.md §一 底部栏顺序：[+] [→]
         val buttonBar = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.X_AXIS)
             border = BorderFactory.createEmptyBorder(4, 4, 4, 4)
             add(addFileButton)
-            add(Box.createHorizontalStrut(4))
-            add(hintLabel)
             add(Box.createHorizontalGlue())
-            add(tokenCountLabel)
-            add(Box.createHorizontalStrut(8))
             add(sendButton)
         }
         add(buttonBar, BorderLayout.SOUTH)
@@ -865,11 +841,4 @@ class ChatInputArea(
         updateInputBorder()
     }
 
-    /**
-     * 更新 token 计数显示，对齐 docs/ui/chat.md §十二 InputState.tokenCount。
-     * 由 ChatViewModel.updateInputState 回调触发，显示当前输入估算 token 数。
-     */
-    fun updateTokenCount(count: Int) {
-        tokenCountLabel.text = if (count > 0) "${"%,d".format(count)} tokens" else "0 tokens"
-    }
 }

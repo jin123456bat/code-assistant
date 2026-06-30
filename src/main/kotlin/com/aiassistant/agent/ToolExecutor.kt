@@ -21,14 +21,26 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
 import java.net.URLEncoder
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
+
+data class ToolApprovalRequest(
+    val toolUseId: String,
+    val toolName: String,
+    val message: String,
+    val dangerous: Boolean,
+    val complete: (ToolApprovalPolicy.ApprovalResult) -> Unit
+)
 
 class ToolExecutor(private val project: Project, private val session: AgentSession) {
 
     /** 工具状态变更回调，供 AgentLoop 驱动 ToolCallCard 实时刷新 */
     var onToolStateChanged: ((toolUseId: String, state: ToolCallState, result: String?, durationMs: Long?) -> Unit)? =
         null
+
+    /** 审批请求回调，供 UI 在 ToolCallCard 内嵌按钮中完成审批。 */
+    var onApprovalRequested: ((ToolApprovalRequest) -> Unit)? = null
 
     /** 子 Agent 事件回调，透传给 AgentLoop → ChatViewModel → MultiAgentBlock */
     var onSubAgentEvent: ((MultiAgentManager.SubAgentEvent) -> Unit)? = null
@@ -164,6 +176,26 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
         val input = toolUse._input()
         val isDangerous = ToolApprovalPolicy.isDangerousReason(reason)
         val message = ToolApprovalPolicy.describe(toolName, input, reason)
+        val approvalCallback = onApprovalRequested
+        if (approvalCallback != null) {
+            val latch = CountDownLatch(1)
+            val resultRef = AtomicReference(ToolApprovalPolicy.ApprovalResult.REJECTED)
+            approvalCallback(
+                ToolApprovalRequest(
+                    toolUseId = toolUseId,
+                    toolName = toolName,
+                    message = message,
+                    dangerous = isDangerous,
+                    complete = { result ->
+                        resultRef.set(result)
+                        latch.countDown()
+                    }
+                )
+            )
+            latch.await()
+            return finishApproval(resultRef.get())
+        }
+
         val app = ApplicationManager.getApplication()
 
         val resultRef = AtomicReference(ToolApprovalPolicy.ApprovalResult.REJECTED)
@@ -220,7 +252,7 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
         val endLine = ToolInput.int(input, "endLine")
 
         val basePath = project.basePath ?: return "错误: 项目路径不可用"
-        val file = File(basePath, path)
+        val file = resolveProjectFile(basePath, path) ?: return pathEscapedError(path)
         if (!file.exists()) return "错误: 文件 \"$path\" 不存在"
 
         val lines = file.readLines()
@@ -229,7 +261,6 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
 
         // 记录 modificationStamp 供 Edit 冲突检测
         session.fileStamps[path] = file.lastModified()
-        session.filesModifiedThisTurn.add(path)  // 大范围修改审批检测（对齐 docs/agent/tools.md §六）
         // 记录当前 turn 已 Read，供 Edit/Write 前置 Read 校验（对齐 docs/agent/tools.md §七）
         session.filesReadThisTurn.add(path)
 
@@ -257,7 +288,7 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
         if (lineCount > maxLines) return "错误: 内容过长 ($lineCount 行，上限 $maxLines 行)"
 
         val basePath = project.basePath ?: return "错误: 项目路径不可用"
-        val file = File(basePath, path)
+        val file = resolveProjectFile(basePath, path) ?: return pathEscapedError(path)
         val isNew = !file.exists()
 
         // 覆盖模式：Read 前置校验（对齐 docs/agent/tools.md §七）
@@ -296,7 +327,7 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
         val newString = ToolInput.string(input, "newString") ?: return "错误: 缺少 newString 参数"
 
         val basePath = project.basePath ?: return "错误: 项目路径不可用"
-        val file = File(basePath, path)
+        val file = resolveProjectFile(basePath, path) ?: return pathEscapedError(path)
         if (!file.exists()) {
             if (oldString.isEmpty()) {
                 file.parentFile?.mkdirs()
@@ -347,6 +378,16 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
         val newLines = newString.lines().size
         return "✅ 已修改: $path\n替换了 $replacedLines 行 → $newLines 行"
     }
+
+    private fun resolveProjectFile(basePath: String, path: String): File? {
+        val base = File(basePath).canonicalFile
+        val file = File(base, path).canonicalFile
+        val inside = file == base || file.path.startsWith(base.path + File.separator)
+        return file.takeIf { inside }
+    }
+
+    private fun pathEscapedError(path: String): String =
+        "错误: 文件路径 \"$path\" 超出项目根目录，已拒绝访问"
 
     // ── Bash ──
     private fun runShell(toolUse: BetaToolUseBlock, timeoutSec: Int): String {
@@ -657,6 +698,9 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
         val skill = skills.find { it.name == skillName || it.command == skillName }
             ?: return "错误: Skill \"$skillName\" 不存在"
         if (!skill.enabled) return "错误: Skill \"$skillName\" 已被禁用"
+        if (skill.hasMissingTools) {
+            return "错误: Skill \"$skillName\" 工具缺失: ${skill.missingTools.joinToString(", ")}"
+        }
         // 记录已调用 skill，对齐 docs/agent/skills.md §五：compact 时被调用过的 skill 重新注入
         session.calledSkills.add(skill.name)
         return "## Skill: ${skill.name}\n${skill.description}\n\n${skill.content}"
@@ -681,11 +725,8 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
         val query = ToolInput.string(input, "query") ?: return "错误: 缺少 query 参数"
         if (query.length < 2) return "错误: 搜索关键词至少 2 个字符"
 
-        @Suppress("UNCHECKED_CAST")
-        val allowedDomains = (input as? Map<*, *>)?.get("allowed_domains") as? List<String>
-
-        @Suppress("UNCHECKED_CAST")
-        val blockedDomains = (input as? Map<*, *>)?.get("blocked_domains") as? List<String>
+        val allowedDomains = ToolInput.stringList(input, "allowedDomains")
+        val blockedDomains = ToolInput.stringList(input, "blockedDomains")
         val offset = ToolInput.int(input, "offset") ?: 0
         val maxResults = 10
 
@@ -1432,8 +1473,7 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
         val input = toolUse._input()
         val task = ToolInput.string(input, "task") ?: return "错误: 缺少 task 参数"
 
-        @Suppress("UNCHECKED_CAST")
-        val plansRaw = (input as? Map<*, *>)?.get("plans") as? List<Map<String, Any>>
+        val plansRaw = ToolInput.mapList(input, "plans")
             ?: return "错误: 缺少 plans 参数或格式不正确"
         if (plansRaw.size > 20) return "错误: 计划项不能超过 20 项，当前 ${plansRaw.size} 项"
         val plan = planExecutor.createPlanFromTool(task, plansRaw)
@@ -1467,8 +1507,7 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
     private fun reorderPlans(toolUse: BetaToolUseBlock): String {
         val input = toolUse._input()
 
-        @Suppress("UNCHECKED_CAST")
-        val planIds = (input as? Map<*, *>)?.get("planIds") as? List<String>
+        val planIds = ToolInput.stringList(input, "planIds")
             ?: return "错误: 缺少 planIds 参数或格式不正确"
         return planExecutor.reorderPlans(planIds)
     }
