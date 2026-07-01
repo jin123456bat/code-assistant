@@ -57,7 +57,7 @@ class ChatInputAreaTest {
     }
 
     private fun findSendButton(inputArea: ChatInputArea): JButton =
-        buttonsIn(inputArea).single { it.text == "发送" }
+        buttonsIn(inputArea).single { it.accessibleContext.accessibleDescription == "发送消息" }
 
     private fun buttonsIn(container: Container): List<JButton> =
         container.components.flatMap { child ->

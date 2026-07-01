@@ -4,6 +4,8 @@ import com.anthropic.core.JsonValue
 import com.anthropic.models.beta.messages.BetaToolUseBlock
 import com.intellij.openapi.project.Project
 import java.lang.reflect.Proxy
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlin.io.path.createTempDirectory
 import kotlin.io.path.writeText
 import kotlin.test.Test
@@ -39,6 +41,35 @@ class ToolExecutorPathTest {
         assertTrue(result.contains("[文件: README.md"), result)
         assertTrue("README.md" in session.filesReadThisTurn)
         assertTrue(session.filesModifiedThisTurn.isEmpty())
+    }
+
+    @Test
+    fun `write rejects when another agent holds file lock`() {
+        val root = createTempDirectory()
+        val projectDir = root.resolve("project").toFile().apply { mkdirs() }
+        val project = projectAt(projectDir.absolutePath)
+        val file = projectDir.resolve("locked.txt")
+        val lock = MultiAgentManager(project).acquireFileLock(file.canonicalPath)
+        val locked = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val holder = Thread {
+            lock.lock()
+            try {
+                locked.countDown()
+                release.await(5, TimeUnit.SECONDS)
+            } finally {
+                lock.unlock()
+            }
+        }
+        holder.start()
+        assertTrue(locked.await(5, TimeUnit.SECONDS))
+
+        val result = ToolExecutor(project, approvedSession("Write"))
+            .execute(tool("Write", mapOf("filePath" to "locked.txt", "content" to "new")))
+
+        release.countDown()
+        holder.join(5000)
+        assertContains(result, "正在被其他 Agent 修改")
     }
 
     private fun approvedSession(toolName: String): AgentSession =

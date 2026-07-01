@@ -96,6 +96,19 @@ class SessionStoreTest {
         assertEquals(PlanExecutor.PlanItem.ItemStatus.PAUSED, restoredPlan.plans.single().status)
     }
 
+    @Test
+    fun `persists approved mcp servers`() {
+        val project = projectAt(createTempDirectory().toString())
+        val session = AgentSession(id = "session-with-mcp-approval")
+        session.approvedMcpServers.add("github")
+
+        val store = SessionStore(project)
+        store.save(session)
+
+        val restored = assertNotNull(store.load(session.id))
+        assertEquals(setOf("github"), restored.approvedMcpServers)
+    }
+
     private fun projectAt(basePath: String): Project =
         Proxy.newProxyInstance(
             Project::class.java.classLoader,

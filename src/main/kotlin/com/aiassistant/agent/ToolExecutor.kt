@@ -73,6 +73,7 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
             val approvalCtx =
                 ToolApprovalPolicy.ApprovalContext(session, toolName, toolUse, project)
             val (needsApproval, reason) = ToolApprovalPolicy.needsUserApproval(approvalCtx)
+            var markFirstUse = true
             if (needsApproval) {
                 when (val approvalResult = requestApproval(toolUse, reason)) {
                     ToolApprovalPolicy.ApprovalResult.REJECTED -> {
@@ -89,11 +90,14 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
 
                     ToolApprovalPolicy.ApprovalResult.ALLOW_ONCE -> {
                         // 仅本次放行，不加入白名单
+                        markFirstUse = !toolName.contains("/")
                     }
                 }
             }
             // 标记首次工具使用已完成（对齐 docs/agent/tools.md §六 首次工具使用）
-            ToolApprovalPolicy.markFirstToolUse(session, toolName)
+            if (markFirstUse) {
+                ToolApprovalPolicy.markFirstToolUse(session, toolName)
+            }
             onToolStateChanged?.invoke(toolUseId, ToolCallState.EXECUTING, null, null)
             val start = System.currentTimeMillis()
             val result = when (toolName) {
@@ -110,11 +114,11 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
                 "WebFetch" -> webFetch(toolUse)
                 "AskUserQuestion" -> askUserQuestion(toolUse)
                 "Symbol" -> symbol(toolUse)
-                "createPlan" -> createPlan(toolUse)
-                "listPlans" -> listPlans()
-                "removePlan" -> removePlan(toolUse)
-                "reorderPlans" -> reorderPlans(toolUse)
-                "markPlanDone" -> markPlanDone(toolUse)
+                "CreatePlan", "createPlan" -> createPlan(toolUse)
+                "ListPlans", "listPlans" -> listPlans()
+                "RemovePlan", "removePlan" -> removePlan(toolUse)
+                "ReorderPlans", "reorderPlans" -> reorderPlans(toolUse)
+                "MarkPlanDone", "markPlanDone" -> markPlanDone(toolUse)
                 else -> {
                     // MCP 工具处理：工具名格式为 `serverName/toolName`
                     val toolClass = ToolRegistry.get(toolName)
@@ -289,28 +293,22 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
 
         val basePath = project.basePath ?: return "错误: 项目路径不可用"
         val file = resolveProjectFile(basePath, path) ?: return pathEscapedError(path)
-        val isNew = !file.exists()
+        var isNew = !file.exists()
 
-        // 覆盖模式：Read 前置校验（对齐 docs/agent/tools.md §七）
-        if (!isNew && !session.filesReadThisTurn.contains(path)) {
-            return "错误: 当前 turn 中文件 \"$path\" 未被 Read 过。\n请先用 Read 读取 $path 后再修改"
-        }
-
-        // 覆盖模式：modificationStamp 冲突检测
-        if (!isNew) {
-            val lastReadStamp = session.fileStamps[path]
-            val currentStamp = file.lastModified()
-            if (lastReadStamp != null && lastReadStamp != currentStamp) {
-                return "错误: \"$path\" 已被外部修改（上次读取 stamp=$lastReadStamp，当前 stamp=$currentStamp）。\n请使用 Read 重新读取文件后再试。"
+        withFileWriteLock(file, path) {
+            isNew = !file.exists()
+            if (!isNew && !session.filesReadThisTurn.contains(path)) {
+                return@withFileWriteLock "错误: 当前 turn 中文件 \"$path\" 未被 Read 过。\n请先用 Read 读取 $path 后再修改"
             }
-        }
-
-        ApplicationManager.getApplication().invokeAndWait {
-            WriteCommandAction.runWriteCommandAction(project) {
-                file.parentFile?.mkdirs()
-                file.writeText(content)
+            validateFileStamp(file, path)?.let { return@withFileWriteLock it }
+            ApplicationManager.getApplication().invokeAndWait {
+                WriteCommandAction.runWriteCommandAction(project) {
+                    file.parentFile?.mkdirs()
+                    file.writeText(content)
+                }
             }
-        }
+            null
+        }?.let { return it }
 
         // 更新 stamp
         session.fileStamps[path] = file.lastModified()
@@ -330,8 +328,14 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
         val file = resolveProjectFile(basePath, path) ?: return pathEscapedError(path)
         if (!file.exists()) {
             if (oldString.isEmpty()) {
-                file.parentFile?.mkdirs()
-                file.writeText(newString)
+                withFileWriteLock(file, path) {
+                    if (file.exists()) {
+                        return@withFileWriteLock "错误: 文件 \"$path\" 已存在。\n请先用 Read 读取 $path 后再修改"
+                    }
+                    file.parentFile?.mkdirs()
+                    file.writeText(newString)
+                    null
+                }?.let { return it }
                 session.fileStamps[path] = file.lastModified()
                 session.filesModifiedThisTurn.add(path)  // 大范围修改审批检测（对齐 docs/agent/tools.md §六）
                 return "✅ 文件已创建: $path (${newString.lines().size} 行)"
@@ -344,38 +348,37 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
             return "错误: 当前 turn 中文件 \"$path\" 未被 Read 过。\n请先用 Read 读取 $path 后再修改"
         }
 
-        // modificationStamp 冲突检测
-        val lastReadStamp = session.fileStamps[path]
-        val currentStamp = file.lastModified()
-        if (lastReadStamp != null && lastReadStamp != currentStamp) {
-            return "错误: \"$path\" 已被外部修改（上次读取 stamp=$lastReadStamp，当前 stamp=$currentStamp）。\n请使用 Read 重新读取文件后再试。"
-        }
+        var replacedLines = oldString.lines().size
+        var newLines = newString.lines().size
+        withFileWriteLock(file, path) {
+            if (!file.exists()) return@withFileWriteLock "错误: 文件 \"$path\" 不存在"
+            validateFileStamp(file, path)?.let { return@withFileWriteLock it }
+            val currentContent = file.readText()
+            val count = currentContent.split(oldString).size - 1
 
-        val currentContent = file.readText()
-        val count = currentContent.split(oldString).size - 1
-
-        if (count == 0) {
-            val lines = currentContent.lines()
-            return "错误: 在 \"$path\" 中未找到 oldString。\n提示: 请使用 Read 确认文件内容。\n文件共 ${lines.size} 行。"
-        }
-        if (count > 1) {
-            return "错误: oldString 在 \"$path\" 中匹配到 $count 处，必须唯一。\n请使用更长的 oldString 使其唯一。"
-        }
-
-        val newContent = currentContent.replace(oldString, newString)
-
-        ApplicationManager.getApplication().invokeAndWait {
-            WriteCommandAction.runWriteCommandAction(project) {
-                file.writeText(newContent)
+            if (count == 0) {
+                val lines = currentContent.lines()
+                return@withFileWriteLock "错误: 在 \"$path\" 中未找到 oldString。\n提示: 请使用 Read 确认文件内容。\n文件共 ${lines.size} 行。"
             }
-        }
+            if (count > 1) {
+                return@withFileWriteLock "错误: oldString 在 \"$path\" 中匹配到 $count 处，必须唯一。\n请使用更长的 oldString 使其唯一。"
+            }
+
+            val newContent = currentContent.replace(oldString, newString)
+            replacedLines = oldString.lines().size
+            newLines = newString.lines().size
+            ApplicationManager.getApplication().invokeAndWait {
+                WriteCommandAction.runWriteCommandAction(project) {
+                    file.writeText(newContent)
+                }
+            }
+            null
+        }?.let { return it }
 
         // 更新 stamp
         session.fileStamps[path] = file.lastModified()
         session.filesModifiedThisTurn.add(path)  // 大范围修改审批检测（对齐 docs/agent/tools.md §六）
 
-        val replacedLines = oldString.lines().size
-        val newLines = newString.lines().size
         return "✅ 已修改: $path\n替换了 $replacedLines 行 → $newLines 行"
     }
 
@@ -388,6 +391,32 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
 
     private fun pathEscapedError(path: String): String =
         "错误: 文件路径 \"$path\" 超出项目根目录，已拒绝访问"
+
+    private fun validateFileStamp(file: File, path: String): String? {
+        val lastReadStamp = session.fileStamps[path]
+        val currentStamp = file.lastModified()
+        return if (lastReadStamp != null && lastReadStamp != currentStamp) {
+            "错误: \"$path\" 已被外部修改（上次读取 stamp=$lastReadStamp，当前 stamp=$currentStamp）。\n请使用 Read 重新读取文件后再试。"
+        } else {
+            null
+        }
+    }
+
+    private fun withFileWriteLock(
+        file: File,
+        displayPath: String,
+        writeAction: () -> String?
+    ): String? {
+        val lock = multiAgent.acquireFileLock(file.canonicalPath)
+        if (!lock.tryLock()) {
+            return "错误: 文件 \"$displayPath\" 正在被其他 Agent 修改，请稍后重试。"
+        }
+        return try {
+            writeAction()
+        } finally {
+            lock.unlock()
+        }
+    }
 
     // ── Bash ──
     private fun runShell(toolUse: BetaToolUseBlock, timeoutSec: Int): String {
@@ -1578,7 +1607,7 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
                                     obj.get("text")?.asString?.let { texts.add(it) }
                                 }
                             }
-                            texts.joinToString("\n")
+                            truncateMcpResult(texts.joinToString("\n"))
                         } else {
                             "[MCP 工具 $toolName 返回空结果]"
                         }
@@ -1597,6 +1626,18 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
         }
 
         return "MCP 工具 $toolName 执行超时: Server [$serverId] 30s 无响应"
+    }
+
+    /**
+     * MCP 工具结果最多返回 200 行。MCP 调用通常有副作用，不支持分页重放。
+     */
+    private fun truncateMcpResult(result: String): String {
+        val maxLines = 200
+        val lines = result.lines()
+        if (lines.size <= maxLines) return result
+
+        return lines.take(maxLines).joinToString("\n") +
+                "\n... (共 ${lines.size} 行，已截断到 $maxLines 行)"
     }
 
     companion object {

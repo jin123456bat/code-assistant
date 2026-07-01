@@ -9,6 +9,10 @@ import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.BufferedReader
 import java.io.BufferedWriter
 import java.io.File
@@ -92,6 +96,12 @@ class McpManager(private val project: Project) {
     private val gson = Gson()
     private val configStore = McpConfigStore(project)
     private val servers = mutableMapOf<String, McpServer>()
+    private val httpClient: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(5, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .build()
+    }
 
     /** 定时任务调度器 */
     private val scheduler: ScheduledExecutorService =
@@ -172,6 +182,9 @@ class McpManager(private val project: Project) {
      * 实际执行连接操作：启动进程 + 启动 stdout/stderr 后台读取线程 + 握手。
      */
     private fun doConnect(server: McpServer): Boolean {
+        if (server.config.transport.equals("http", ignoreCase = true)) {
+            return doConnectHttp(server)
+        }
         try {
             setServerState(server, State.INITIALIZING)
 
@@ -240,6 +253,39 @@ class McpManager(private val project: Project) {
         }
     }
 
+    private fun doConnectHttp(server: McpServer): Boolean {
+        return try {
+            setServerState(server, State.INITIALIZING)
+            stopStdioThreads(server)
+            server.process = null
+            server.stdinWriter = null
+            server.nonJsonConsecutiveCount.set(0)
+            server.responseQueue.clear()
+
+            if (server.config.url.isNullOrBlank()) {
+                server.lastErrorMessage = "HTTP MCP Server 缺少 url"
+                setServerState(server, State.ERROR)
+                return false
+            }
+
+            if (performHttpHandshake(server)) {
+                sendJsonRpcNotification(server, "notifications/initialized", null)
+                val toolNames = fetchAndRegisterTools(server)
+                setServerState(server, State.RUNNING)
+                LOG.info("HTTP MCP Server [${server.config.id}] 连接成功，注册 ${toolNames.size} 个工具: $toolNames")
+                true
+            } else {
+                setServerState(server, State.ERROR)
+                false
+            }
+        } catch (e: Exception) {
+            server.lastErrorMessage = e.message ?: "HTTP 连接失败"
+            setServerState(server, State.ERROR)
+            LOG.warn("HTTP MCP Server [${server.config.id}] 连接失败", e)
+            false
+        }
+    }
+
     /**
      * JSON-RPC 初始化握手：发送 initialize 请求，在 responseQueue 中等待 5 秒响应。
      */
@@ -280,6 +326,31 @@ class McpManager(private val project: Project) {
             false
         } catch (e: Exception) {
             LOG.warn("MCP Server [${server.config.id}] 初始化握手异常", e)
+            false
+        }
+    }
+
+    private fun performHttpHandshake(server: McpServer): Boolean {
+        val initializeRequest = buildJsonRpcRequest(
+            "initialize",
+            mapOf(
+                "protocolVersion" to "2024-11-05",
+                "capabilities" to mapOf<String, Any>(),
+                "clientInfo" to mapOf(
+                    "name" to "code-assistant",
+                    "version" to "1.0.0"
+                )
+            )
+        )
+
+        return try {
+            sendJsonRpcMessage(server, initializeRequest)
+            val response = waitForResponseFromQueue(server, TimeUnit.SECONDS.toMillis(5))
+                ?: return false
+            val json = JsonParser.parseString(response)
+            json.isJsonObject && json.asJsonObject.has("result")
+        } catch (e: Exception) {
+            LOG.warn("HTTP MCP Server [${server.config.id}] 初始化握手异常", e)
             false
         }
     }
@@ -722,8 +793,11 @@ class McpManager(private val project: Project) {
         }
         val startTime = System.currentTimeMillis()
         return try {
-            val writer = server.stdinWriter
-            if (writer == null) {
+            if (!server.config.transport.equals(
+                    "http",
+                    ignoreCase = true
+                ) && server.stdinWriter == null
+            ) {
                 return ConnectionResult(success = false, errorMessage = "未建立连接通道")
             }
             val initializeRequest = buildJsonRpcRequest(
@@ -818,11 +892,78 @@ class McpManager(private val project: Project) {
     }
 
     private fun sendJsonRpcMessage(server: McpServer, message: JsonObject) {
+        if (server.config.transport.equals("http", ignoreCase = true)) {
+            sendHttpJsonRpcMessage(server, message)
+            return
+        }
         val writer = server.stdinWriter ?: return
         synchronized(writer) {
             writer.write(gson.toJson(message) + "\n")
             writer.flush()
         }
+    }
+
+    private fun sendHttpJsonRpcMessage(server: McpServer, message: JsonObject) {
+        val url = server.config.url ?: throw IllegalStateException("HTTP MCP Server 缺少 url")
+        val body = gson.toJson(message).toRequestBody(JSON_MEDIA_TYPE)
+        val request = Request.Builder()
+            .url(url)
+            .header("Accept", "application/json, text/event-stream")
+            .post(body)
+            .build()
+        httpClient.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw IllegalStateException("HTTP ${response.code}: ${response.message}")
+            }
+            val contentType = response.header("Content-Type").orEmpty()
+            val responseBody = response.body?.let { body ->
+                if (contentType.contains("text/event-stream", ignoreCase = true)) {
+                    readFirstSseData(body.source()).orEmpty()
+                } else {
+                    body.string()
+                }
+            }.orEmpty()
+            if (responseBody.isBlank()) return
+            enqueueHttpResponse(server, contentType, responseBody)
+        }
+    }
+
+    private fun readFirstSseData(source: okio.BufferedSource): String? {
+        val data = StringBuilder()
+        while (true) {
+            val line =
+                source.readUtf8Line() ?: return data.toString().trim().takeIf { it.isNotEmpty() }
+            when {
+                line.isBlank() && data.isNotEmpty() -> return data.toString().trim()
+                line.startsWith("data:") -> data.appendLine(line.removePrefix("data:").trimStart())
+            }
+        }
+    }
+
+    private fun enqueueHttpResponse(server: McpServer, contentType: String, body: String) {
+        if (!contentType.contains("text/event-stream", ignoreCase = true) && !body.trimStart()
+                .startsWith("data:")
+        ) {
+            server.responseQueue.offer(body.trim())
+            return
+        }
+        if (contentType.contains("text/event-stream", ignoreCase = true) && !body.trimStart()
+                .startsWith("data:")
+        ) {
+            server.responseQueue.offer(body.trim())
+            return
+        }
+
+        body.split("\n\n")
+            .map { event ->
+                event.lines()
+                    .map { it.trim() }
+                    .filter { it.startsWith("data:") }
+                    .joinToString("\n") { it.removePrefix("data:").trimStart() }
+                    .trim()
+            }
+            .filter { it.isNotEmpty() && it != "[DONE]" }
+            .forEach { server.responseQueue.offer(it) }
     }
 
     // ── 内部辅助方法 ──
@@ -882,6 +1023,7 @@ class McpManager(private val project: Project) {
 
         /** 连续非 JSON-RPC 行阈值，超过此值判定 Server 异常 */
         private const val NON_JSON_CONSECUTIVE_MAX = 100
+        private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
 
         /** 按 Project 查找已创建的 McpManager 实例，供 ToolExecutor 等组件查询 Server 状态 */
         private val instances = mutableMapOf<Project, McpManager>()

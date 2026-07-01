@@ -77,7 +77,7 @@
 │       └── injects SKILL.md body into System Prompt                    │
 │                                                                        │
 │  McpManager ──manages──→ MCP Server processes                         │
-│       │                    (stdio subprocess / HTTP+SSE)               │
+│       │                    (stdio subprocess / HTTP JSON-RPC)          │
 │       │                                                                │
 │       └── registers MCP tools → ToolRegistry                          │
 │                                                                        │
@@ -236,11 +236,11 @@ PlanExecutor.generatePlan(task) (PooledThread)
   │
   ├── PlanCard 渲染（invokeLater → EDT）
   │
-  └── PlanExecutor.executeNext() 自动循环:
+  └── ChatViewModel.startPlanAutoExecution() 自动循环:
         │
-        ├── 获取 nextPlan (PAUSED → EXECUTING)
-        ├── AgentLoop.run(plan.summary)
-        ├── 更新 plan.status → COMPLETED
+        ├── PlanExecutor.beginNextStep() (PAUSED → EXECUTING)
+        ├── AgentLoop.run(plan item prompt)
+        ├── PlanExecutor.completeStep()/pauseStep()
         ├── currentPlanIndex++
         ├── 下一项 → 重复
         └── 全部 COMPLETED → PlanCard 消失

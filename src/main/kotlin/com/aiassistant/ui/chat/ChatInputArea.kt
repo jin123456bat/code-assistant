@@ -28,13 +28,20 @@ class ChatInputArea(
 ) : JPanel(BorderLayout()) {
 
     private val textArea = JTextArea(2, 0).apply {
-        lineWrap = true; wrapStyleWord = true; font = font.deriveFont(13f)
+        lineWrap = true; wrapStyleWord = true; font = font.deriveFont(11f)
+        background = AppColors.pageBg
     }
     private val popup = JPopupMenu()
     private val popupMenuItems = mutableListOf<JMenuItem>()
 
     /** Tags 行（FlowLayout，文件+图片混合排列，位于输入框上方），对齐 docs/ui/chat.md §七 + §十四 tagsRow */
-    private val tagsPanel = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0))
+    private val tagsPanel = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0)).apply {
+        isOpaque = true; background = AppColors.pageBg
+    }
+
+    /** 项目文件缓存，后台预加载，避免 EDT 访问 PSI index */
+    @Volatile
+    private var cachedFiles: List<ProjectFileEntry>? = null
 
     /** 手动 @file 引用（可多个），对齐 docs/ui/chat.md §十二 InputState.manualRefs */
     private val manualFileRefs = mutableListOf<FileRef>()
@@ -46,20 +53,41 @@ class ChatInputArea(
     private val imageRefs = mutableListOf<ImageRef>()
     private val addFileButton = JButton("+").apply {
         accessibleContext.accessibleDescription = "添加文件引用"
+        font = font.deriveFont(Font.PLAIN, 16f)
+        preferredSize = Dimension(24, 24)
+        isContentAreaFilled = true
+        isOpaque = true
+        background = AppColors.cardBg
+        foreground = AppColors.textSecondary
+        border = BorderFactory.createLineBorder(AppColors.gray300, 1)
+        isFocusPainted = false
         addActionListener {
-            // 对齐 docs/ui/chat.md §八：点击 [+] 与输入 @ 行为一致，触发文件选择 Popup
-            // 在光标位置插入 @ 以复用 checkTriggers() 的 @ 检测逻辑，实现统一的文件搜索弹出
             val caret = textArea.caretPosition
             textArea.document.insertString(caret, "@", null)
-            // checkTriggers() 由 DocumentListener 自动触发，弹出按子目录分组的文件选择列表
         }
     }
-    private val sendButton = JButton("发送").apply {
+    private val sendButton = JButton("→").apply {
         accessibleContext.accessibleDescription = "发送消息"
+        font = font.deriveFont(Font.PLAIN, 14f)
+        preferredSize = Dimension(28, 28)
         addActionListener { doSend() }
         isOpaque = true
         foreground = Color.WHITE
         background = AppColors.primary
+        border = BorderFactory.createEmptyBorder()
+        isFocusPainted = false
+    }
+    private val stopButton = JButton("⏹").apply {
+        accessibleContext.accessibleDescription = "停止生成"
+        font = font.deriveFont(Font.PLAIN, 12f)
+        preferredSize = Dimension(28, 28)
+        addActionListener { onStop?.invoke() }
+        isOpaque = true
+        foreground = Color.WHITE
+        background = AppColors.error
+        border = BorderFactory.createEmptyBorder()
+        isFocusPainted = false
+        isVisible = false
     }
 
 
@@ -95,15 +123,14 @@ class ChatInputArea(
         override fun getIconHeight(): Int = sendButton.font.size + 4
     }
 
-    // 对齐 docs/ui/components.md §3.2 Overflow "JScrollPane border 跟随 input 边框"
-    // 定义各状态的边框，由 updateInputBorder() 统一管理
+    // 对齐 ui-prototype.html: textarea border=none，仅 input-area 容器有 border-top
     private val inputScrollPane: JScrollPane
     private val defaultInputBorder =
-        BorderFactory.createLineBorder(AppColors.border)       // Default: border=#D1D5DB
+        BorderFactory.createEmptyBorder()                       // 无可见边框
     private val focusInputBorder =
-        BorderFactory.createLineBorder(AppColors.primary, 2)     // Focus: border=#3B82F6, 2px
+        BorderFactory.createEmptyBorder()                       // focus 无边框变化
     private val disabledInputBorder =
-        BorderFactory.createLineBorder(AppColors.hoverBg)    // Disabled: bg=#F3F4F6
+        BorderFactory.createLineBorder(AppColors.hoverBg)       // disabled 时浅灰背景
 
     /**
      * 对齐 docs/ui/components.md §3.2 Overflow：高度自适应 2-10 行。
@@ -120,7 +147,7 @@ class ChatInputArea(
         val totalLines = lines.sumOf { line ->
             if (line.isEmpty()) 1
             else maxOf(1, (fontMetrics.stringWidth(line) + textWidth - 1) / textWidth)
-        }.coerceIn(2, 10)
+        }.coerceIn(2, 8)
 
         textArea.rows = totalLines
         textArea.revalidate()
@@ -157,6 +184,16 @@ class ChatInputArea(
 
     fun setProject(project: com.intellij.openapi.project.Project) {
         projectRef = project
+        // ponytail: 后台预加载文件列表，避免 EDT 访问 PSI index
+        com.intellij.openapi.application.ApplicationManager.getApplication().executeOnPooledThread {
+            cachedFiles = try {
+                com.intellij.openapi.application.ReadAction.compute<List<ProjectFileEntry>, Throwable> {
+                    getProjectFiles("")
+                }
+            } catch (_: Exception) {
+                emptyList()
+            }
+        }
     }
 
     /**
@@ -365,20 +402,26 @@ class ChatInputArea(
             override fun changedUpdate(e: DocumentEvent?) = checkTriggers()
         })
 
-        val topPanel = JPanel(BorderLayout())
+        val topPanel = JPanel(BorderLayout()).apply {
+            isOpaque = true; background = AppColors.pageBg
+        }
         topPanel.add(tagsPanel, BorderLayout.NORTH)
         topPanel.add(inputScrollPane, BorderLayout.CENTER)
 
         add(topPanel, BorderLayout.CENTER)
-        // 对齐 docs/ui/chat.md §一 底部栏顺序：[+] [→]
         val buttonBar = JPanel().apply {
+            isOpaque = true; background = AppColors.pageBg
             layout = BoxLayout(this, BoxLayout.X_AXIS)
-            border = BorderFactory.createEmptyBorder(4, 4, 4, 4)
+            border = BorderFactory.createEmptyBorder(0, 8, 6, 8)
             add(addFileButton)
             add(Box.createHorizontalGlue())
+            add(stopButton)
+            add(Box.createHorizontalStrut(8))
             add(sendButton)
         }
         add(buttonBar, BorderLayout.SOUTH)
+        // 对齐 ui-prototype.html .input-area: border-top=1px solid #E5E7EB
+        border = BorderFactory.createMatteBorder(1, 0, 0, 0, AppColors.border)
     }
 
     /**
@@ -403,10 +446,10 @@ class ChatInputArea(
         // @file trigger
         val fileMatch = Regex("""(?:^|\s)@(\S*)$""").find(before)
         if (fileMatch != null) {
-            showPopup(
-                fileMatch.groupValues[1],
-                getProjectFiles(fileMatch.groupValues[1])
-            )
+            val filter = fileMatch.groupValues[1]
+            // ponytail: 使用缓存文件列表在 EDT 同步过滤+显示，避免 PSI 慢操作
+            val files = cachedFiles ?: emptyList()
+            showPopup(filter, files)
             return
         }
         // /command trigger
@@ -489,9 +532,9 @@ class ChatInputArea(
         popup.removeAll()
         popup.add(scrollPane)
 
-        // 对齐 docs/ui/chat.md §八：从输入区域底部弹出选择列表
-        val textAreaHeight = textArea.bounds.height
-        popup.show(textArea, 0, textAreaHeight)
+        // ponytail: textArea 在 JScrollPane viewport 内，popup.show(textArea, ...) 会被裁剪
+        // 改为相对 inputScrollPane 弹出，确保完全可见
+        popup.show(inputScrollPane, 0, inputScrollPane.height)
     }
 
     /** 计算 Popup 高度：累加前 maxRows 个组件的 preferredSize.height，确保 8 行可见约束准确 */
@@ -549,9 +592,9 @@ class ChatInputArea(
         }
         popup.add(scrollPane)
 
-        // 对齐 docs/ui/chat.md §八：从输入区域底部弹出选择列表
-        val textAreaHeight = textArea.bounds.height
-        popup.show(textArea, 0, textAreaHeight)
+        // ponytail: textArea 在 JScrollPane viewport 内，popup.show(textArea, ...) 会被裁剪
+        // 改为相对 inputScrollPane 弹出，确保完全可见
+        popup.show(inputScrollPane, 0, inputScrollPane.height)
     }
 
     private var popupIndex = -1
@@ -727,9 +770,15 @@ class ChatInputArea(
         tagsPanel.removeAll()
         val displayTags = buildDisplayTags()
         displayTags.forEach { tagItem ->
-            val t = JPanel(FlowLayout(FlowLayout.LEFT, 2, 0)).apply {
-                isOpaque = true; background = AppColors.tagBg; border =
-                BorderFactory.createLineBorder(AppColors.tagBorder)
+            val isImage = tagItem is TagItem.ImageTag
+            val t = JPanel(FlowLayout(FlowLayout.LEFT, 1, 0)).apply {
+                isOpaque = true
+                // 对齐 ui-prototype: 文件 tag bg=#EFF6FF border=#BFDBFE, 图片 tag bg=#F3F4F6 border=#D1D5DB
+                background = if (isImage) AppColors.hoverBg else AppColors.tagBg
+                border =
+                    if (isImage) BorderFactory.createLineBorder(AppColors.gray300) else BorderFactory.createLineBorder(
+                        AppColors.tagBorder
+                    )
             }
             // 对齐 docs/ui/chat.md §七「48x48 缩略图 tag」：ImageTag 有缩略图时展示缩略图
             if (tagItem is TagItem.ImageTag && tagItem.ref.thumbnail != null) {
@@ -798,26 +847,17 @@ class ChatInputArea(
      * loading=false 时恢复 Default 状态。
      */
     fun setLoading(loading: Boolean) {
+        // ponytail: stopButton 显示 ⏹ 足够清晰，去除无效 spinner 动画
         loadingAnimator?.stop()
         loadingAnimator = null
         if (loading) {
-            sendButton.text = ""
-            sendButton.icon = SpinnerIcon()
+            sendButton.isVisible = false
             sendButton.isEnabled = false
-            sendButton.background = AppColors.primary
-            // 文字位置显示旋转 spinner 对齐 docs/ui/components.md §3.1 Loading 行
-            loadingAnimator = javax.swing.Timer(120) {
-                spinnerIndex = (spinnerIndex + 1) % spinnerChars.size
-                sendButton.repaint()
-            }.apply {
-                isRepeats = true
-                start()
-            }
+            stopButton.isVisible = true
         } else {
-            sendButton.text = "发送"
-            sendButton.icon = null
+            sendButton.isVisible = true
             sendButton.isEnabled = true
-            sendButton.background = AppColors.primary
+            stopButton.isVisible = false
         }
         textArea.isEnabled = !loading
         addFileButton.isEnabled = !loading
@@ -831,7 +871,7 @@ class ChatInputArea(
     fun setInputEnabled(enabled: Boolean) {
         setLoading(!enabled)
         if (enabled) {
-            textArea.background = Color.WHITE
+            textArea.background = AppColors.pageBg
             textArea.cursor = Cursor.getPredefinedCursor(Cursor.TEXT_CURSOR)
         } else {
             textArea.background = AppColors.hoverBg

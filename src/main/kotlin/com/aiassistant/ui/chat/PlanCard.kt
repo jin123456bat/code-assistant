@@ -10,7 +10,7 @@ import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import javax.swing.*
 
-// 计划卡片 — 步骤进度 + 控制按钮，支持亮/暗主题，支持折叠/展开
+// 计划卡片 — 步骤进度 + 控制按钮，支持亮/暗主题，支持折叠/展开（用户可随时折叠，不受执行状态限制）
 // Plan 状态样式规范见 docs/ui/chat.md §五
 
 class PlanCard(
@@ -26,11 +26,8 @@ class PlanCard(
     private val steps = mutableListOf<StepRow>()
     private var currentStepIndex = 0
 
-    /** 当前折叠状态。EXECUTING 状态时强制展开且不可折叠。 */
+    /** 当前折叠状态 */
     private var isExpanded = false
-
-    /** 计划是否处于 EXECUTING 状态（自动展开且不可折叠） */
-    private var isExecuting = false
 
     /** 当前 PlanCard 的整体状态 */
     private var planState: PlanState = PlanState.PAUSED
@@ -48,9 +45,10 @@ class PlanCard(
     }
 
     init {
+        // 对齐 ui-prototype.html .plan-card: border-bottom=1px solid #E5E7EB, padding=10px 16px
         border = BorderFactory.createCompoundBorder(
-            BorderFactory.createLineBorder(AppColors.border),
-            BorderFactory.createEmptyBorder(12, 16, 12, 16)
+            BorderFactory.createMatteBorder(0, 0, 1, 0, AppColors.border),
+            BorderFactory.createEmptyBorder(6, 10, 6, 10)
         )
         isOpaque = true
         background = AppColors.cardBg
@@ -59,16 +57,14 @@ class PlanCard(
         header.cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
         header.addMouseListener(object : MouseAdapter() {
             override fun mouseClicked(e: MouseEvent) {
-                if (!isExecuting) {
-                    toggleExpanded()
-                }
+                toggleExpanded()
             }
         })
-        arrowLabel.font = arrowLabel.font.deriveFont(12f)
-        summaryLabel.font = summaryLabel.font.deriveFont(13f).deriveFont(Font.BOLD)
-        progressLabel.font = progressLabel.font.deriveFont(11f)
+        arrowLabel.font = arrowLabel.font.deriveFont(10f)
+        summaryLabel.font = summaryLabel.font.deriveFont(12f).deriveFont(Font.BOLD)
+        progressLabel.font = progressLabel.font.deriveFont(10f)
 
-        val headerLeft = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0))
+        val headerLeft = JPanel(FlowLayout(FlowLayout.LEFT, 2, 0))
         headerLeft.add(arrowLabel)
         headerLeft.add(summaryLabel)
         header.add(headerLeft, BorderLayout.WEST)
@@ -81,32 +77,26 @@ class PlanCard(
         applyExpandedState()
     }
 
-    /** 切换折叠/展开状态。EXECUTING 状态下不可折叠，调用此方法无效。 */
+    /** 切换折叠/展开状态 */
     fun toggleExpanded() {
-        if (isExecuting) return
         isExpanded = !isExpanded
         applyExpandedState()
     }
 
-    /** 设置折叠状态。EXECUTING 状态下强制展开，传入 false 无效。 */
+    /** 设置折叠状态 */
     fun setExpanded(expanded: Boolean) {
-        if (isExecuting && !expanded) return
         isExpanded = expanded
         applyExpandedState()
     }
 
     /**
      * 设置计划是否处于 EXECUTING 状态。
-     * EXECUTING 状态下自动展开且不可折叠（箭头隐藏，不允许折叠）。
+     * EXECUTING 状态下自动展开，但用户仍可手动折叠。
      */
     fun setExecutingState(executing: Boolean) {
-        isExecuting = executing
         if (executing) {
             isExpanded = true
-            arrowLabel.isVisible = false
             planState = PlanState.EXECUTING
-        } else {
-            arrowLabel.isVisible = true
         }
         applyExpandedState()
     }
@@ -117,7 +107,7 @@ class PlanCard(
         stepsPanel.removeAll()
         planSteps.forEach { addStep(it) }
         currentStepIndex = 0
-        planState = PlanState.PAUSED
+        if (planState != PlanState.EXECUTING) planState = PlanState.PAUSED
         updateProgressLabel()
         applyExpandedState()
     }
@@ -169,12 +159,13 @@ class PlanCard(
         updateProgressLabel()
     }
 
-    /** 标记步骤错误 */
+    /** 标记步骤错误（对齐 ui-prototype .step-error: bg=#FEE2E2, border-radius=4px） */
     fun setStepError(index: Int, msg: String) {
         steps.getOrNull(index)?.let { step ->
             val err = AppColors.error.toHtmlColor()
+            val errBg = AppColors.errorBg.toHtmlColor()
             step.label.text =
-                "<html><span style='color:$err'>❌ ${step.description}: $msg</span></html>"
+                "<html><div style='color:$err;background:$errBg;padding:2px 4px;'>❌ ${step.description}: $msg</div></html>"
         }
     }
 

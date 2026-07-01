@@ -37,6 +37,8 @@ class TabBar(
 
     // 用 JLayeredPane 包裹每个 tab，以便在右上角叠加 badge
     private val tabWrappers = mutableListOf<JLayeredPane>()
+    private val tabWidth = 44
+    private val tabHeight = 32
 
     private val tabs = listOf(
         Tab(Page.WELCOME, AllIcons.Nodes.HomeFolder, "Welcome", true),
@@ -52,9 +54,9 @@ class TabBar(
         tabs.forEach { tab ->
             enabledPages[tab.page] = tab.enabled
             val lbl = JLabel(tab.icon, SwingConstants.CENTER).apply {
-                font = font.deriveFont(13f)
+                font = font.deriveFont(12f)
                 foreground = AppColors.textSecondary
-                preferredSize = Dimension(44, 32)
+                preferredSize = Dimension(tabWidth, tabHeight)
                 toolTipText = tab.tooltip
                 border = BorderFactory.createCompoundBorder(
                     BorderFactory.createMatteBorder(0, 0, 2, 0, AppColors.borderTransparent),
@@ -80,9 +82,9 @@ class TabBar(
 
             // 用 JLayeredPane 包裹 label，以便在右上角叠加 badge
             val wrapper = JLayeredPane().apply {
-                preferredSize = Dimension(44, 32)
+                preferredSize = Dimension(tabWidth, tabHeight)
                 layout = null
-                lbl.setBounds(0, 0, 44, 32)
+                lbl.setBounds(0, 0, tabWidth, tabHeight)
                 add(lbl, JLayeredPane.DEFAULT_LAYER)
             }
             add(wrapper)
@@ -121,11 +123,11 @@ class TabBar(
         val badge = JLabel(displayText, SwingConstants.CENTER).apply {
             // 右上角角标，圆形 badge：最小 16px（半径 8px），数字超过一位时等比加宽加高保持圆形
             val badgeSize = if (displayText.length <= 2) 16 else (8 * displayText.length)
-            setBounds(44 - badgeSize - 1, 1, badgeSize, badgeSize)
+            setBounds(tabWidth - badgeSize - 1, 1, badgeSize, badgeSize)
             isOpaque = true
             background = AppColors.badgeBg
             foreground = AppColors.badgeFg
-            font = Font("SansSerif", Font.BOLD, 9)
+            font = Font("SansSerif", Font.BOLD, 8)
             border = BorderFactory.createLineBorder(AppColors.badgeBg, badgeSize / 2)
         }
 

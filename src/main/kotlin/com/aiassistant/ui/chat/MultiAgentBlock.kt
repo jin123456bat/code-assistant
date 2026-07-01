@@ -56,11 +56,11 @@ class MultiAgentBlock(
         /** 详情面板（可折叠） */
         val detailPanel = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            border = BorderFactory.createEmptyBorder(4, 24, 4, 8)
+            border = BorderFactory.createEmptyBorder(4, 16, 4, 8)
             isVisible = false
         }
         private val streamTextArea = JTextArea().apply {
-            font = Font(Font.MONOSPACED, Font.PLAIN, 12)
+            font = Font(Font.MONOSPACED, Font.PLAIN, 11)
             isEditable = false
             background = AppColors.codeBg
             foreground = AppColors.textSecondary
@@ -72,7 +72,7 @@ class MultiAgentBlock(
             isVisible = false
         }
         private val footerLabel = JLabel().apply {
-            font = font.deriveFont(11f)
+            font = font.deriveFont(10f)
             foreground = AppColors.textTertiary
         }
         var isExpanded = false
@@ -86,10 +86,11 @@ class MultiAgentBlock(
         private val toolCards = mutableMapOf<String, ToolCallCard>()
 
         init {
+            // 对齐 ui-prototype .ma-sub: bg=#FFFFFF, border=1px solid #F3F4F6, padding=6px 10px
             isOpaque = true
-            background = AppColors.multiAgentBg
+            background = AppColors.cardBg
             border = BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(0, 0, 1, 0, AppColors.multiAgentBorder),
+                BorderFactory.createLineBorder(AppColors.hoverBg, 1),
                 BorderFactory.createEmptyBorder(4, 8, 4, 8)
             )
 
@@ -104,14 +105,14 @@ class MultiAgentBlock(
             }
             updateToggleButton()
             nameLabel.apply {
-                font = font.deriveFont(13f)
+                font = font.deriveFont(12f)
                 text = "<html>${info.name}: ${info.task.take(60)}</html>"
             }
             leftPanel.add(toggleButton, BorderLayout.WEST)
             leftPanel.add(nameLabel, BorderLayout.CENTER)
 
             statusLabel.apply {
-                font = font.deriveFont(12f)
+                font = font.deriveFont(11f)
                 text = "${info.state.icon} ${info.state.label}"
             }
             add(leftPanel, BorderLayout.CENTER)
@@ -217,7 +218,7 @@ class MultiAgentBlock(
         isOpaque = false
     }
     private val fileLockLabel = JLabel().apply {
-        font = font.deriveFont(11f)
+        font = font.deriveFont(10f)
         foreground = AppColors.textTertiary
         text = ""
     }
@@ -235,9 +236,10 @@ class MultiAgentBlock(
     val subAgentCount: Int get() = subAgents.size
 
     init {
+        // 对齐 ui-prototype.html .multi-agent-block: padding=12px
         border = BorderFactory.createCompoundBorder(
             RoundedBorder(8, AppColors.multiAgentBorder),
-            BorderFactory.createEmptyBorder(0, 0, 0, 0)
+            BorderFactory.createEmptyBorder(8, 8, 8, 8)
         )
         isOpaque = true
         background = AppColors.multiAgentBg
@@ -246,7 +248,7 @@ class MultiAgentBlock(
         val header = JPanel(BorderLayout()).apply {
             isOpaque = true
             background = AppColors.headerBg
-            border = BorderFactory.createEmptyBorder(8, 12, 8, 12)
+            border = BorderFactory.createEmptyBorder(4, 8, 4, 8)
             cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
             addMouseListener(object : MouseAdapter() {
                 override fun mouseClicked(e: MouseEvent) {
@@ -260,13 +262,13 @@ class MultiAgentBlock(
         arrowLabel.border = BorderFactory.createEmptyBorder(0, 0, 0, 6)
         headerLeft.add(arrowLabel, BorderLayout.WEST)
         headerLabel.apply {
-            font = font.deriveFont(Font.BOLD, 13f)
+            font = font.deriveFont(Font.BOLD, 12f)
             text = "🤖 多 Agent 调度中"
         }
         headerLeft.add(headerLabel, BorderLayout.CENTER)
         header.add(headerLeft, BorderLayout.WEST)
         concurrencyLabel.apply {
-            font = font.deriveFont(12f)
+            font = font.deriveFont(11f)
             foreground = AppColors.textSecondary
             text = ""
         }
@@ -277,7 +279,7 @@ class MultiAgentBlock(
         add(subAgentContainer, BorderLayout.CENTER)
 
         // 底部状态行：文件锁信息
-        footerPanel.border = BorderFactory.createEmptyBorder(6, 12, 6, 12)
+        footerPanel.border = BorderFactory.createEmptyBorder(4, 8, 4, 8)
         footerPanel.add(fileLockLabel, BorderLayout.WEST)
         add(footerPanel, BorderLayout.SOUTH)
 

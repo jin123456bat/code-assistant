@@ -19,6 +19,9 @@ class MultiAgentManager(private val project: Project) {
 
         /** 默认最大并发 Agent 数（对齐 docs/agent/multi-agent.md §二 并发控制） */
         private const val DEFAULT_MAX_CONCURRENT = 3
+
+        /** 文件写锁表，所有 Agent 共享（对齐 docs/agent/multi-agent.md §一 文件写锁） */
+        private val fileLocks = ConcurrentHashMap<String, ReentrantLock>()
     }
 
     /**
@@ -74,9 +77,6 @@ class MultiAgentManager(private val project: Project) {
 
     /** 并发控制信号量，FIFO 公平排队（对齐 docs/agent/multi-agent.md §二 并发控制） */
     private val semaphore = Semaphore(DEFAULT_MAX_CONCURRENT, true)
-
-    /** 文件写锁表，所有 Agent 共享（对齐 docs/agent/multi-agent.md §一 文件写锁） */
-    private val fileLocks = ConcurrentHashMap<String, ReentrantLock>()
 
     /** 子 Agent 事件回调，供 ChatViewModel 订阅以驱动 MultiAgentBlock UI */
     var onSubAgentEvent: ((SubAgentEvent) -> Unit)? = null

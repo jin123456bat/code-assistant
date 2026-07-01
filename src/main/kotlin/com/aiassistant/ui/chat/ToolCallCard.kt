@@ -25,6 +25,7 @@ class ToolCallCard(
 
     data class ApprovalActions(
         val dangerous: Boolean,
+        val allowSessionLabel: String = "允许此会话",
         val onAllowOnce: () -> Unit,
         val onAllowSession: () -> Unit,
         val onReject: () -> Unit
@@ -47,7 +48,7 @@ class ToolCallCard(
     private var isCollapsed =
         initialState != ToolCallState.AWAITING_APPROVAL && initialState != ToolCallState.EXECUTING
     private val arrowLabel = JLabel(if (isCollapsed) "▶" else "▾").apply {
-        font = font.deriveFont(12f)
+        font = font.deriveFont(11f)
     }
     private val headerLabel = JLabel()
     private val headerPanel = JPanel(BorderLayout())
@@ -57,7 +58,7 @@ class ToolCallCard(
     }
     private val bodyPanel = JPanel().apply {
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
-        border = BorderFactory.createEmptyBorder(8, 12, 8, 12)
+        border = BorderFactory.createEmptyBorder(4, 8, 4, 8)
     }
     private val approvalPanel = JPanel(FlowLayout(FlowLayout.LEFT, 8, 0)).apply {
         isOpaque = false
@@ -69,7 +70,7 @@ class ToolCallCard(
     private val resultScrollPane = JScrollPane().apply {
         verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED
         horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED
-        maximumSize = Dimension(Int.MAX_VALUE, 240)
+        maximumSize = Dimension(Int.MAX_VALUE, 180)
         border = BorderFactory.createEmptyBorder()
         isOpaque = true
         viewport.isOpaque = true
@@ -77,9 +78,9 @@ class ToolCallCard(
 
     // 结果展示区域，可能为 JTextArea（纯文本结果）或 JLabel（HTML Diff 渲染）
     private var resultComponent: JComponent = JTextArea().apply {
-        font = Font(Font.MONOSPACED, Font.PLAIN, 13)
+        font = Font(Font.MONOSPACED, Font.PLAIN, 12)
         isEditable = false; background = AppColors.codeBg
-        border = BorderFactory.createEmptyBorder(8, 12, 8, 12)
+        border = BorderFactory.createEmptyBorder(4, 8, 4, 8)
     }
     private val footerLabel = JLabel()
 
@@ -105,7 +106,7 @@ class ToolCallCard(
         headerPanel.apply {
             isOpaque = true
             background = AppColors.headerBg
-            border = BorderFactory.createEmptyBorder(8, 12, 8, 12)
+            border = BorderFactory.createEmptyBorder(4, 8, 4, 8)
             add(leftPanel, BorderLayout.WEST)
             add(headerLabel, BorderLayout.EAST)
             // 点击头部切换折叠/展开（仅在可折叠状态下）
@@ -140,9 +141,9 @@ class ToolCallCard(
         bodyPanel.add(resultScrollPane)
         add(bodyPanel, BorderLayout.CENTER)
 
-        footerLabel.font = footerLabel.font.deriveFont(11f)
+        footerLabel.font = footerLabel.font.deriveFont(10f)
         footerLabel.foreground = AppColors.textSecondary
-        footerLabel.border = BorderFactory.createEmptyBorder(6, 12, 6, 12)
+        footerLabel.border = BorderFactory.createEmptyBorder(4, 8, 4, 8)
         add(footerLabel, BorderLayout.SOUTH)
 
         setState(initialState)
@@ -171,6 +172,11 @@ class ToolCallCard(
     fun setState(newState: ToolCallState, result: String? = null, durationMs: Long? = null) {
         state = newState
         headerLabel.foreground = newState.color
+        // ponytail: 执行完成/出错/超时时自动展开，确保用户能看到结果
+        if (newState == ToolCallState.DONE || newState == ToolCallState.ERROR || newState == ToolCallState.TIMEOUT) {
+            isCollapsed = false
+            applyCollapseState()
+        }
         headerLabel.icon = newState.icon
         headerLabel.text = newState.label
         if (newState == ToolCallState.EXECUTING) {
@@ -182,8 +188,10 @@ class ToolCallCard(
         if (result != null) {
             setResultContent(result.take(2000))
             resultComponent.isVisible = true
+            resultScrollPane.isVisible = true
         } else {
             resultComponent.isVisible = false
+            resultScrollPane.isVisible = false
         }
         footerLabel.text = if (durationMs != null) "${durationMs}ms" else ""
 
@@ -197,6 +205,7 @@ class ToolCallCard(
     fun setResult(result: String, durationMs: Long) {
         setResultContent(result.take(2000))
         resultComponent.isVisible = true
+        resultScrollPane.isVisible = true
         footerLabel.text = "${durationMs}ms"
         // 结果到达后默认折叠（除非当前状态不可折叠）
         if (canCollapse) {
@@ -232,7 +241,7 @@ class ToolCallCard(
                 }
             })
             if (!actions.dangerous) {
-                approvalPanel.add(JButton("允许此会话").apply {
+                approvalPanel.add(JButton(actions.allowSessionLabel).apply {
                     addActionListener {
                         disableApprovalButtons()
                         actions.onAllowSession()
@@ -274,7 +283,7 @@ class ToolCallCard(
             }
         }
         val html =
-            "<html><body style='font-family:monospace;font-size:12px;white-space:nowrap;'>${
+            "<html><body style='font-family:monospace;font-size:12px;white-space:nowrap;margin:0;padding:0'>${
                 sb.toString().replace("\n", "<br>")
             }</body></html>"
         // 创建支持 HTML 渲染的 JLabel 替换 resultComponent（原为 JTextArea），
@@ -282,7 +291,7 @@ class ToolCallCard(
         val diffLabel = JLabel(html).apply {
             isOpaque = true
             background = AppColors.codeBg
-            border = BorderFactory.createEmptyBorder(8, 12, 8, 12)
+            border = BorderFactory.createEmptyBorder(4, 8, 4, 8)
         }
         resultComponent = diffLabel
         resultScrollPane.setViewportView(resultComponent)

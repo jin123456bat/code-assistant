@@ -1,5 +1,7 @@
 package com.aiassistant.agent
 
+import com.anthropic.models.beta.messages.BetaTool
+import com.anthropic.core.JsonValue
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -70,27 +72,37 @@ class ToolRegistryTest {
     }
 
     @Test
-    fun `listBuiltin 不包含 mcp- 前缀的工具`() {
+    fun `listBuiltin 不包含 MCP 工具`() {
         ToolRegistry.register(
-            "mcp/test-mcp",
+            "docs/search",
             TestTool::class.java,
-            ToolRegistry.ToolInfo("mcp/test-mcp", "MCP 测试", "")
+            ToolRegistry.ToolInfo(
+                "docs/search",
+                "MCP 测试",
+                "",
+                betaTool = mcpBetaTool("docs/search")
+            )
         )
         val builtins = ToolRegistry.listBuiltin()
-        assertFalse(builtins.contains("mcp/test-mcp"), "builtin 列表不应包含 MCP 工具")
-        ToolRegistry.unregister("mcp/test-mcp")
+        assertFalse(builtins.contains("docs/search"), "builtin 列表不应包含 MCP 工具")
+        ToolRegistry.unregister("docs/search")
     }
 
     @Test
-    fun `listMcp 仅返回 mcp- 前缀的工具`() {
+    fun `listMcp 仅返回 MCP 工具`() {
         ToolRegistry.register(
-            "mcp/test-mcp",
+            "docs/search",
             TestTool::class.java,
-            ToolRegistry.ToolInfo("mcp/test-mcp", "MCP 测试", "")
+            ToolRegistry.ToolInfo(
+                "docs/search",
+                "MCP 测试",
+                "",
+                betaTool = mcpBetaTool("docs/search")
+            )
         )
         val mcps = ToolRegistry.listMcp()
         assertTrue(mcps.contains(TestTool::class.java))
-        ToolRegistry.unregister("mcp/test-mcp")
+        ToolRegistry.unregister("docs/search")
     }
 
     @Test
@@ -112,6 +124,17 @@ class ToolRegistryTest {
         assertTrue(defs.contains("Read"))
         assertTrue(defs.contains("Write"))
     }
+
+    private fun mcpBetaTool(name: String): BetaTool =
+        BetaTool.builder()
+            .name(name)
+            .description("MCP 测试")
+            .inputSchema(
+                BetaTool.InputSchema.builder()
+                    .type(JsonValue.from("object"))
+                    .build()
+            )
+            .build()
 
     // 测试辅助类
     private class TestTool

@@ -49,7 +49,10 @@ class TokenUsagePage(project: Project) : JPanel(BorderLayout()) {
         headerPanel.add(leftPanel, BorderLayout.WEST)
         headerPanel.add(totalConsumptionLabel, BorderLayout.EAST)
         add(headerPanel, BorderLayout.NORTH)
-        add(JScrollPane(body).apply { border = null }, BorderLayout.CENTER)
+        add(JScrollPane(body).apply {
+            horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_NEVER
+            border = null
+        }, BorderLayout.CENTER)
         refreshView(store.listAll(), "本月")
     }
 

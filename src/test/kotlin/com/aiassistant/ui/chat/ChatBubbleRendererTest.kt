@@ -115,6 +115,26 @@ class ChatBubbleRendererTest {
     }
 
     @Test
+    fun `mcp approval card labels session approval as server approval`() {
+        val card = ToolCallCard(
+            toolName = "docs/search",
+            params = "query=hello",
+            initialState = ToolCallCard.ToolCallState.AWAITING_APPROVAL,
+            approvalActions = ToolCallCard.ApprovalActions(
+                dangerous = false,
+                allowSessionLabel = "允许此 Server",
+                onAllowOnce = {},
+                onAllowSession = {},
+                onReject = {}
+            )
+        )
+
+        val buttonTexts = buttonsIn(card).map { it.text }
+        assertContains(buttonTexts, "允许此 Server")
+        assertFalse("允许此会话" in buttonTexts)
+    }
+
+    @Test
     fun `error copy button has an action`() {
         val component = ChatBubbleRenderer.render(
             ChatMessage(
@@ -141,6 +161,21 @@ class ChatBubbleRendererTest {
         buttonsIn(component).single { it.text == "🔄 重试" }.doClick()
 
         assertTrue(retried)
+    }
+
+    @Test
+    fun `agent bubble does not render feedback buttons`() {
+        val component = ChatBubbleRenderer.render(
+            ChatMessage(
+                id = "agent-1",
+                type = ChatMessage.Type.AGENT_TEXT,
+                content = "done"
+            )
+        )
+
+        val buttonTexts = buttonsIn(component).map { it.text }
+        assertFalse("👍" in buttonTexts)
+        assertFalse("👎" in buttonTexts)
     }
 
     private fun labelsIn(container: Container): List<JLabel> =

@@ -13,60 +13,64 @@ class McpConfigStoreTest {
 
     @Test
     fun `loads documented servers wrapper format`() {
-        val root = createTempDirectory()
-        root.resolve(".code-assistant").createDirectories()
-        root.resolve(".code-assistant/mcp-config.json").writeText(
-            """
-            {
-              "servers": [
+        withIsolatedHome {
+            val root = createTempDirectory()
+            root.resolve(".code-assistant").createDirectories()
+            root.resolve(".code-assistant/mcp-config.json").writeText(
+                """
                 {
-                  "id": "docs",
-                  "command": "npx",
-                  "args": ["-y", "docs-server"],
-                  "env": { "TOKEN": "secret" },
-                  "transport": "stdio",
-                  "enabled": true
+                  "servers": [
+                    {
+                      "id": "docs",
+                      "command": "npx",
+                      "args": ["-y", "docs-server"],
+                      "env": { "TOKEN": "secret" },
+                      "transport": "stdio",
+                      "enabled": true
+                    }
+                  ]
                 }
-              ]
-            }
-            """.trimIndent()
-        )
+                """.trimIndent()
+            )
 
-        val config = McpConfigStore(projectAt(root.toString())).load()
+            val config = McpConfigStore(projectAt(root.toString())).load()
 
-        assertEquals(1, config.servers.size)
-        val server = config.servers.single()
-        assertEquals("docs", server.id)
-        assertEquals("npx", server.command)
-        assertEquals(listOf("-y", "docs-server"), server.args)
-        assertEquals(mapOf("TOKEN" to "secret"), server.env)
+            assertEquals(1, config.servers.size)
+            val server = config.servers.single()
+            assertEquals("docs", server.id)
+            assertEquals("npx", server.command)
+            assertEquals(listOf("-y", "docs-server"), server.args)
+            assertEquals(mapOf("TOKEN" to "secret"), server.env)
+        }
     }
 
     @Test
     fun `loads Claude mcpServers compatibility format`() {
-        val root = createTempDirectory()
-        root.resolve(".mcp.json").writeText(
-            """
-            {
-              "mcpServers": {
-                "filesystem": {
-                  "command": "npx",
-                  "args": ["-y", "@modelcontextprotocol/server-filesystem"],
-                  "env": { "ROOT": "/tmp" }
+        withIsolatedHome {
+            val root = createTempDirectory()
+            root.resolve(".mcp.json").writeText(
+                """
+                {
+                  "mcpServers": {
+                    "filesystem": {
+                      "command": "npx",
+                      "args": ["-y", "@modelcontextprotocol/server-filesystem"],
+                      "env": { "ROOT": "/tmp" }
+                    }
+                  }
                 }
-              }
-            }
-            """.trimIndent()
-        )
+                """.trimIndent()
+            )
 
-        val config = McpConfigStore(projectAt(root.toString())).load()
+            val config = McpConfigStore(projectAt(root.toString())).load()
 
-        val server = config.servers.single()
-        assertEquals("filesystem", server.id)
-        assertEquals("npx", server.command)
-        assertEquals(listOf("-y", "@modelcontextprotocol/server-filesystem"), server.args)
-        assertEquals(mapOf("ROOT" to "/tmp"), server.env)
-        assertEquals("stdio", server.transport)
+            val server = config.servers.single()
+            assertEquals("filesystem", server.id)
+            assertEquals("npx", server.command)
+            assertEquals(listOf("-y", "@modelcontextprotocol/server-filesystem"), server.args)
+            assertEquals(mapOf("ROOT" to "/tmp"), server.env)
+            assertEquals("stdio", server.transport)
+        }
     }
 
     @Test
@@ -87,35 +91,47 @@ class McpConfigStoreTest {
 
     @Test
     fun `project main config overrides dot mcp config with same id`() {
-        val root = createTempDirectory()
-        root.resolve(".code-assistant").createDirectories()
-        root.resolve(".mcp.json").writeText(
-            """
-            {
-              "mcpServers": {
-                "docs": {
-                  "command": "from-dot-mcp"
-                }
-              }
-            }
-            """.trimIndent()
-        )
-        root.resolve(".code-assistant/mcp-config.json").writeText(
-            """
-            {
-              "servers": [
+        withIsolatedHome {
+            val root = createTempDirectory()
+            root.resolve(".code-assistant").createDirectories()
+            root.resolve(".mcp.json").writeText(
+                """
                 {
-                  "id": "docs",
-                  "command": "from-main-config"
+                  "mcpServers": {
+                    "docs": {
+                      "command": "from-dot-mcp"
+                    }
+                  }
                 }
-              ]
-            }
-            """.trimIndent()
-        )
+                """.trimIndent()
+            )
+            root.resolve(".code-assistant/mcp-config.json").writeText(
+                """
+                {
+                  "servers": [
+                    {
+                      "id": "docs",
+                      "command": "from-main-config"
+                    }
+                  ]
+                }
+                """.trimIndent()
+            )
 
-        val config = McpConfigStore(projectAt(root.toString())).load()
+            val config = McpConfigStore(projectAt(root.toString())).load()
 
-        assertEquals("from-main-config", config.servers.single { it.id == "docs" }.command)
+            assertEquals("from-main-config", config.servers.single { it.id == "docs" }.command)
+        }
+    }
+
+    private fun withIsolatedHome(block: () -> Unit) {
+        val oldHome = System.getProperty("user.home")
+        System.setProperty("user.home", createTempDirectory().toString())
+        try {
+            block()
+        } finally {
+            System.setProperty("user.home", oldHome)
+        }
     }
 
     private fun projectAt(basePath: String): Project =

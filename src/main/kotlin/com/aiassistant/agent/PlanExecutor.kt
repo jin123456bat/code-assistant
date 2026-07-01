@@ -28,7 +28,14 @@ class PlanExecutor(private val session: AgentSession) {
         enum class ItemStatus { PAUSED, EXECUTING, COMPLETED, CANCELLED }
     }
 
-    var currentPlan: Plan? = null
+    data class PlanResult(
+        val planId: String,
+        val status: PlanItem.ItemStatus,
+        val output: String,
+        val toolCalls: List<ToolCallRecord> = emptyList()
+    )
+
+    var currentPlan: Plan? = session.plan
 
     fun parsePlan(llmOutput: String): Plan {
         // Layer 1: try JSON extraction (```json ... ``` or raw {...})
@@ -83,6 +90,69 @@ class PlanExecutor(private val session: AgentSession) {
             )
         }
         return Plan(summary = llmOutput.take(80), plans = items)
+    }
+
+    fun beginNextStep(): PlanItem? {
+        val plan = currentPlan ?: return null
+        val nextIndex = plan.plans.indexOfFirst { it.status == PlanItem.ItemStatus.PAUSED }
+        if (nextIndex < 0) {
+            finishPlanIfNeeded(plan)
+            return null
+        }
+        plan.currentPlanIndex = nextIndex
+        plan.status = Plan.Status.EXECUTING
+        plan.updatedAt = Instant.now()
+        val item = plan.plans[nextIndex]
+        item.status = PlanItem.ItemStatus.EXECUTING
+        return item
+    }
+
+    fun completeStep(planId: String, output: String): PlanResult? {
+        val plan = currentPlan ?: return null
+        val item = plan.plans.find { it.id == planId } ?: return null
+        if (item.status == PlanItem.ItemStatus.EXECUTING) {
+            item.status = PlanItem.ItemStatus.COMPLETED
+            item.result = output
+        }
+        plan.currentPlanIndex = nextOpenIndex(plan)
+        finishPlanIfNeeded(plan)
+        plan.updatedAt = Instant.now()
+        return PlanResult(planId = item.id, status = item.status, output = output)
+    }
+
+    fun pauseStep(planId: String, output: String? = null): PlanResult? {
+        val plan = currentPlan ?: return null
+        val item = plan.plans.find { it.id == planId } ?: return null
+        if (item.status == PlanItem.ItemStatus.EXECUTING) {
+            item.status = PlanItem.ItemStatus.PAUSED
+            item.result = output
+            item.retryCount++
+        }
+        plan.status = Plan.Status.PAUSED
+        plan.currentPlanIndex = plan.plans.indexOf(item).coerceAtLeast(0)
+        plan.updatedAt = Instant.now()
+        return PlanResult(planId = item.id, status = item.status, output = output.orEmpty())
+    }
+
+    fun executeNext(stepRunner: (PlanItem) -> String): PlanResult? {
+        val item = beginNextStep() ?: return null
+        val output = stepRunner(item)
+        return completeStep(item.id, output)
+    }
+
+    private fun nextOpenIndex(plan: Plan): Int =
+        plan.plans.indexOfFirst { it.status == PlanItem.ItemStatus.PAUSED }.let {
+            if (it >= 0) it else plan.plans.size
+        }
+
+    private fun finishPlanIfNeeded(plan: Plan) {
+        if (plan.plans.all { it.status == PlanItem.ItemStatus.COMPLETED || it.status == PlanItem.ItemStatus.CANCELLED }) {
+            plan.status = if (plan.plans.all { it.status == PlanItem.ItemStatus.CANCELLED }) {
+                Plan.Status.CANCELLED
+            } else {
+                Plan.Status.COMPLETED
+            }
+        }
     }
 
     private fun tryParseJson(text: String): List<PlanItem>? {

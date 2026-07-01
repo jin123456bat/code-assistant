@@ -303,6 +303,7 @@ ToolRegistry
 ├── get(name: String): Class<*>?       // 按名查找 tool class
 ├── listAll(): List<Class<*>>          // 所有已注册工具 class
 ├── listBuiltin(): List<String>        // 内置工具名称列表
+├── listMcp(): List<Class<*>>          // MCP 动态工具 class（按 betaTool 元数据识别）
 └── toToolDefinitions(): List<String>  // 转为工具名称列表
 ```
 
@@ -312,7 +313,8 @@ ToolRegistry
 ToolInfo (ToolRegistry 内部类):
 ├── name: String                       // Read, Write, ...
 ├── description: String                // LLM 看到的工具描述，必须包含上限声明
-└── usage: String                      // 使用示例
+├── usage: String                      // 使用示例
+└── betaTool: BetaTool?                // MCP 动态工具定义，非空时不归入 listBuiltin()
 ```
 
 ### 工具描述中的上限声明

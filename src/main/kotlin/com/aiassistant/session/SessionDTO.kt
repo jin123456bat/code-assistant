@@ -86,7 +86,6 @@ data class MessageDTO(
     val contentType: String? = null,
     val timestamp: Instant,
     val deleted: Boolean = false,
-    val feedback: String? = null,
     val toolCalls: List<ToolCallDTO>? = null,
     val tokenUsage: TokenUsageDTO? = null
 )

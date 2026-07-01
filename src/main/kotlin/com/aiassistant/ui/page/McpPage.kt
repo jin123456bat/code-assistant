@@ -18,17 +18,20 @@ class McpPage(project: Project) : JPanel(BorderLayout()) {
     private var editingServerId: String? = null
 
     init {
-        // Header with add button
-        val header = JPanel(FlowLayout(FlowLayout.LEFT))
-        header.add(JLabel("<html><b style='font-size:16px'>🔌 MCP Servers</b></html>"))
+        val header = JPanel(BorderLayout())
+        header.add(
+            JLabel("<html><b style='font-size:16px'>🔌 MCP Servers</b></html>"),
+            BorderLayout.WEST
+        )
         header.add(JButton("➕ 添加").apply {
             addActionListener {
                 editingServerId = null
                 nameField.text = ""
                 cmdField.text = ""
                 addForm.isVisible = !addForm.isVisible
+                revalidate(); repaint()
             }
-        })
+        }, BorderLayout.EAST)
 
         // Add form
         addForm.border = BorderFactory.createCompoundBorder(
@@ -74,6 +77,7 @@ class McpPage(project: Project) : JPanel(BorderLayout()) {
         add(topPanel, BorderLayout.NORTH)
         add(JScrollPane(listContainer).apply {
             verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED
+            horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_NEVER
         }, BorderLayout.CENTER)
 
         // Footer

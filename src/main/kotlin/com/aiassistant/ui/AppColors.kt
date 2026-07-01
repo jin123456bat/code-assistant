@@ -14,6 +14,7 @@ object AppColors {
     // ---- 主题色 ----
     val primary = JBColor(0x3B82F6, 0x60A5FA)
     val primaryHover = JBColor(0x2563EB, 0x93BBFD)
+    val primaryPressed = JBColor(0x1D4ED8, 0xBFDBFE)
     val primaryLight = JBColor(0xEFF6FF, 0x1E3A5F)
     val success = JBColor(0x22C55E, 0x4ADE80)
     val error = JBColor(0xEF4444, 0xF87171)
@@ -54,10 +55,11 @@ object AppColors {
     val errorBg = JBColor(0xFEE2E2, 0x7F1D1D)
 
     // ---- 思考过程 ----
-    val thinkingBg = JBColor(0xFFFBEB, 0x422006)
+    val thinkingBg = JBColor(0xFFF8F0, 0x422006)
     val thinkingBorder = JBColor(0xFDE8D0, 0x4A3820)
     val thinkingTimeFg = JBColor(0xB45309, 0xF59E0B)
     val thinkingBodyFg = JBColor(0x92400E, 0xFBBF24)
+    val thinkingAccent = JBColor(0xFDE68A, 0x78350F)   // amber-200 强调色
 
     // ---- 工具调用 ----
     val toolPlaceholderBg = JBColor(0xF3F4F6, 0x282D35)

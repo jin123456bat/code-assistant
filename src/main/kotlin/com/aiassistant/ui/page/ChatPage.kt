@@ -31,6 +31,7 @@ class ChatPage(
     private val toolCards = mutableMapOf<String, ToolCallCard>()
     private val scrollPane = JScrollPane(messageContainer).apply {
         verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED
+        horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_NEVER
         border = BorderFactory.createEmptyBorder(); background = AppColors.pageBg
         verticalScrollBar.addAdjustmentListener { e ->
             if (!e.valueIsAdjusting) {
@@ -59,11 +60,11 @@ class ChatPage(
         // 标题行：会话标题 + 清空按钮 + 关闭按钮，对齐 docs/ui/pages.md §十二 ChatPage 组件树
         // 初始显示当前会话标题（默认为"新会话"），标题生成后通过 onTitleChanged 回调更新
         val titleLabel = JLabel(viewModel.session.title).apply {
-            font = font.deriveFont(13f).deriveFont(java.awt.Font.BOLD)
+            font = font.deriveFont(12f).deriveFont(java.awt.Font.BOLD)
         }
         val clearButton = JButton("🗑").apply {
             toolTipText = "清空会话"
-            font = font.deriveFont(14f)
+            font = font.deriveFont(13f)
             isContentAreaFilled = false
             border = BorderFactory.createEmptyBorder(2, 6, 2, 6)
             addActionListener {
@@ -78,7 +79,7 @@ class ChatPage(
         }
         val closeButton = JButton("✕").apply {
             toolTipText = "关闭面板"
-            font = font.deriveFont(14f)
+            font = font.deriveFont(13f)
             isContentAreaFilled = false
             border = BorderFactory.createEmptyBorder(2, 6, 2, 6)
             addActionListener {
@@ -90,7 +91,7 @@ class ChatPage(
         val titleBar = JPanel(BorderLayout()).apply {
             border = BorderFactory.createCompoundBorder(
                 BorderFactory.createMatteBorder(0, 0, 1, 0, AppColors.border),
-                BorderFactory.createEmptyBorder(6, 12, 6, 12)
+                BorderFactory.createEmptyBorder(4, 8, 4, 8)
             )
             add(titleLabel, BorderLayout.WEST)
             add(JPanel().apply {
@@ -155,7 +156,7 @@ class ChatPage(
                 inputArea.showError()
             }
             animateBubbleAppear(renderMessage(msg))
-            messageContainer.add(Box.createVerticalStrut(8))
+            messageContainer.add(Box.createVerticalStrut(3))
             messageContainer.revalidate(); scrollToBottom()
         }
         viewModel.onToolCallStarted = { toolUseId, toolName, params ->
@@ -164,7 +165,7 @@ class ChatPage(
             val card = ToolCallCard(toolName, paramsText, ToolCallCard.ToolCallState.PENDING)
             toolCards[toolUseId] = card
             animateBubbleAppear(card)
-            messageContainer.add(Box.createVerticalStrut(8))
+            messageContainer.add(Box.createVerticalStrut(3))
             messageContainer.revalidate(); scrollToBottom()
         }
         viewModel.onToolCallStateChanged = { toolUseId, state, result, durationMs ->
@@ -182,11 +183,12 @@ class ChatPage(
             ).also { newCard ->
                 toolCards[request.toolUseId] = newCard
                 animateBubbleAppear(newCard)
-                messageContainer.add(Box.createVerticalStrut(8))
+                messageContainer.add(Box.createVerticalStrut(3))
             }
             card.setApprovalActions(
                 ToolCallCard.ApprovalActions(
                     dangerous = request.dangerous,
+                    allowSessionLabel = if (request.toolName.contains("/")) "允许此 Server" else "允许此会话",
                     onAllowOnce = {
                         request.complete(com.aiassistant.agent.ToolApprovalPolicy.ApprovalResult.ALLOW_ONCE)
                     },
@@ -205,14 +207,10 @@ class ChatPage(
         }
         viewModel.onStreamingToken = { token ->
             streamingBuf.append(token)
-            streamingBubble?.let { messageContainer.remove(it) }
+            // ponytail: 从实际父容器移除，避免 animateBubbleAppear 包装后找不到
+            streamingBubble?.let { (it.parent as? JComponent)?.apply { remove(it); revalidate(); repaint() } }
             streamingBubble = ChatBubbleRenderer.renderStreaming(streamingBuf.toString())
-            // 流式更新的第一个 token 使用动画，后续直接替换不加动画
-            if (streamingBuf.length == token.length) {
-                animateBubbleAppear(streamingBubble!!)
-            } else {
-                messageContainer.add(streamingBubble)
-            }
+            messageContainer.add(streamingBubble!!)
             messageContainer.revalidate(); scrollToBottom()
         }
         viewModel.onReasoningContent = { reasoning ->
@@ -226,7 +224,7 @@ class ChatPage(
             reasoningBubble = ChatBubbleRenderer.renderThinking(reasoningBuf.toString(), durationMs)
             // 思考过程块位于消息流末尾，没有 tool call 时在流式回复前，有 tool call 时在 tool call 前
             messageContainer.add(reasoningBubble)
-            messageContainer.add(Box.createVerticalStrut(4))
+            messageContainer.add(Box.createVerticalStrut(3))
             messageContainer.revalidate(); scrollToBottom()
         }
         viewModel.onStateChanged = {
@@ -253,11 +251,11 @@ class ChatPage(
         }
 
         if (viewModel.messages.isEmpty()) {
-            addTimestampMarker()
+            // 新会话不显示时间戳，保持空白
         } else {
             viewModel.messages.forEach { msg ->
                 messageContainer.add(renderMessage(msg))
-                messageContainer.add(Box.createVerticalStrut(8))
+                messageContainer.add(Box.createVerticalStrut(3))
             }
             messageContainer.revalidate()
         }
@@ -361,16 +359,13 @@ class ChatPage(
                 )
             )
         )
-        messageContainer.add(Box.createVerticalStrut(8)); messageContainer.revalidate()
+        messageContainer.add(Box.createVerticalStrut(3)); messageContainer.revalidate()
     }
 
     private fun renderMessage(msg: ChatMessage): JComponent =
         ChatBubbleRenderer.render(
             msg,
             onRetry = if (viewModel.canRetry) ({ viewModel.retryLastTurn() }) else null,
-            onFeedback = if (msg.type == ChatMessage.Type.AGENT_TEXT) ({ feedback ->
-                viewModel.recordFeedback(msg.id, feedback)
-            }) else null,
             panelWidth = scrollPane.viewport.width
         )
 
@@ -427,7 +422,7 @@ class ChatPage(
         addTimestampMarker()
         viewModel.messages.forEach { msg ->
             messageContainer.add(renderMessage(msg))
-            messageContainer.add(Box.createVerticalStrut(8))
+            messageContainer.add(Box.createVerticalStrut(3))
         }
         messageContainer.revalidate()
         messageContainer.repaint()

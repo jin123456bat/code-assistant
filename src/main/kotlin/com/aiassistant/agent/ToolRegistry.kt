@@ -49,8 +49,9 @@ object ToolRegistry {
             infoMap[name]?.let { RegisteredTool(name, clazz, it) }
         }
     fun listNames(): List<String> = tools.keys.toList()
-    fun listBuiltin(): List<String> = tools.filter { !it.key.startsWith("mcp/") }.keys.toList()
-    fun listMcp(): List<Class<*>> = tools.filter { it.key.startsWith("mcp/") }.values.toList()
+    private fun isMcpTool(name: String): Boolean = infoMap[name]?.betaTool != null
+    fun listBuiltin(): List<String> = tools.filter { !isMcpTool(it.key) }.keys.toList()
+    fun listMcp(): List<Class<*>> = tools.filter { isMcpTool(it.key) }.values.toList()
     fun toToolDefinitions(): List<String> = tools.keys.toList()
 
     /** 动态生成 system prompt 中的工具使用指南章节 */
@@ -185,7 +186,7 @@ object ToolRegistry {
             )
         )
         register(
-            "createPlan",
+            "CreatePlan",
             CreatePlan::class.java,
             ToolInfo(
                 "createPlan",
@@ -194,7 +195,7 @@ object ToolRegistry {
             )
         )
         register(
-            "listPlans",
+            "ListPlans",
             ListPlans::class.java,
             ToolInfo(
                 "listPlans",
@@ -203,7 +204,7 @@ object ToolRegistry {
             )
         )
         register(
-            "removePlan",
+            "RemovePlan",
             RemovePlan::class.java,
             ToolInfo(
                 "removePlan",
@@ -212,7 +213,7 @@ object ToolRegistry {
             )
         )
         register(
-            "reorderPlans",
+            "ReorderPlans",
             ReorderPlans::class.java,
             ToolInfo(
                 "reorderPlans",
@@ -221,7 +222,7 @@ object ToolRegistry {
             )
         )
         register(
-            "markPlanDone",
+            "MarkPlanDone",
             MarkPlanDone::class.java,
             ToolInfo(
                 "markPlanDone",

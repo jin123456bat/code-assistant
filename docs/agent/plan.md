@@ -7,16 +7,17 @@
 Plan Mode 将复杂任务拆解为有序计划列表，创建后自动连续执行。LLM 通过 5 个计划管理工具自主管理执行流程。
 
 - **PlanCard**：纯 UI 组件，展示计划列表及进度。每个 PAUSED 计划项行末有 [✕] 删除按钮（**用户唯一干预入口
-  **）。头部可点击折叠/展开——默认折叠（仅显示标题+摘要+进度），用户点击展开查看完整计划列表。EXECUTING
-  状态下自动展开且不可折叠。全部计划项 COMPLETED 或被取消后 PlanCard 消失。
-- **PlanExecutor**：负责自动执行。创建计划后按顺序串行执行，每个计划项完成后自动进入下一个。LLM 通过
-  `removePlan`/`reorderPlans`/`markPlanDone` 工具自主控制执行节奏，无需用户干预。
+  **）。头部可点击折叠/展开——默认折叠（仅显示标题+摘要+进度），用户点击展开查看完整计划列表。用户可随时折叠/展开，不受执行状态限制。全部计划项
+  COMPLETED 或被取消后 PlanCard 消失。
+- **PlanExecutor**：负责计划状态推进、单项完成/暂停/取消和计划管理工具。自动连续执行由
+  `ChatViewModel` 调度：每个计划项交给 `AgentLoop.run()` 执行，完成后再调用 `PlanExecutor`
+  推进到下一项。LLM 通过 `removePlan`/`reorderPlans`/`markPlanDone` 工具自主控制执行节奏，无需用户干预。
 
 ## 二、交互模式
 
 默认**自动连续执行**，用户可随时暂停进入手动控制。**"自动"指计划项之间无需用户发送消息**，
-`PlanExecutor` 在一个计划项完成后自动调用 `AgentLoop.run()`
-执行下一个。工具审批复用 [tools.md §六](tools.md#六审批机制)
+`ChatViewModel.startPlanAutoExecution()` 在一个计划项完成后继续调度下一次 `AgentLoop.run()`。
+工具审批复用 [tools.md §六](tools.md#六审批机制)
 规则，无特殊豁免——首次使用某工具仍会弹审批窗，用户授权后该会话内后续调用自动放行。
 
 ```
@@ -99,6 +100,15 @@ Plan 及其子计划项共用同一套状态：
 | `EXECUTING` | 正在执行中，LLM 通过工具自主控制执行流程           |
 | `COMPLETED` | 执行完成                             |
 | `CANCELLED` | 被取消（LLM 调用 removePlan 删除所有剩余计划项） |
+
+### 状态样式（PlanCard UI）
+
+| 状态        | 图标 | 样式                                    |
+|-----------|----|---------------------------------------|
+| PAUSED    | ⬜  | fg=#6B7280, bg=transparent, 行末 [✕] 可见 |
+| EXECUTING | 🔄 | fg=#3B82F6, bg=#EFF6FF, 左侧蓝色竖线 2px    |
+| COMPLETED | ✅  | fg=#22C55E, bg=transparent            |
+| CANCELLED | 🗑 | fg=#9CA3AF, bg=transparent, 删除线       |
 
 ## 五、计划管理工具
 
@@ -208,10 +218,13 @@ LLM 在执行过程中**随时主动**创建正式执行计划：
 
 ```
 PlanExecutor
-├── 构造: PlanExecutor(session: AgentSession, agentLoop: AgentLoop)
+├── 构造: PlanExecutor(session: AgentSession)
 ├── generatePlan(task: String): Plan       // /plan 或 createPlan → LLM 输出 → 4 层解析 → Plan
 ├── createPlanFromTool(task: String, plans: List<Plan>): Plan  // LLM 通过 createPlan 工具主动创建
-├── executeNext(): PlanResult              // 自动执行下一个计划项，完成后自动继续
+├── beginNextStep(): PlanItem?             // 将下一个 PAUSED 项标记为 EXECUTING
+├── completeStep(planId: String, output: String): PlanResult?  // 完成当前项并推进索引
+├── pauseStep(planId: String, output: String?): PlanResult?     // 执行失败/中断时退回 PAUSED
+├── executeNext(stepRunner: (PlanItem) -> String): PlanResult?  // 测试/纯函数场景的单步执行封装
 ├── deletePlan()                           // [内部] 终止 → 所有剩余项标记 CANCELLED，Plan 标记 CANCELLED。非 LLM 工具
 ├── removePlan(planId: String)             // [LLM 工具] 删除单项（仅 PAUSED），用户也可通过 PlanCard [✕] 触发
 ├── reorderPlans(planIds: List<String>)    // [LLM 工具] 重排剩余 PAUSED 项的顺序
@@ -239,7 +252,7 @@ PlanItem:（子项，JSON Schema 见 [persistence.md](../specs/persistence.md#pl
 
 PlanResult:
 ├── planId: String
-├── status: COMPLETED | CANCELLED
+├── status: PAUSED | EXECUTING | COMPLETED | CANCELLED
 ├── output: String                         // LLM 输出
 └── toolCalls: List<ToolCallRecord>        // 该计划项使用的工具调用记录
 ```
@@ -253,25 +266,9 @@ PlanResult:
 4. 原始文本 → Plan(summary=原始文本, plans=[Plan(description=原始文本)])
 ```
 
-## 十、PlanCard 接口
+## 十、PlanCard
 
-```
-PlanCard
-├── 构造: PlanCard(plan: Plan)
-├── setPlanState(planId: String, state: PlanStatus)   // 更新单项状态
-├── setCurrentPlanIndex(index: Int)                  // 高亮当前项
-├── isExpanded: Boolean = false                      // 折叠/展开，默认折叠
-├── toggleExpanded()                                 // 切换折叠/展开
-├── onPlanDeleted: ((planId: String) -> Unit)?       // 用户删除单项回调
-└── 渲染: JPanel (计划摘要 + 计划项列表，行末 [✕] 仅 PAUSED 状态可见)
-```
-
-**折叠/展开规则：**
-
-- 默认折叠（仅显示标题+摘要+进度）
-- EXECUTING 状态下自动展开且忽略折叠操作（强制展开）
-- 折叠态显示标题行+任务摘要+当前执行中项（EXECUTING）；无执行中项时仅显示标题+摘要+进度
-- 全部计划项 COMPLETED/CANCELLED 后 PlanCard 消失
+> PlanCard 组件接口及折叠/展开规则详见 [Components 文档](../ui/components.md#plan-card)。
 
 PlanCard 仅负责 UI 展示计划项列表和 PAUSED 项的行末删除入口（用户唯一干预入口）。不提供暂停/继续/删除计划等全局按钮——计划执行流程由
 LLM 通过工具自主管理。

@@ -27,9 +27,9 @@ class RoundedBorder(
         g2.dispose()
     }
 
-    // thickness + 3：保证圆角渲染时不裁切，同时内容与边框有合理间距
+    // ponytail: thickness+1 紧凑但不紧贴，保证圆角清晰可见且组件间不过度拥挤
     override fun getBorderInsets(c: Component?) =
-        Insets(thickness + 3, thickness + 3, thickness + 3, thickness + 3)
+        Insets(thickness + 1, thickness + 1, thickness + 1, thickness + 1)
 
     override fun isBorderOpaque() = false
 }

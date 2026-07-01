@@ -76,6 +76,8 @@ object ToolApprovalPolicy {
         val session = ctx.session
         val toolName = ctx.toolName
         val input = ctx.toolUse._input()
+        val mcpServerId = extractMcpServerId(toolName)
+        val firstUseKey = mcpServerId?.let { "mcp:$it" } ?: toolName
 
         // ── 0. 子 Agent 无需审批（对齐 docs/agent/multi-agent.md §三） ──
         // 父 Agent 调用 Agent 工具时已建立信任，子 Agent 所有工具一律自动放行
@@ -97,8 +99,12 @@ object ToolApprovalPolicy {
             }
         }
 
+        if (mcpServerId != null && mcpServerId in session.approvedMcpServers) {
+            return false to null
+        }
+
         // ── 2. 首次工具使用 ──
-        if (toolName !in session.firstToolUseDone) {
+        if (firstUseKey !in session.firstToolUseDone) {
             return true to ApprovalReason.FIRST_USE
         }
 
@@ -210,14 +216,19 @@ object ToolApprovalPolicy {
      * 将工具名加入当前会话的审批白名单（对齐 docs/agent/tools.md §六 "允许此会话" 按钮行为）。
      */
     fun approveForSession(session: AgentSession, toolName: String) {
-        session.approvedTools.add(toolName)
+        val mcpServerId = extractMcpServerId(toolName)
+        if (mcpServerId != null) {
+            session.approvedMcpServers.add(mcpServerId)
+        } else {
+            session.approvedTools.add(toolName)
+        }
     }
 
     /**
      * 标记该工具的首次使用已完成（对齐 docs/agent/tools.md §六 首次工具使用）。
      */
     fun markFirstToolUse(session: AgentSession, toolName: String) {
-        session.firstToolUseDone.add(toolName)
+        session.firstToolUseDone.add(extractMcpServerId(toolName)?.let { "mcp:$it" } ?: toolName)
     }
 
     /**
@@ -242,6 +253,9 @@ object ToolApprovalPolicy {
     fun isDangerousReason(reason: ApprovalReason?): Boolean {
         return reason == ApprovalReason.DANGEROUS_SHELL_COMMAND || reason == ApprovalReason.DANGEROUS_FLAG
     }
+
+    fun extractMcpServerId(toolName: String): String? =
+        toolName.substringBefore('/').takeIf { it.length < toolName.length && it.isNotBlank() }
 
     fun describe(toolName: String, input: Any?, reason: ApprovalReason? = null): String {
         val lines = mutableListOf<String>()

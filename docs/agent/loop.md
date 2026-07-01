@@ -260,7 +260,6 @@ Message:（内部 UI 模型。API 层 message.role 仅 `user`/`assistant`，cont
 ├── timestamp: Instant
 ├── toolCalls: List<ToolCallRecord>?   // ASSISTANT 消息可能含工具调用记录
 ├── tokenUsage: TokenDelta?            // ASSISTANT 消息的 token 消耗
-├── feedback: String?                  // 用户反馈 "positive" | "negative"
 └── deleted: Boolean = false           // 回退标记，true 时持久化保留但 UI 不渲染
 
 TokenUsage:

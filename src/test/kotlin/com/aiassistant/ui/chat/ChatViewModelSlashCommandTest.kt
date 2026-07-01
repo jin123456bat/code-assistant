@@ -33,6 +33,28 @@ class ChatViewModelSlashCommandTest {
         assertNull(viewModel.resolveSlashCommandForTest("/bad run"))
     }
 
+    @Test
+    fun `clear and new session preserve approved mcp servers`() {
+        val viewModel = ChatViewModel(projectAt(createTempDirectory().toString()))
+        viewModel.session.approvedMcpServers.add("github")
+
+        viewModel.clearSession()
+        assertEquals(setOf("github"), viewModel.session.approvedMcpServers)
+
+        viewModel.newSession()
+        assertEquals(setOf("github"), viewModel.session.approvedMcpServers)
+    }
+
+    @Test
+    fun `clear session resets cancelled flag`() {
+        val viewModel = ChatViewModel(projectAt(createTempDirectory().toString()))
+        viewModel.cancel()
+
+        viewModel.clearSession()
+
+        assertEquals(false, viewModel.session.cancelled)
+    }
+
     private fun writeSkill(
         root: java.nio.file.Path,
         name: String,

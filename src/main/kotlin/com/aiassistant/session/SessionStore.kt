@@ -124,6 +124,7 @@ class SessionStore(private val project: Project) {
                 outputTokens = session.totalTokens.outputTokens
             ),
             approvedTools = session.approvedTools.toList(),
+            approvedMcpServers = session.approvedMcpServers.toList(),
             errorCount = session.errorCount,
             calledSkills = session.calledSkills.toList(),
             firstToolUseDone = session.firstToolUseDone.toList(),
@@ -146,8 +147,7 @@ class SessionStore(private val project: Project) {
                     },
                     tokenUsage = msg.tokenUsage?.let {
                         TokenUsageDTO(inputTokens = it.inputTokens, outputTokens = it.outputTokens)
-                    },
-                    feedback = msg.feedback
+                    }
                 )
             }
         )
@@ -183,6 +183,7 @@ class SessionStore(private val project: Project) {
                 TokenUsage(inputTokens = it.inputTokens, outputTokens = it.outputTokens)
             } ?: TokenUsage()
             session.approvedTools.addAll(dto.approvedTools)
+            session.approvedMcpServers.addAll(dto.approvedMcpServers)
             session.errorCount = dto.errorCount
             session.calledSkills.addAll(dto.calledSkills)
             session.firstToolUseDone.addAll(dto.firstToolUseDone)
@@ -242,8 +243,7 @@ class SessionStore(private val project: Project) {
                         },
                         tokenUsage = msg.tokenUsage?.let {
                             TokenDelta(it.inputTokens, it.outputTokens)
-                        },
-                        feedback = msg.feedback
+                        }
                     )
                 )
             }

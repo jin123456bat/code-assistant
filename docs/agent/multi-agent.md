@@ -140,25 +140,8 @@ Agent 的 `AgentLoop` 或 `ToolExecutor` 中做额外判断。审批跳过发生
 
 ## 五、子 Agent UI
 
-子 Agent 在父面板中以**内联折叠块**形式展示，默认折叠，点击展开查看详情：
-
-**MultiAgentBlock（多 Agent 调度卡片）：**
-
-- 头部显示 "🤖 多 Agent 调度中" + 并发状态（如 "2/3 运行中"）
-- 子 Agent 行：图标 + 名称/任务 + 状态（✅完成 / 🔄执行中 / ⏸排队）
-- 点击子 Agent 行 → 展开/折叠该子 Agent 的详细执行过程
-
-**展开后（子 Agent 详情面板）：**
-
-- 子 Agent 流式文本实时追加（首 token 即时，后续静默合并 ≥30ms flush）
-- 子 ToolCallCard 嵌套展示（可折叠，与父 ToolCallCard 规则一致）
-- 错误红色标注
-- 底部显示耗时 + "详情: sub-session #{sessionId}"（点击跳转 SessionsPage）
-
-**实时渲染：**
-
-- 子 Agent 流式输出追加到父面板，不新建独立面板
-- 子 Agent 异步执行中，父 Agent 可继续处理其他任务。子 Agent 完成后通过回调通知父 Agent
+> MultiAgentBlock 的 UI
+> 布局及交互详见 [Chat 面板 §六](../ui/chat.md#六多-agent-调度卡片multiagentblock)。
 
 ## 六、SessionsPage 关联
 

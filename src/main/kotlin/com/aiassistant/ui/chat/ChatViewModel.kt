@@ -164,6 +164,7 @@ class ChatViewModel(
     val messages: List<ChatMessage> get() = _messages
     private val _messages = ObservableList.create<ChatMessage>()
     private var turnInFlight = false
+    private var planAutoRunning = false
     private var lastAgentText: String? = null
     private var lastSlashCommand: String? = null
     private var lastCompletion: ((AgentLoop.Result) -> Unit)? = null
@@ -275,8 +276,7 @@ class ChatViewModel(
                     },
                     tokenDelta = msg.tokenUsage?.let {
                         ChatMessage.TokenDelta(it.inputTokens, it.outputTokens)
-                    },
-                    feedback = msg.feedback
+                    }
                 )
             )
         }
@@ -468,6 +468,7 @@ class ChatViewModel(
     }
 
     fun sendMessage(text: String) {
+        resetCancellationForNextTurn()
         val userMsg = ChatMessage(
             id = java.util.UUID.randomUUID().toString(),
             type = ChatMessage.Type.USER_TEXT, content = text, timestamp = Instant.now()
@@ -537,6 +538,7 @@ class ChatViewModel(
                 }
             }
             store.save(session)
+            startPlanAutoExecution()
         }
     }
 
@@ -619,7 +621,67 @@ class ChatViewModel(
         }
         store.save(session)
         MessageBus.publishAgentStateChanged(session.id, session.state.name)
+        startPlanAutoExecution()
     }
+
+    private fun startPlanAutoExecution() {
+        if (planAutoRunning || turnInFlight) return
+        val plan = session.plan ?: return
+        if (plan.status == com.aiassistant.agent.PlanExecutor.Plan.Status.COMPLETED ||
+            plan.status == com.aiassistant.agent.PlanExecutor.Plan.Status.CANCELLED
+        ) return
+
+        val planExecutor = com.aiassistant.agent.PlanExecutor(session)
+        val step = planExecutor.beginNextStep() ?: return
+        planAutoRunning = true
+        store.save(session)
+        MessageBus.publishPlanStateChanged(session.id, plan.status.name)
+        onStateChanged?.invoke()
+
+        runAgentText(buildPlanStepText(step)) { result ->
+            if (session.cancelled) {
+                planExecutor.pauseStep(step.id, "已取消")
+                store.save(session)
+                MessageBus.publishPlanStateChanged(
+                    session.id,
+                    session.plan?.status?.name ?: "PAUSED"
+                )
+                planAutoRunning = false
+                onStateChanged?.invoke()
+                return@runAgentText
+            }
+            when (result) {
+                is AgentLoop.Result.Success -> planExecutor.completeStep(
+                    step.id,
+                    result.text.take(2000)
+                )
+
+                is AgentLoop.Result.Error -> planExecutor.pauseStep(step.id, result.message)
+            }
+            handleResult(result)
+            store.save(session)
+            MessageBus.publishPlanStateChanged(
+                session.id,
+                session.plan?.status?.name ?: "COMPLETED"
+            )
+            planAutoRunning = false
+            if (result is AgentLoop.Result.Success) {
+                startPlanAutoExecution()
+            } else {
+                onStateChanged?.invoke()
+            }
+        }
+    }
+
+    private fun buildPlanStepText(step: com.aiassistant.agent.PlanExecutor.PlanItem): String =
+        buildString {
+            appendLine("执行当前计划项：${step.description}")
+            appendLine("建议工具：${step.tool}")
+            if (step.files.isNotEmpty()) {
+                appendLine("涉及文件：${step.files.joinToString(", ")}")
+            }
+            append("完成后请继续根据当前计划状态自主调用 markPlanDone/removePlan/reorderPlans/listPlans。")
+        }
 
     private fun buildAgentText(text: String): String {
         val withFiles = FileReferenceResolver.expand(text, project.basePath)
@@ -645,13 +707,16 @@ class ChatViewModel(
      */
     fun clearSession() {
         store.save(session)
+        resetCancellationForNextTurn()
 
         // 清除会话内容（复用 session.id，对齐 docs/ui/components.md §4）
         // 显式保留 approvedTools：clearSession() 复用同一 session 对象，approvedTools 自然保留。
         // 此处显式声明意图以对齐文档要求：session.approvedTools 保留（不清除审批信任）。
         val preservedApprovedTools = session.approvedTools.toMutableSet()
+        val preservedApprovedMcpServers = session.approvedMcpServers.toMutableSet()
         session.messages.clear()
         session.approvedTools.addAll(preservedApprovedTools)
+        session.approvedMcpServers.addAll(preservedApprovedMcpServers)
         session.compactSummary = null
         session.compactCount = 0
         session.plan = null
@@ -672,6 +737,7 @@ class ChatViewModel(
     fun newSession() {
         store.save(session)
         val approvedTools = session.approvedTools.toMutableSet()
+        val approvedMcpServers = session.approvedMcpServers.toMutableSet()
         turnInFlight = false
         lastAgentText = null
         lastSlashCommand = null
@@ -679,6 +745,7 @@ class ChatViewModel(
         session = AgentSession()
         // 保留旧 session 的 approvedTools，不清除审批信任（对齐 docs/ui/components.md §4 clearSession()）
         session.approvedTools.addAll(approvedTools)
+        session.approvedMcpServers.addAll(approvedMcpServers)
         // 显式归零 totalTokens（对齐 docs/ui/chat.md §十二 clearSession()）
         session.totalTokens = TokenUsage()
         loop = AgentLoop(project, session)
@@ -705,25 +772,10 @@ class ChatViewModel(
         MessageBus.publishSessionChanged(session.id, "RESTORED")
     }
 
-    /**
-     * 记录用户对 assistant 消息的反馈（对齐 docs/ui/chat.md §十）。
-     * 将 feedback 写入 Session Message 并持久化。
-     */
-    fun recordFeedback(messageId: String, feedback: String) {
-        // 更新 Session 中的 Message
-        val sessionMsgIndex = session.messages.indexOfLast { it.id == messageId }
-        if (sessionMsgIndex >= 0) {
-            val msg = session.messages[sessionMsgIndex]
-            session.messages[sessionMsgIndex] = msg.copy(feedback = feedback)
-            store.save(session)
-        }
-        // 更新内存中的 ChatMessage 列表
-        val chatMsgIndex = _messages.indexOfFirst { it.id == messageId }
-        if (chatMsgIndex >= 0) {
-            val msg = _messages[chatMsgIndex]
-            _messages[chatMsgIndex] = msg.copy(feedback = feedback)
-            onStateChanged?.invoke()
-        }
+    private fun resetCancellationForNextTurn() {
+        if (!session.cancelled) return
+        session.resume()
+        session.finishTurn()
     }
 
     // ── 对话回退功能（对齐 docs/ui/chat.md §十二）──
@@ -785,6 +837,7 @@ class ChatViewModel(
         flushTimer?.stop()
         flushTimer = null
         streamingBuf.clear()
+        onStateChanged?.invoke()
     }
 }
 
@@ -795,8 +848,6 @@ data class ChatMessage(
     val timestamp: Instant = Instant.now(),
     val toolCall: ToolCallUIData? = null,
     val tokenDelta: TokenDelta? = null,
-    /** 用户反馈: "positive" | "negative"，仅 AGENT_TEXT 消息有此字段（对齐 docs/ui/chat.md §十） */
-    val feedback: String? = null,
     /** 回退标记：true 表示该消息已被回退（对齐 docs/ui/chat.md §十二 rollbackToMessage） */
     val deleted: Boolean = false
 ) {

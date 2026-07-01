@@ -38,6 +38,16 @@ class McpConfigStore(private val project: Project) {
     val globalDotMcpPath: Path
         get() = Paths.get(System.getProperty("user.home"), ".claude", ".mcp.json")
 
+    /** Claude 桌面应用 MCP 配置：~/Library/Application Support/Claude/claude_desktop_config.json (macOS) */
+    val claudeDesktopConfigPath: Path
+        get() = Paths.get(
+            System.getProperty("user.home"),
+            "Library",
+            "Application Support",
+            "Claude",
+            "claude_desktop_config.json"
+        )
+
     private val configFile: File get() = configPath.toFile()
 
     /**
@@ -51,6 +61,11 @@ class McpConfigStore(private val project: Project) {
 
         // 第 3 级：全局兼容配置 ~/.claude/.mcp.json（最低优先级）
         loadFromFile(globalDotMcpPath.toFile())?.forEach { config ->
+            allServers[config.id] = config
+        }
+
+        // 第 2.5 级：Claude 桌面应用 MCP 配置（macOS）
+        loadFromFile(claudeDesktopConfigPath.toFile())?.forEach { config ->
             allServers[config.id] = config
         }
 

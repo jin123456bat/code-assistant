@@ -95,9 +95,10 @@ ChatViewModel.sendMessage("/plan 重构 UserService", ...)
     → PlanCard 渲染
     → 自动开始执行
 
-PlanExecutor.executeNext() 自动循环:
-  → 获取 nextPlan (currentPlanIndex 对应的 PAUSED 计划项)
-  → AgentLoop.run(plan.summary)
+ChatViewModel.startPlanAutoExecution() 自动循环:
+  → PlanExecutor.beginNextStep() 获取下一个 PAUSED 计划项并标记 EXECUTING
+  → AgentLoop.run(plan item prompt)
+  → 成功时 PlanExecutor.completeStep()，失败/中断时 PlanExecutor.pauseStep()
   → 更新 plan.status + plan.result
   → currentPlanIndex++
   → 自动继续执行下一个

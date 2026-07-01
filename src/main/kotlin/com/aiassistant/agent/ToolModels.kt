@@ -159,10 +159,34 @@ class WebFetch {
 @JsonClassDescription("向用户发起问题以澄清需求。一次 1-4 个问题，每题 2-4 个选项。支持多选。")
 class AskUserQuestion {
     @JsonPropertyDescription("问题列表，1-4 个")
-    var questions: List<Map<String, Any>> = emptyList()
+    var questions: List<QuestionItem> = emptyList()
 
     @JsonPropertyDescription("超时秒数，必填。建议 120-300s（等待用户手动操作），0=不限")
     var timeout: Int = 0
+}
+
+/** 单个问题项，用于 AskUserQuestion.questions */
+class QuestionItem {
+    @JsonPropertyDescription("完整问题文本，以问号结尾")
+    var question: String = ""
+
+    @JsonPropertyDescription("短标签，如 Auth method, Library, Approach（≤12 字符）")
+    var header: String = ""
+
+    @JsonPropertyDescription("可选项列表，2-4 个。支持多选时允许多选")
+    var options: List<OptionItem> = emptyList()
+
+    @JsonPropertyDescription("是否允许多选，默认 false")
+    var multiSelect: Boolean = false
+}
+
+/** 问题的可选项，用于 QuestionItem.options */
+class OptionItem {
+    @JsonPropertyDescription("选项标签，1-5 词")
+    var label: String = ""
+
+    @JsonPropertyDescription("选项含义说明")
+    var description: String = ""
 }
 
 @JsonClassDescription("基于 IDE PSI 的语义导航（8 种操作）。goToDefinition 跳转定义、goToImplementation 查实现、findReferences 查引用（≤50）、hover 类型提示、documentSymbol 文件结构（≤100）、workspaceSymbol 全局搜索（≤20，需 query）、incomingCalls/outgoingCalls 调用链（≤50）。")
@@ -194,10 +218,22 @@ class CreatePlan {
     var task: String = ""
 
     @JsonPropertyDescription("计划项列表，每项含 description(描述)、tool(建议工具名)、files(涉及文件路径列表)")
-    var plans: List<Map<String, Any>> = emptyList()
+    var plans: List<PlanItemInput> = emptyList()
 
     @JsonPropertyDescription("超时秒数，必填。建议 10-20s，0=不限")
     var timeout: Int = 0
+}
+
+/** 单个计划项，用于 CreatePlan.plans */
+class PlanItemInput {
+    @JsonPropertyDescription("步骤描述")
+    var description: String = ""
+
+    @JsonPropertyDescription("建议工具名，如 Read/Write/Edit/Bash/AskUserQuestion")
+    var tool: String = ""
+
+    @JsonPropertyDescription("涉及文件路径列表，如 [\"src/main/UserService.kt\"]")
+    var files: List<String> = emptyList()
 }
 
 @JsonClassDescription("查看当前计划的所有计划项及状态")

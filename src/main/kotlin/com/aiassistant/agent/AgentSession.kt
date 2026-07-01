@@ -53,6 +53,9 @@ class AgentSession(
     /** 用户已批准此会话的工具名集合，持久化到 Session JSON 的 approvedTools 字段（对齐 docs/agent/tools.md §六 审批白名单） */
     val approvedTools: MutableSet<String> = mutableSetOf()
 
+    /** 用户已批准此会话的 MCP Server 集合，持久化到 Session JSON 的 approvedMcpServers 字段 */
+    val approvedMcpServers: MutableSet<String> = mutableSetOf()
+
     /** 本会话中已完成首次审批的工具名集合，用于判断"首次工具使用"（对齐 docs/agent/tools.md §六 审批触发规则） */
     val firstToolUseDone: MutableSet<String> = mutableSetOf()
 
@@ -113,6 +116,7 @@ class AgentSession(
     }
 
     fun resume() {
+        cancelled = false
         state = State.PROCESSING
     }
 
@@ -171,8 +175,6 @@ data class Message(
     val timestamp: Instant = Instant.now(),
     val toolCalls: List<ToolCallRecord>? = null,
     val tokenUsage: TokenDelta? = null,
-    /** 用户反馈: "positive" | "negative"，仅 assistant 消息有此字段（对齐 docs/ui/chat.md §十） */
-    var feedback: String? = null,
     /** 回退标记，true 时持久化保留但 UI 不渲染（对齐 docs/agent/loop.md §七） */
     var deleted: Boolean = false
 )

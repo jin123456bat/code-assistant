@@ -176,42 +176,7 @@ DeepSeek V4 在流式响应中会先输出 `reasoning_content`（思考过程）
 
 ## 五、Plan 卡片
 
-```
-┌──────────────────────────────────────────┐
-│ ▾ 📋 执行计划                   1/4 已完成│ ← 头部（可点击折叠/展开，进度在头部右侧）
-│ 任务: {summary}                          │ ← Body Small
-│ 涉及: {fileCount}个文件 {toolList}        │
-├──────────────────────────────────────────┤
-│ Plan N:                                  │ ← 每项独立行
-│ ⬜/🔄/✅/❌/🗑  {description}              │ ← 状态图标 + 描述
-│    工具: {tool}  文件: {fileList}        │ ← Caption
-│                           [✕]  ← PAUSED  │ ← 用户可删除待执行项
-└──────────────────────────────────────────┘
-
-折叠态（仅显示头部 + 当前执行项）:
-┌──────────────────────────────────────────┐
-│ ▶ 📋 执行计划                   1/4 已完成│ ← 头部（点击展开）
-│ 任务: {summary}                          │
-│ 🔄 {当前 EXECUTING 项描述}               │ ← 仅显示执行中项
-│    工具: {tool}  文件: {fileList}        │
-└──────────────────────────────────────────┘
-```
-
-### 折叠行为
-
-- 默认折叠（仅显示头部标题+摘要+进度）
-- 点击头部任意位置切换折叠/展开
-- EXECUTING 状态下自动展开且不可折叠（确保用户看到当前执行项）
-- 全部计划项 COMPLETED 或 CANCELLED 后 PlanCard 消失
-
-### Plan 状态样式
-
-| 状态        | 图标 | 样式                                    |
-|-----------|----|---------------------------------------|
-| PAUSED    | ⬜  | fg=#6B7280, bg=transparent, 行末 [✕] 可见 |
-| EXECUTING | 🔄 | fg=#3B82F6, bg=#EFF6FF, 左侧蓝色竖线 2px    |
-| COMPLETED | ✅  | fg=#22C55E, bg=transparent            |
-| CANCELLED | 🗑 | fg=#9CA3AF, bg=transparent, 删除线       |
+PlanCard 渲染在 Chat 消息流顶部，展示当前执行计划。详细规范见 [Plan Mode](../agent/plan.md)。
 
 ## 六、多 Agent 调度卡片（MultiAgentBlock）
 
@@ -359,15 +324,7 @@ DeepSeek V4 在流式响应中会先输出 `reasoning_content`（思考过程）
 - Selected: bg=#EFF6FF（亮）/ #1E3A5F（暗），border-left: 3px solid #3B82F6，圆圈实心蓝
 - Disabled: fg=#9CA3AF, cursor=default
 
-## 十、用户反馈
-
-每条 assistant 消息右下角附加 👍/👎 按钮：
-
-- 点击后记录到 Session JSON 对应消息的 `feedback: "positive" | "negative"` 字段
-- 不影响当前对话流程，无额外 UI 弹窗
-- 仅收集，不做自动分析
-
-## 十一、Toast & 横幅
+## 十、Toast & 横幅
 
 ```
 Toast（右下角弹出，3s 自动消失）:
@@ -390,107 +347,7 @@ Toast（右下角弹出，3s 自动消失）:
 └──────────────────────────────────────────────────────────┘
 ```
 
-## 十二、ChatViewModel 接口
-
-```
-ChatViewModel
-├── messages: ObservableList<ChatMessage>  // UI 绑定列表（只读）
-├── streamingToken: ObservableString       // 当前流式 token（UI 绑定）
-├── session: AgentSession                  // 当前绑定的会话
-├── inputState: InputState                 // 输入区域状态
-│
-├── sendMessage(text: String)
-│   → attachments/images 通过 ChatInputArea.inputState 收集，在构建 prompt 时合并
-├── cancelGeneration()                     // 停止按钮
-├── addFileRef(ref: FileRef)               // 添加文件引用（手动或选中）
-├── removeFileRef(ref: FileRef)
-├── updateSelectionRef(file: String, lines: IntRange?, content: String)  // 更新选中引用
-├── clearSelectionRef()                    // 取消选中时清除
-├── addImage(image: ImageRef)              // 粘贴图片
-├── removeImage(imageId: String)
-│
-├── clearSession()                          // 清空当前会话（/clear 和 /new 行为一致）
-│   → session.messages.clear()
-│   → session.compactSummary = null, session.compactCount = 0
-│   → session.plan = null
-│   → session.totalTokens 归零
-│   → session.approvedTools 保留（不清除审批信任）
-│   → 复用当前 session.id，不新建文件
-│
-├── rollbackToMessage(messageId: String)     // 回退：标记 messageId 之后的消息 deleted=true
-├── undoRollback()                           // 撤销回退：恢复最近回退的消息 deleted=false
-└── hasPendingRollback: Boolean              // 是否存在可撤销的回退
-│
-└── InputState:
-    ├── manualRefs: List<FileRef>          // @file 手动引用（可多个）
-    ├── selectionRef: FileRef?             // 选中代码引用（仅一个）
-    ├── images: List<ImageRef>             // 粘贴的图片（可多个，单次 ≤ 5 张）
-    └── tokenCount: Int                    // 当前输入估算 token 数（不含图片）
-
-ChatMessage:
-├── id: String
-├── type: USER_TEXT | AGENT_TEXT | TOOL_CALL | ERROR | SYSTEM   // TOOL_RESULT 不独立渲染，结果内嵌在 ToolCallCard 中
-├── content: String                        // Markdown 源码
-├── toolCall: ToolCallUIData?              // TOOL_CALL 类型的额外数据
-├── timestamp: Instant
-└── tokenDelta: TokenDelta?                // AGENT_TEXT 的单条消息级 token 增量
-
-ToolCallUIData:
-├── toolName: String
-├── parameters: Map<String, Any>
-├── state: PENDING | AWAITING_APPROVAL | EXECUTING | DONE | ERROR | TIMEOUT | REJECTED | CANCELLED
-├── result: String?
-├── durationMs: Long?
-└── planId: String?
-```
-
-## 十三、ChatBubbleRenderer 接口
-
-```
-ChatBubbleRenderer
-├── render(msg: ChatMessage): JComponent
-│   → 根据 msg.type 分发：
-│     USER_TEXT   → 右对齐蓝色气泡（JLabel, HTML）
-│     AGENT_TEXT  → 左对齐 Markdown 气泡（BlockSequence）
-│     TOOL_CALL   → ToolCallCard
-│     ERROR       → 红色错误气泡 + [重试]
-│     SYSTEM      → 居中灰色分隔线
-│
-├── renderStreaming(markdownText: String): JComponent
-│   → 流式 Markdown → 字符串缓冲累积，Block 闭合后通过 parseMarkdown() 渲染为组件
-│
-└── BlockSequence:
-    ├── 内部结构：List<MarkdownBlock>（sealed class，见 ChatBubbleRenderer.kt）
-    │   MarkdownBlock = Paragraph | CodeBlock | Header | ListItem | QuoteBlock
-    ├── Paragraph  → JLabel (HTML, 段落/内联代码高亮)
-    ├── CodeBlock  → JTextArea (只读, JetBrains Mono 等宽字体, JScrollPane)
-    ├── Header     → JLabel (HTML, 粗体)
-    ├── ListItem   → JLabel (HTML, 缩进+项目符号)
-    └── QuoteBlock → JTextArea (斜体, 左边框线)
-```
-
-## 十四、ChatInputArea 接口
-
-```
-ChatInputArea
-├── 构造: ChatInputArea(viewModel: ChatViewModel)
-├── textArea: JTextArea                       // 输入框（无边框，自适应 2-10 行）
-├── tagsRow: JPanel                           // Tags 行（FlowLayout，文件+图片混合排列，位于输入框上方）
-├── addFileButton: JButton                    // [+] 按钮 → 弹出文件选择 Popup
-├── sendButton: JButton                       // [→] 发送按钮
-│
-├── onSlashTrigger(): Unit                    // 输入 `/` → 弹出指令列表 Popup
-├── onAtTrigger(): Unit                       // 输入 `@` 或点击 [+] → 弹出文件搜索 Popup
-├── handlePopupKeyDown(event: KeyEvent): Boolean  // Popup 键盘导航 (↑↓ Enter Esc)
-├── onPasteImage(image: BufferedImage)        // 剪贴板图片粘贴回调
-│
-└── 剪贴板监听：
-    → Toolkit.getDefaultToolkit().systemClipboard
-    → 检测 DataFlavor.imageFlavor
-    → Ctrl+V / Cmd+V 时若剪贴板含图片 → onPasteImage()
-```
-
-## 十五、审批内嵌卡片
+## 十一、审批内嵌卡片
 
 审批不弹出独立 Dialog，而是通过 ToolCallCard 的 `AWAITING_APPROVAL` 状态在对话流中内嵌呈现。
 
@@ -518,3 +375,29 @@ ToolCallCard（AWAITING_APPROVAL 状态）:
 ### 审批触发规则
 
 详见 [工具系统 §六](../agent/tools.md#六审批机制)。
+
+---
+
+## 十二、数据模型
+
+```
+ChatMessage:
+├── id: String
+├── type: USER_TEXT | AGENT_TEXT | TOOL_CALL | ERROR | SYSTEM
+├── content: String                        // Markdown 源码
+├── toolCall: ToolCallUIData?              // TOOL_CALL 类型的额外数据
+├── timestamp: Instant
+└── tokenDelta: TokenDelta?                // AGENT_TEXT 的单条消息级 token 增量
+
+ToolCallUIData:
+├── toolName: String
+├── parameters: Map<String, Any>
+├── state: PENDING | AWAITING_APPROVAL | EXECUTING | DONE | ERROR | TIMEOUT | REJECTED | CANCELLED
+├── result: String?
+├── durationMs: Long?
+└── planId: String?
+```
+
+## 十三、技术接口
+
+> ChatViewModel、ChatBubbleRenderer、ChatInputArea 等技术契约详见 [Components 文档](components.md)。

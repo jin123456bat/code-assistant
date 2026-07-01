@@ -8,6 +8,7 @@ import kotlin.io.path.writeText
 import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertEquals
+import kotlin.test.assertIs
 
 class AgentLoopHistoryTest {
 
@@ -76,6 +77,40 @@ class AgentLoopHistoryTest {
             )
 
         assertContains(params.toString(), "REVIEW_SKILL_BODY_FOR_TEST")
+    }
+
+    @Test
+    fun `cancelled session returns error instead of empty success`() {
+        val session = AgentSession().apply { cancel() }
+
+        val result = AgentLoop(
+            project = projectAt(createTempDirectory().toString()),
+            session = session,
+            apiKeyProvider = { "sk-test" },
+            modelProvider = { "deepseek-v4-pro" }
+        ).run("执行计划项")
+
+        assertIs<AgentLoop.Result.Error>(result)
+        assertContains(result.message, "已取消")
+    }
+
+    @Test
+    fun `resumed session does not stay cancelled forever`() {
+        val session = AgentSession().apply {
+            cancel()
+            resume()
+            finishTurn()
+        }
+
+        val result = AgentLoop(
+            project = projectAt(createTempDirectory().toString()),
+            session = session,
+            apiKeyProvider = { null },
+            modelProvider = { "deepseek-v4-pro" }
+        ).run("继续")
+
+        assertIs<AgentLoop.Result.Error>(result)
+        assertContains(result.message, "请先配置 DeepSeek API Key")
     }
 
     private fun projectAt(basePath: String): Project =

@@ -32,6 +32,7 @@ class GenerateCommitAction : AnAction() {
     // @Volatile：update() 在 EDT 读，后台线程写（正常路径最后一步 + catch 分支），需要可见性保证
     @Volatile private var isGenerating = false
     @Volatile private var lastClickTime = 0L
+    private var loggedCommitPanelFallback = false
 
     override fun update(e: AnActionEvent) {
         val project = e.project
@@ -637,9 +638,19 @@ class GenerateCommitAction : AnAction() {
                             val method = parent.javaClass.getMethod(methodName)
 
                             @Suppress("UNCHECKED_CAST")
-                            val changes =
-                                (method.invoke(parent) as? Collection<*>)?.filterIsInstance<Change>()
-                            if (!changes.isNullOrEmpty()) return changes
+                            val raw = method.invoke(parent) as? Collection<*> ?: continue
+                            if (raw.isEmpty()) continue
+                            val changes = raw.filterIsInstance<Change>()
+                            if (changes.isNotEmpty()) return changes
+                            // ponytail: 新版 UI 可能返回包装类型(ChangeNode等)，尝试提取内部 Change
+                            val extracted = raw.mapNotNull { elem ->
+                                (elem as? Change) ?: try {
+                                    elem?.javaClass?.getMethod("getChange")?.invoke(elem) as? Change
+                                } catch (_: Exception) {
+                                    null
+                                }
+                            }
+                            if (extracted.isNotEmpty()) return extracted
                         } catch (_: NoSuchMethodException) {
                             continue
                         }
@@ -650,7 +661,11 @@ class GenerateCommitAction : AnAction() {
             parent = parent.parent
         }
         // 降级：所有反射路径失败（未知 Commit UI），使用 default changelist
-        AppLogger.info("getCheckedChanges: no known commit panel found, falling back to defaultChangeList")
+        // ponytail: 仅首次记录，避免 update() 高频调用刷屏
+        if (!loggedCommitPanelFallback) {
+            AppLogger.info("getCheckedChanges: no known commit panel found, falling back to defaultChangeList")
+            loggedCommitPanelFallback = true
+        }
         return ChangeListManager.getInstance(project).defaultChangeList.changes.toList()
     }
 

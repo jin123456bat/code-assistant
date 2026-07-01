@@ -10,17 +10,18 @@ Model Context Protocol (MCP) 支持——通过 JSON-RPC 协议与外部 MCP Ser
 ## 一、架构
 
 ```
-┌──────────────┐     MCP (JSON-RPC via stdio)
-│ Code         │ ←── stdio / HTTP+SSE ──→  MCP Servers
+┌──────────────┐     MCP (JSON-RPC via stdio / HTTP)
+│ Code         │ ←── stdio / HTTP ───────→  MCP Servers
 │ Assistant    │    JSON-RPC (手写)         ├─ mysql (stdio)
 │ Plugin       │                           ├─ filesystem (stdio)
-└──────────────┘                           └─ remote-api (HTTP+SSE)
+└──────────────┘                           └─ remote-api (HTTP)
 ```
 
-**传输协议：** 支持 stdio（子进程）和 HTTP+SSE（远程服务）。`mcp-config.json` 中 `transport` 字段指定：
+**传输协议：** 支持 stdio（子进程）和 HTTP JSON-RPC（远程服务）。`mcp-config.json` 中 `transport` 字段指定：
 
 - `"transport": "stdio"` 时使用 `command` + `args` 启动子进程
-- `"transport": "http"` 时使用 `url` 字段连接远程 MCP Server
+- `"transport": "http"` 时使用 `url` 字段向远程 MCP Server 发送 JSON-RPC POST 请求；响应可为
+  `application/json`，也可为有限的 `text/event-stream` `data:` 帧。当前实现不维护长连接 SSE 推送通道。
 
 ---
 
@@ -117,47 +118,15 @@ MCP Server 的 stdout 可能混杂非 JSON-RPC 行（如 npm 安装日志、stde
 
 ## 五、MCP 页面
 
-```
-┌──────────────────────────────────────────────────┐
-│ [🏠] [💬] [📁] [📊] [🔌*] [🎯] [⚙]          │
-├──────────────────────────────────────────────────┤
-│  MCP Servers                        [➕ 添加]    │
-├──────────────────────────────────────────────────┤
-│                                                  │
-│  ┌──────────────────────────────────────────────┐│
-│  │ 🟢 mysql                              [断开] ││ ← 状态灯
-│  │    command: npx -y @anthropic/mcp-server-...  ││
-│  │    tools: 5 (query, list_tables, describe,   ││
-│  │              insert, update)                  ││
-│  │    [▶ 测试连接]  [✏ 编辑]  [🗑 删除]         ││
-│  └──────────────────────────────────────────────┘│
-│  ┌──────────────────────────────────────────────┐│
-│  │ 🟡 init... filesystem                  [✕]   ││ ← 初始化中
-│  │    command: npx -y @anthropic/mcp-server-...  ││
-│  │    正在安装依赖 (npm install)...              ││
-│  │    最多等待 3 分钟                            ││
-│  └──────────────────────────────────────────────┘│
-│  ┌──────────────────────────────────────────────┐│
-│  │ 🔴 custom-server                      [重连] ││ ← 崩溃
-│  │    command: python my_server.py              ││
-│  │    错误: Process exited with code 1          ││
-│  │    [▶ 测试连接]  [📋 查看日志]  [✏ 编辑]     ││
-│  └──────────────────────────────────────────────┘│
-│                                                  │
-│  配置文件: .code-assistant/mcp-config.json        │
-│  [📂 打开文件]                                    │
-└──────────────────────────────────────────────────┘
-```
+> UI 布局及交互详见 [MCP 页面](../ui/pages.md#六mcp-页面)。
 
-**添加 Server 流程：** 点击"➕ 添加"→ 内联表单填写名称/命令/参数/环境变量 → "保存并连接" →
-`McpManager.connect()` 启动子进程 + MCP 握手 → `tools/list` 获取工具 → 注册到 `ToolRegistry` → 卡片标记
-RUNNING。
+**添加 Server：** `McpManager.connect(serverId)` 启动子进程 + MCP 握手 → `tools/list` 获取工具 → 注册到
+`ToolRegistry`。
 
-**删除 Server 流程：** 点击"🗑 删除"→ 确认 Dialog → `McpManager.disconnect(serverId)` shutdown 进程 →
-从 `ToolRegistry` 移除工具 → 从 `mcp-config.json` 移除 → 卡片消失。
+**删除 Server：** `McpManager.disconnect(serverId)` shutdown 进程 → 从 `ToolRegistry` 移除工具 → 从
+`mcp-config.json` 移除。
 
-**测试连接：** 发送 MCP `initialize` 握手请求，5s 超时。成功 → 显示绿色 toast "连接成功，发现 N 个工具"
-。失败 → 显示红色 toast + 错误信息。
+**测试连接：** 发送 MCP `initialize` 握手请求，5s 超时。成功返回工具数量和延迟，失败返回错误信息。
 
 ---
 

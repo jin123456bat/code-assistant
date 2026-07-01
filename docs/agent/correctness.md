@@ -125,7 +125,7 @@ $ ./gradlew build
 
 ---
 
-## 四、Write/Edit 撤销机制
+### 一.五、Write/Edit 撤销机制
 
 **Write/Edit 操作不支持 IDE 原生撤销（Undo）。**
 

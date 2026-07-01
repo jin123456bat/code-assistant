@@ -166,6 +166,9 @@ class AgentLoop(
         slashCommand: String? = null,
         mode: AgentMode = AgentMode.AGENT
     ): Result {
+        if (session.cancelled) {
+            return Result.Error("已取消")
+        }
         if (session.state in setOf(
                 AgentSession.State.PROCESSING,
                 AgentSession.State.EXECUTING,
@@ -571,6 +574,9 @@ class AgentLoop(
                 }
             }
 
+            if (session.cancelled) {
+                return Result.Error("已取消")
+            }
             session.finishTurn()
             val fullReasoning = reasoningOutput.toString()
             val fullText = output.toString()
