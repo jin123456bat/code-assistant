@@ -22,6 +22,34 @@ class MultiAgentManager(private val project: Project) {
 
         /** 文件写锁表，所有 Agent 共享（对齐 docs/agent/multi-agent.md §一 文件写锁） */
         private val fileLocks = ConcurrentHashMap<String, ReentrantLock>()
+
+        /**
+         * Explore（只读搜索）模式工具白名单。
+         * 对齐 docs/agent/multi-agent.md §三：Explore 仅允许 Read、Grep、Glob。
+         */
+        val EXPLORE_TOOLS: List<Class<*>> = listOf(
+            Read::class.java,
+            Grep::class.java,
+            Glob::class.java
+        )
+
+        /**
+         * General-purpose 模式工具白名单（11 个）。
+         * 对齐 docs/agent/multi-agent.md §三。
+         */
+        val GENERAL_PURPOSE_TOOLS: List<Class<*>> = listOf(
+            Read::class.java,
+            Write::class.java,
+            Edit::class.java,
+            Bash::class.java,
+            Glob::class.java,
+            Grep::class.java,
+            ReadLints::class.java,
+            WebSearch::class.java,
+            WebFetch::class.java,
+            AskUserQuestion::class.java,
+            Symbol::class.java
+        )
     }
 
     /**
@@ -75,8 +103,32 @@ class MultiAgentManager(private val project: Project) {
         ) : SubAgentEvent()
     }
 
-    /** 并发控制信号量，FIFO 公平排队（对齐 docs/agent/multi-agent.md §二 并发控制） */
-    private val semaphore = Semaphore(DEFAULT_MAX_CONCURRENT, true)
+    /**
+     * 并发控制信号量，从 AppSettingsService 读取配置上限。
+     * 对齐 docs/agent/multi-agent.md §二 并发控制。
+     */
+    private fun createSemaphore(): Semaphore {
+        val configured = com.aiassistant.AppSettingsService.getInstance().getAgentMaxConcurrency()
+        val permits = if (configured > 0) configured else DEFAULT_MAX_CONCURRENT
+        return Semaphore(permits, true)
+    }
+
+    @Volatile
+    private var semaphore: Semaphore? = null
+
+    private fun getSemaphore(): Semaphore {
+        var s = semaphore
+        if (s == null) {
+            synchronized(this) {
+                s = semaphore
+                if (s == null) {
+                    s = createSemaphore()
+                    semaphore = s
+                }
+            }
+        }
+        return s!!
+    }
 
     /** 子 Agent 事件回调，供 ChatViewModel 订阅以驱动 MultiAgentBlock UI */
     var onSubAgentEvent: ((SubAgentEvent) -> Unit)? = null
@@ -85,24 +137,13 @@ class MultiAgentManager(private val project: Project) {
     private val sessionStore = com.aiassistant.session.SessionStore(project)
 
     /**
-     * 子 Agent 工具白名单：General-purpose 默认可用工具（11 个）。
+     * 子 Agent 工具白名单。默认使用 General-purpose（11 个工具）。
      * 对齐 docs/agent/multi-agent.md §三 工具白名单：
-     * - 可用：Read, Write, Edit, Bash, Glob, Grep, readLints, WebSearch, WebFetch, AskUserQuestion, Symbol
-     * - 不可用：Agent（禁止嵌套）、Skill（Skill 注入由父 Agent 管理）、createPlan/listPlans/removePlan/reorderPlans/markPlanDone（计划管理工具）
+     * - General-purpose：Read, Write, Edit, Bash, Glob, Grep, readLints, WebSearch, WebFetch, AskUserQuestion, Symbol
+     * - Explore（只读）：Read, Grep, Glob
+     * - 不可用：Agent（禁止嵌套）、Skill、createPlan 等计划管理工具
      */
-    private val subAgentToolsFilter: List<Class<*>> = listOf(
-        Read::class.java,
-        Write::class.java,
-        Edit::class.java,
-        Bash::class.java,
-        Glob::class.java,
-        Grep::class.java,
-        ReadLints::class.java,
-        WebSearch::class.java,
-        WebFetch::class.java,
-        AskUserQuestion::class.java,
-        Symbol::class.java
-    )
+    private var subAgentToolsFilter: List<Class<*>> = GENERAL_PURPOSE_TOOLS
 
     /**
      * 启动子 Agent 处理子任务。
@@ -130,7 +171,7 @@ class MultiAgentManager(private val project: Project) {
         if (!runInBackground) {
             // 同步模式：FIFO 公平排队获取信号量
             try {
-                semaphore.acquire()
+                getSemaphore().acquire()
             } catch (e: InterruptedException) {
                 Thread.currentThread().interrupt()
                 return "错误: 排队被中断"
@@ -139,13 +180,13 @@ class MultiAgentManager(private val project: Project) {
             return try {
                 executeSubAgent(prompt, parentSession, timeoutSec)
             } finally {
-                semaphore.release()
+                getSemaphore().release()
             }
         } else {
             // 异步模式：由后台线程自己管理信号量和清理
             CompletableFuture.runAsync {
                 try {
-                    semaphore.acquire()
+                    getSemaphore().acquire()
                 } catch (e: InterruptedException) {
                     Thread.currentThread().interrupt()
                     return@runAsync
@@ -153,7 +194,7 @@ class MultiAgentManager(private val project: Project) {
                 try {
                     executeSubAgentAsync(prompt, parentSession, timeoutSec)
                 } finally {
-                    semaphore.release()
+                    getSemaphore().release()
                 }
             }
             return "子 Agent 已启动（异步模式），任务: ${prompt.take(200)}"
@@ -527,5 +568,12 @@ class MultiAgentManager(private val project: Project) {
     fun acquireFileLock(path: String): ReentrantLock =
         fileLocks.computeIfAbsent(path) { ReentrantLock() }
 
-    fun getActiveCount(): Int = DEFAULT_MAX_CONCURRENT - semaphore.availablePermits()
+    fun getActiveCount(): Int = maxConcurrent - getSemaphore().availablePermits()
+
+    private val maxConcurrent: Int
+        get() {
+            val configured =
+                com.aiassistant.AppSettingsService.getInstance().getAgentMaxConcurrency()
+            return if (configured > 0) configured else DEFAULT_MAX_CONCURRENT
+        }
 }

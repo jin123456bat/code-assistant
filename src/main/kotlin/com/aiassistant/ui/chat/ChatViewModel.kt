@@ -484,6 +484,16 @@ class ChatViewModel(
         if (text.trimStart() == "/clear") {
             clearSession(); return
         }
+        if (text.trimStart() == "/reload-skill") {
+            skillManager.reloadSkills()
+            val msg = ChatMessage(
+                type = ChatMessage.Type.SYSTEM,
+                content = "Skills 已重新加载",
+                timestamp = Instant.now()
+            )
+            _messages.add(msg); onMessageAdded?.invoke(msg)
+            return
+        }
         if (text.trimStart().startsWith("/plan ")) {
             handlePlanCommand(text.trimStart().removePrefix("/plan ").trim())
             return
@@ -503,7 +513,12 @@ class ChatViewModel(
 
     private fun resolveSlashCommand(text: String): String? {
         val firstToken = text.trimStart().substringBefore(' ')
-        if (!firstToken.startsWith("/") || firstToken in setOf("/clear", "/plan")) return null
+        if (!firstToken.startsWith("/") || firstToken in setOf(
+                "/clear",
+                "/plan",
+                "/reload-skill"
+            )
+        ) return null
         return firstToken.takeIf { it in skillManager.enabledSlashCommands() }
     }
 

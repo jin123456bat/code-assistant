@@ -159,6 +159,12 @@ class PlanCard(
         updateProgressLabel()
     }
 
+    /** 更新当前执行步骤索引（对齐 docs/ui/components.md §五 setCurrentPlanIndex） */
+    fun setCurrentPlanIndex(index: Int) {
+        currentStepIndex = index.coerceIn(0, (steps.size - 1).coerceAtLeast(0))
+        updateProgressLabel()
+    }
+
     /** 标记步骤错误（对齐 ui-prototype .step-error: bg=#FEE2E2, border-radius=4px） */
     fun setStepError(index: Int, msg: String) {
         steps.getOrNull(index)?.let { step ->

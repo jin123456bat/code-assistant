@@ -7,7 +7,7 @@ import com.fasterxml.jackson.annotation.JsonPropertyDescription
 // 工具名对齐文档 tools.md §一：Read / Write / Edit / Bash / Glob / Grep / readLints / Agent /
 //   WebSearch / WebFetch / AskUserQuestion / Skill / Symbol + 5 个 Plan 管理工具
 
-@JsonClassDescription("读取项目内指定文件的内容")
+@JsonClassDescription("读取项目内指定文件的内容。单次最多返回 500 行，超出时尾部标注截断提示，需用 startLine 参数分页读取。支持读取图片文件（PNG/JPEG/GIF/WebP）。")
 class Read {
     @JsonPropertyDescription("项目内相对路径，如 src/main/kotlin/UserService.kt")
     var filePath: String = ""
@@ -22,7 +22,7 @@ class Read {
     var timeout: Int = 0
 }
 
-@JsonClassDescription("覆盖写入整个文件。用于创建新文件或大范围修改")
+@JsonClassDescription("覆盖写入整个文件。用于创建新文件或大范围修改。内容最多 3000 行，超出将被拒绝。")
 class Write {
     @JsonPropertyDescription("项目内相对路径")
     var filePath: String = ""
@@ -34,7 +34,7 @@ class Write {
     var timeout: Int = 0
 }
 
-@JsonClassDescription("精确替换文件中的部分内容。oldString 必须在文件中唯一且精确匹配")
+@JsonClassDescription("精确替换文件中的部分内容。oldString 必须在文件中唯一且精确匹配。newString 最多 3000 行，超出将被拒绝。")
 class Edit {
     @JsonPropertyDescription("项目内相对路径")
     var filePath: String = ""
@@ -49,7 +49,7 @@ class Edit {
     var timeout: Int = 0
 }
 
-@JsonClassDescription("执行 Shell 命令。工作目录默认为项目根目录")
+@JsonClassDescription("执行 Shell 命令。工作目录限定为项目根目录。最多返回 200 行/4000 字符输出（取先达到者），超出后中段截断。timeout 必填，由 LLM 根据命令类型设定（编译 300s，简单命令 30s，0=不限）。")
 class Bash {
     @JsonPropertyDescription("要执行的 Shell 命令")
     var command: String = ""
@@ -79,7 +79,7 @@ class Glob {
     var timeout: Int = 0
 }
 
-@JsonClassDescription("在项目中搜索文本内容。支持正则表达式，不区分大小写。非法正则自动回退为字面子串匹配")
+@JsonClassDescription("在项目中搜索文本内容。支持正则表达式，不区分大小写。非法正则自动回退为字面子串匹配。最多返回 50 条匹配，超出时尾部标注截断提示。跳过 build/、.git/、.idea/、node_modules/ 目录。")
 class Grep {
     @JsonPropertyDescription("搜索关键词")
     var query: String = ""
@@ -91,7 +91,7 @@ class Grep {
     var timeout: Int = 0
 }
 
-@JsonClassDescription("读取指定文件的 IDE 诊断信息（错误和警告）")
+@JsonClassDescription("读取指定文件的 IDE 诊断信息（错误和警告）。按严重程度降序排列，最多返回 50 条诊断。")
 class ReadLints {
     @JsonPropertyDescription("项目内相对路径")
     var filePath: String = ""
@@ -112,7 +112,7 @@ class Skill {
     var timeout: Int = 0
 }
 
-@JsonClassDescription("启动子代理处理子任务，子代理完成后返回结果摘要")
+@JsonClassDescription("启动子代理处理子任务。子代理完成后返回结果摘要（最多 2000 tokens）。子代理使用独立的工具白名单，不可嵌套启动孙代理。")
 class Agent {
     @JsonPropertyDescription("子代理的任务描述，必填")
     var prompt: String = ""
@@ -212,7 +212,7 @@ class Symbol {
 
 // ── Plan 管理工具 ──
 
-@JsonClassDescription("创建/更新执行计划。当任务涉及 3 个以上文件或预计需要 5 轮以上完成时，在执行关键修改前先创建执行计划")
+@JsonClassDescription("创建/更新执行计划。当任务涉及 3 个以上文件或预计需要 5 轮以上完成时，在执行关键修改前先创建执行计划。最多 20 个计划项。")
 class CreatePlan {
     @JsonPropertyDescription("任务描述，一句话概括总体目标")
     var task: String = ""

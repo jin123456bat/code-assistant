@@ -19,6 +19,9 @@ import javax.swing.table.DefaultTableModel
 
 class TokenUsagePage(project: Project) : JPanel(BorderLayout()) {
 
+    /** 会话选中回调，点击表格行时触发（对齐 docs/ui/pages.md §五 点击跳转） */
+    var onSessionSelected: ((String) -> Unit)? = null
+
     private val store = SessionStore(project)
     private var includeChildSessions = false
     private var currentPage = 0
@@ -204,6 +207,15 @@ class TokenUsagePage(project: Project) : JPanel(BorderLayout()) {
             tableHeader.reorderingAllowed = false
             setShowGrid(false)
             intercellSpacing = Dimension(0, 0)
+            // 点击行跳转到对应会话（对齐 docs/ui/pages.md §五）
+            addMouseListener(object : java.awt.event.MouseAdapter() {
+                override fun mouseClicked(e: java.awt.event.MouseEvent) {
+                    val row = rowAtPoint(e.point)
+                    if (row >= 0 && row < sessions.size) {
+                        onSessionSelected?.invoke(sessions[row].id)
+                    }
+                }
+            })
         }
         return JScrollPane(table).apply {
             border = BorderFactory.createLineBorder(AppColors.border)

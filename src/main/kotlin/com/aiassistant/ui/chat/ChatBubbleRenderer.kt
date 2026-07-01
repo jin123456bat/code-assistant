@@ -58,8 +58,8 @@ object ChatBubbleRenderer {
                 escapeHtml(msg.content).replace("\n", "<br>")
             }</body></html>"
         ).apply {
-            isOpaque = true; background = AppColors.userBubbleBg; font = font.deriveFont(12f)
-            border = BorderFactory.createEmptyBorder(6, 10, 6, 10)
+            isOpaque = true; background = AppColors.userBubbleBg; font = font.deriveFont(14f)
+            border = BorderFactory.createEmptyBorder(12, 12, 12, 12)
         }
         textRow.add(text)
         wrapper.add(textRow)
@@ -214,9 +214,9 @@ object ChatBubbleRenderer {
         bottomRow.add(renderTimestamp(msg, tokenInfo), BorderLayout.WEST)
 
         wrapper.add(bottomRow)
-        // Swing 紧凑：仅左侧 accent bar + 内边距，去除圆角边框避免额外 inset
+        // 对齐 docs/ui/components.md：padding=12px + left accent bar 3px
         wrapper.border = BorderFactory.createCompoundBorder(
-            BorderFactory.createEmptyBorder(6, 10, 6, 10),
+            BorderFactory.createEmptyBorder(12, 12, 12, 12),
             BorderFactory.createMatteBorder(0, 3, 0, 0, AppColors.primary)
         )
         wrapper.isOpaque = true
@@ -273,7 +273,7 @@ object ChatBubbleRenderer {
             putClientProperty("bubbleType", "system")
         }
         p.add(JLabel(msg.content, SwingConstants.CENTER).apply {
-            foreground = AppColors.textTertiary; font = font.deriveFont(10f)
+            foreground = AppColors.textTertiary; font = font.deriveFont(11f)
         }, BorderLayout.CENTER)
         return p
     }

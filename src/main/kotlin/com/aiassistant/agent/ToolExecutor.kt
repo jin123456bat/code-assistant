@@ -255,6 +255,18 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
         val file = resolveProjectFile(basePath, path) ?: return pathEscapedError(path)
         if (!file.exists()) return "错误: 文件 \"$path\" 不存在"
 
+        // 图片文件：返回 base64 编码（对齐 docs/agent/images.md §三 Read 工具图片支持）
+        val imageMime = imageMimeType(file)
+        if (imageMime != null) {
+            val bytes = file.readBytes()
+            val maxBytes = 5 * 1024 * 1024
+            if (bytes.size > maxBytes) return "错误: 图片 \"$path\" 过大 (${bytes.size} 字节，上限 $maxBytes 字节)"
+            val base64 = java.util.Base64.getEncoder().encodeToString(bytes)
+            session.fileStamps[path] = file.lastModified()
+            session.filesReadThisTurn.add(path)
+            return "${IMAGE_RESULT_PREFIX}$imageMime\n[图片: $path (${bytes.size} 字节, ${imageMime})]\n$base64\n[图片结束: $path]"
+        }
+
         val lines = file.readLines()
         val from = (startLine?.minus(1))?.coerceAtLeast(0) ?: 0
         val to = (endLine?.coerceAtMost(lines.size)) ?: lines.size
@@ -388,6 +400,18 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
     private fun pathEscapedError(path: String): String =
         "错误: 文件路径 \"$path\" 超出项目根目录，已拒绝访问"
 
+    /** 判断文件是否为支持的图片格式，返回 MIME 类型。非图片返回 null。 */
+    private fun imageMimeType(file: File): String? {
+        val ext = file.extension.lowercase()
+        return when (ext) {
+            "png" -> "image/png"
+            "jpg", "jpeg" -> "image/jpeg"
+            "gif" -> "image/gif"
+            "webp" -> "image/webp"
+            else -> null
+        }
+    }
+
     private fun validateFileStamp(file: File, path: String): String? {
         val lastReadStamp = session.fileStamps[path]
         val currentStamp = file.lastModified()
@@ -420,7 +444,11 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
         val command = ToolInput.string(input, "command") ?: return "错误: 缺少 command 参数"
         val workDir = ToolInput.string(input, "workDir") ?: project.basePath
 
-        val dir = File(workDir ?: ".")
+        // 安全检查：工作目录限定为项目根（对齐 docs/agent/tools.md §五）
+        val dir = resolveProjectFile(project.basePath ?: ".", workDir ?: ".")?.let { f ->
+            if (f.isDirectory) f else f.parentFile
+        } ?: return "错误: 工作目录 \"$workDir\" 超出项目根，已拒绝访问"
+
         val process = Runtime.getRuntime().exec(arrayOf("/bin/bash", "-c", command), null, dir)
         session.runningProcesses.add(process)
 
@@ -588,7 +616,7 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
             .filter {
                 it.isFile && !it.path.contains("/build/") && !it.path.contains("/.git/") && !it.path.contains(
                     "/.idea/"
-                ) && it.extension in sourceExtensions && (filePattern == null || it.name.contains(
+                ) && !it.path.contains("/node_modules/") && it.extension in sourceExtensions && (filePattern == null || it.name.contains(
                     java.io.File(filePattern).name
                 ))
             }
@@ -924,46 +952,50 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
         val answerRef = AtomicReference<String>()
         ApplicationManager.getApplication().invokeAndWait {
             try {
-                // 用 Messages.showDialog 的 Messages API 显示问题
-                // 将问题构建为 Markdown 文本供用户阅读，用 InputDialog 收集文本答案
-                val questionText = buildString {
-                    appendLine("请回答以下问题:\n")
-                    for ((qIdx, q) in questions.withIndex()) {
-                        val question = q["question"] as? String ?: "第 ${qIdx + 1} 个问题"
-                        val header = q["header"] as? String ?: "Q${qIdx + 1}"
+                val answers = mutableListOf<String>()
+                for ((qIdx, q) in questions.withIndex()) {
+                    val question = q["question"] as? String ?: "第 ${qIdx + 1} 个问题"
+                    val header = q["header"] as? String ?: "Q${qIdx + 1}"
 
-                        @Suppress("UNCHECKED_CAST")
-                        val options = q["options"] as? List<Map<String, String>> ?: emptyList()
-                        val multiSelect = q["multiSelect"] as? Boolean ?: false
+                    @Suppress("UNCHECKED_CAST")
+                    val options = q["options"] as? List<Map<String, String>> ?: emptyList()
+                    val multiSelect = q["multiSelect"] as? Boolean ?: false
 
-                        appendLine("${qIdx + 1}. $header — $question")
-                        for ((optIdx, opt) in options.withIndex()) {
-                            val label = opt["label"] ?: "选项${optIdx + 1}"
-                            val description = opt["description"] ?: ""
-                            val prefix = if (multiSelect) "[ ]" else "( )"
-                            appendLine("   $prefix $label — $description")
-                        }
-                        appendLine()
+                    if (options.isEmpty()) {
+                        // 无选项时降级为文本输入
+                        val text = Messages.showMultilineInputDialog(
+                            project, "$header — $question", "请回答", "",
+                            Messages.getQuestionIcon(), null
+                        )
+                        answers.add("$header: ${text?.trim() ?: "(未回答)"}")
+                    } else if (multiSelect) {
+                        // 多选模式：使用 MultiSelectQuestionDialog
+                        val dialog = MultiSelectQuestionDialog(
+                            project,
+                            header,
+                            question,
+                            options.map { OptionData(it["label"] ?: "", it["description"] ?: "") }
+                        )
+                        val selected = dialog.showAndWait()
+                        answers.add("$header: ${selected.joinToString(", ")}")
+                    } else {
+                        // 单选模式：使用 Messages.showDialog
+                        val optionLabels = options.map { it["label"] ?: "" }
+                        val optionDescs = options.map { it["description"] ?: "" }
+                        val choice = Messages.showDialog(
+                            project,
+                            question,
+                            header,
+                            optionLabels.toTypedArray(),
+                            0,
+                            Messages.getQuestionIcon()
+                        )
+                        val selected =
+                            if (choice in optionLabels.indices) optionLabels[choice] else "(未选择)"
+                        answers.add("$header: $selected")
                     }
                 }
-
-                // 使用输入对话框收集文本答案
-                val answer = Messages.showMultilineInputDialog(
-                    project,
-                    questionText,
-                    "请回答",
-                    "",
-                    Messages.getQuestionIcon(),
-                    null
-                )
-
-                if (answer == null) {
-                    answerRef.set("用户未回答: 对话框已关闭")
-                } else if (answer.isBlank()) {
-                    answerRef.set("用户未回答: 答案为空")
-                } else {
-                    answerRef.set("用户回答:\n${answer.trim()}")
-                }
+                answerRef.set("用户回答:\n${answers.joinToString("\n")}")
             } catch (e: Exception) {
                 answerRef.set("AskUserQuestion 执行失败: ${e.message}")
             }

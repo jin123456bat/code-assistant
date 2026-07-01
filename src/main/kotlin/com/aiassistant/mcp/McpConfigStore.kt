@@ -48,6 +48,13 @@ class McpConfigStore(private val project: Project) {
             "claude_desktop_config.json"
         )
 
+    /** Codex 项目级兼容配置：<project>/.codex/mcp.json（对齐 docs/agent/mcp.md §二） */
+    val codexProjectPath: Path get() = Paths.get(project.basePath ?: ".", ".codex", "mcp.json")
+
+    /** Codex 全局兼容配置：~/.codex/mcp.json（对齐 docs/agent/mcp.md §二） */
+    val codexUserPath: Path
+        get() = Paths.get(System.getProperty("user.home"), ".codex", "mcp.json")
+
     private val configFile: File get() = configPath.toFile()
 
     /**
@@ -64,6 +71,11 @@ class McpConfigStore(private val project: Project) {
             allServers[config.id] = config
         }
 
+        // 第 2.8 级：Codex 全局兼容配置 ~/.codex/mcp.json
+        loadFromFile(codexUserPath.toFile())?.forEach { config ->
+            allServers[config.id] = config
+        }
+
         // 第 2.5 级：Claude 桌面应用 MCP 配置（macOS）
         loadFromFile(claudeDesktopConfigPath.toFile())?.forEach { config ->
             allServers[config.id] = config
@@ -71,6 +83,11 @@ class McpConfigStore(private val project: Project) {
 
         // 第 2 级：项目兼容配置 .mcp.json（覆盖全局同 id）
         loadFromFile(projectDotMcpPath.toFile())?.forEach { config ->
+            allServers[config.id] = config
+        }
+
+        // 第 1.5 级：Codex 项目兼容配置 .codex/mcp.json
+        loadFromFile(codexProjectPath.toFile())?.forEach { config ->
             allServers[config.id] = config
         }
 

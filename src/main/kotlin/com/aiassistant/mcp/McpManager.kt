@@ -72,6 +72,10 @@ class McpManager(private val project: Project) {
 
         /** 待处理的 JSON-RPC 响应队列 */
         internal val responseQueue: LinkedBlockingQueue<String> = LinkedBlockingQueue()
+
+        /** 最后一次发送 JSON-RPC 请求的时间戳（用于 30s 无响应断连检测，对齐 docs/agent/mcp.md §四） */
+        @Volatile
+        internal var lastRequestTimeMs: Long = 0
     }
 
     /**
@@ -555,8 +559,9 @@ class McpManager(private val project: Project) {
                     if (trimmed.isEmpty()) continue
 
                     if (isValidJsonRpcLine(trimmed)) {
-                        // 有效 JSON-RPC 行：重置计数器，放入响应队列
+                        // 有效 JSON-RPC 行：重置计数器 + 请求时间戳，放入响应队列
                         server.nonJsonConsecutiveCount.set(0)
+                        server.lastRequestTimeMs = 0  // 收到响应，清除超时计时
                         server.responseQueue.offer(trimmed)
                     } else {
                         // 非 JSON-RPC 行：跳过，记录 WARN 日志，计数器+1
@@ -632,6 +637,7 @@ class McpManager(private val project: Project) {
         val server = servers[serverId] ?: return false
         return try {
             sendJsonRpcMessage(server, JsonParser.parseString(requestJson).asJsonObject)
+            server.lastRequestTimeMs = System.currentTimeMillis()
             true
         } catch (e: Exception) {
             LOG.warn("MCP Server [$serverId] 发送 JSON-RPC 请求失败", e)

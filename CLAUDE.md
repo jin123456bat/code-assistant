@@ -78,3 +78,8 @@ bug（[#1069](https://github.com/deepseek-ai/DeepSeek-V3/issues/1069)），`stri
 
 - [DeepSeek Tool Calls 文档](https://api-docs.deepseek.com/zh-cn/guides/tool_calls)
 - [DeepSeek Anthropic API 兼容文档](https://api-docs.deepseek.com/zh-cn/guides/anthropic_api)
+
+## Health Stack
+
+- typecheck: ./gradlew compileKotlin
+- test: ./gradlew test

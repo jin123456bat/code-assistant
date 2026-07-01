@@ -126,9 +126,9 @@ class ChatInputArea(
     // 对齐 ui-prototype.html: textarea border=none，仅 input-area 容器有 border-top
     private val inputScrollPane: JScrollPane
     private val defaultInputBorder =
-        BorderFactory.createEmptyBorder()                       // 无可见边框
+        BorderFactory.createLineBorder(AppColors.border, 1)     // 对齐 docs: #D1D5DB 边框
     private val focusInputBorder =
-        BorderFactory.createEmptyBorder()                       // focus 无边框变化
+        BorderFactory.createLineBorder(AppColors.primary, 2)    // 对齐 docs: Focus 2px #3B82F6
     private val disabledInputBorder =
         BorderFactory.createLineBorder(AppColors.hoverBg)       // disabled 时浅灰背景
 
@@ -147,7 +147,7 @@ class ChatInputArea(
         val totalLines = lines.sumOf { line ->
             if (line.isEmpty()) 1
             else maxOf(1, (fontMetrics.stringWidth(line) + textWidth - 1) / textWidth)
-        }.coerceIn(2, 8)
+        }.coerceIn(2, 10)
 
         textArea.rows = totalLines
         textArea.revalidate()

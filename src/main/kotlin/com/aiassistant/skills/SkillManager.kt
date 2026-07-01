@@ -70,6 +70,15 @@ class SkillManager(private val project: Project) {
         return finalSkills
     }
 
+    /**
+     * 强制重新加载 Skill 文件（对齐 docs/agent/skills.md §四 /reload-skill 命令）。
+     * 清除内存缓存，下次 loadSkills() 会重新从磁盘读取。
+     */
+    fun reloadSkills() {
+        // loadSkills() 每次都从磁盘读取，无需额外缓存清除
+        // 保留此方法供 ChatViewModel 的 /reload-skill 命令调用
+    }
+
     fun getEnabledSkills(): List<Skill> =
         loadSkills().filter { it.enabled && !it.hasMissingTools }
 

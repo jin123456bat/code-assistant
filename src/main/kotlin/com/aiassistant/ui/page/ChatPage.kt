@@ -147,7 +147,7 @@ class ChatPage(
                 showErrorBanner(msg.content)
             }
             animateBubbleAppear(renderMessage(msg))
-            messageContainer.add(Box.createVerticalStrut(3))
+            messageContainer.add(Box.createVerticalStrut(8))
             messageContainer.revalidate(); scrollToBottom()
         }
         viewModel.onToolCallStarted = { toolUseId, toolName, params ->
@@ -156,7 +156,7 @@ class ChatPage(
             val card = ToolCallCard(toolName, paramsText, ToolCallCard.ToolCallState.PENDING)
             toolCards[toolUseId] = card
             animateBubbleAppear(card)
-            messageContainer.add(Box.createVerticalStrut(3))
+            messageContainer.add(Box.createVerticalStrut(8))
             messageContainer.revalidate(); scrollToBottom()
         }
         viewModel.onToolCallStateChanged = { toolUseId, state, result, durationMs ->
@@ -174,7 +174,7 @@ class ChatPage(
             ).also { newCard ->
                 toolCards[request.toolUseId] = newCard
                 animateBubbleAppear(newCard)
-                messageContainer.add(Box.createVerticalStrut(3))
+                messageContainer.add(Box.createVerticalStrut(8))
             }
             card.setApprovalActions(
                 ToolCallCard.ApprovalActions(
@@ -215,7 +215,7 @@ class ChatPage(
             reasoningBubble = ChatBubbleRenderer.renderThinking(reasoningBuf.toString(), durationMs)
             // 思考过程块位于消息流末尾，没有 tool call 时在流式回复前，有 tool call 时在 tool call 前
             messageContainer.add(reasoningBubble)
-            messageContainer.add(Box.createVerticalStrut(3))
+            messageContainer.add(Box.createVerticalStrut(8))
             messageContainer.revalidate(); scrollToBottom()
         }
         viewModel.onStateChanged = {
@@ -246,7 +246,7 @@ class ChatPage(
         } else {
             viewModel.messages.forEach { msg ->
                 messageContainer.add(renderMessage(msg))
-                messageContainer.add(Box.createVerticalStrut(3))
+                messageContainer.add(Box.createVerticalStrut(8))
             }
             messageContainer.revalidate()
         }
@@ -350,7 +350,7 @@ class ChatPage(
                 )
             )
         )
-        messageContainer.add(Box.createVerticalStrut(3)); messageContainer.revalidate()
+        messageContainer.add(Box.createVerticalStrut(8)); messageContainer.revalidate()
     }
 
     private fun renderMessage(msg: ChatMessage): JComponent =
@@ -413,7 +413,7 @@ class ChatPage(
         addTimestampMarker()
         viewModel.messages.forEach { msg ->
             messageContainer.add(renderMessage(msg))
-            messageContainer.add(Box.createVerticalStrut(3))
+            messageContainer.add(Box.createVerticalStrut(8))
         }
         messageContainer.revalidate()
         messageContainer.repaint()
