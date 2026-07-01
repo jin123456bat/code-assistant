@@ -65,21 +65,6 @@ class ChatPage(
         val titleLabel = JLabel(viewModel.session.title).apply {
             font = font.deriveFont(12f).deriveFont(java.awt.Font.BOLD)
         }
-        val clearButton = JButton("🗑").apply {
-            toolTipText = "清空会话"
-            font = font.deriveFont(13f)
-            isContentAreaFilled = false
-            border = BorderFactory.createEmptyBorder(2, 6, 2, 6)
-            addActionListener {
-                viewModel.clearSession()
-                messageContainer.removeAll()
-                toolCards.clear()
-                resetMultiAgentBlock()
-                addTimestampMarker()
-                messageContainer.revalidate()
-                messageContainer.repaint()
-            }
-        }
         val closeButton = JButton("✕").apply {
             toolTipText = "关闭面板"
             font = font.deriveFont(13f)
@@ -98,7 +83,6 @@ class ChatPage(
             )
             add(titleLabel, BorderLayout.WEST)
             add(JPanel().apply {
-                add(clearButton)
                 add(closeButton)
             }, BorderLayout.EAST)
         }
