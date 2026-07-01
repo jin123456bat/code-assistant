@@ -29,11 +29,13 @@ Model Context Protocol (MCP) 支持——通过 JSON-RPC 协议与外部 MCP Ser
 
 兼容 Claude Code / Codex MCP 配置格式。同时读取以下配置文件（后加载覆盖先加载）：
 
-| 优先级 | 文件路径                                        | 说明                       |
-|-----|---------------------------------------------|--------------------------|
-| 1   | `<project>/.code-assistant/mcp-config.json` | 主配置文件                    |
-| 2   | `<project>/.mcp.json`                       | 兼容 Claude Code MCP 配置格式  |
-| 3   | `~/.claude/.mcp.json`                       | 兼容 Claude Code 全局 MCP 配置 |
+| 优先级 | 文件路径                                        | 说明                        |
+|-----|---------------------------------------------|---------------------------|
+| 1   | `<project>/.code-assistant/mcp-config.json` | 主配置文件                     |
+| 2   | `<project>/.mcp.json`                       | 兼容 Claude Code 项目级 MCP 配置 |
+| 3   | `~/.claude/.mcp.json`                       | 兼容 Claude Code 用户级 MCP 配置 |
+| 4   | `<project>/.codex/mcp.json`                 | 兼容 Codex 项目级 MCP 配置       |
+| 5   | `~/.codex/mcp.json`                         | 兼容 Codex 用户级 MCP 配置       |
 
 ### mcp-config.json 示例
 

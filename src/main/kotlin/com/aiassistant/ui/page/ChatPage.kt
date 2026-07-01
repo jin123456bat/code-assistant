@@ -2,6 +2,7 @@ package com.aiassistant.ui.page
 
 import com.aiassistant.agent.MultiAgentManager
 import com.aiassistant.ui.AppColors
+import com.aiassistant.ui.Banner
 import com.aiassistant.ui.EditorSelectionListener
 import com.aiassistant.ui.chat.*
 import com.intellij.openapi.project.Project
@@ -17,11 +18,13 @@ import javax.swing.*
 
 class ChatPage(
     project: Project,
-    restoreSessionId: String? = null
+    restoreSessionId: String? = null,
+    private val enableIdeServices: Boolean = true
 ) : JPanel(BorderLayout()) {
 
     private val viewModel = ChatViewModel(project, restoreSessionId)
     private lateinit var planCard: PlanCard
+    private val northPanel = JPanel(BorderLayout())
     private val messageContainer = JPanel().apply {
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
         isOpaque = true
@@ -101,7 +104,6 @@ class ChatPage(
         }
         // 对齐 docs/ui/components.md §6 ChatPage 组件树：
         // NORTH=标题行+PlanCard, CENTER=JScrollPane→messageContainer
-        val northPanel = JPanel(BorderLayout())
         northPanel.add(titleBar, BorderLayout.NORTH)
         northPanel.add(planCard, BorderLayout.SOUTH)
         add(northPanel, BorderLayout.NORTH)
@@ -135,25 +137,30 @@ class ChatPage(
                     .filter { it.type == ChatMessage.Type.USER_TEXT && !it.deleted }
                     .lastOrNull()?.content
             }
-        ).apply { setProject(project) }
-        EditorSelectionListener(
-            project,
-            onSelectionChanged = { filePath, startLine, endLine, content ->
-                inputArea.setSelectionReference(
-                    fileName = filePath,
-                    lineRange = "$startLine-$endLine",
-                    content = content
-                )
-            },
-            onSelectionCleared = { inputArea.clearSelectionReference() }
-        )
+        ).apply {
+            if (enableIdeServices) setProject(project)
+        }
+        if (enableIdeServices) {
+            EditorSelectionListener(
+                project,
+                onSelectionChanged = { filePath, startLine, endLine, content ->
+                    inputArea.setSelectionReference(
+                        fileName = filePath,
+                        lineRange = "$startLine-$endLine",
+                        content = content
+                    )
+                },
+                onSelectionCleared = { inputArea.clearSelectionReference() }
+            )
+        }
         add(inputArea, BorderLayout.SOUTH)
 
         viewModel.onMessageAdded = { msg ->
             streamingBubble?.let { messageContainer.remove(it); streamingBubble = null }
-            // 对齐 docs/ui/components.md §3.2 Error 状态：发送失败时输入区域标红
             if (msg.type == ChatMessage.Type.ERROR) {
+                // 错误顶部给出持续可见的 Banner，同时保留消息流气泡里的复制/重试操作。
                 inputArea.showError()
+                showErrorBanner(msg.content)
             }
             animateBubbleAppear(renderMessage(msg))
             messageContainer.add(Box.createVerticalStrut(3))
@@ -434,6 +441,47 @@ class ChatPage(
         SwingUtilities.invokeLater {
             scrollPane.verticalScrollBar.value = scrollPane.verticalScrollBar.maximum
         }
+    }
+
+    /** 当前显示的错误 Banner，新错误替换旧错误 */
+    private var errorBanner: JPanel? = null
+
+    /** 在页面顶部展示错误 Banner，点击关闭，新错误替换旧错误 */
+    private fun showErrorBanner(message: String) {
+        errorBanner?.let { northPanel.remove(it) }
+        val bannerType = errorBannerType(message)
+        val bn = Banner.create(
+            message = message,
+            type = bannerType,
+            onClose = { dismissErrorBanner() },
+            showSettingsButton = bannerType == Banner.Type.ERROR_AUTH
+        )
+        errorBanner = bn
+        northPanel.add(bn, BorderLayout.CENTER)
+        northPanel.revalidate()
+        northPanel.repaint()
+        revalidate(); repaint()
+    }
+
+    private fun dismissErrorBanner() {
+        errorBanner?.let {
+            northPanel.remove(it)
+            errorBanner = null
+        }
+        northPanel.revalidate()
+        northPanel.repaint()
+        revalidate()
+        repaint()
+    }
+
+    private fun errorBannerType(message: String): Banner.Type {
+        val normalized = message.lowercase()
+        val isAuthError = "api key" in normalized ||
+                "401" in normalized ||
+                "unauthorized" in normalized ||
+                "认证" in message ||
+                ("key" in normalized && ("无效" in message || "未配置" in message))
+        return if (isAuthError) Banner.Type.ERROR_AUTH else Banner.Type.ERROR
     }
 
     /**

@@ -129,8 +129,8 @@
           animation: fadeIn .15s ease-out;
         }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
-        .bubble.user { align-self: flex-end; background: var(--blue-50); max-width: 60%; border-bottom-right-radius: 4px; }
-        .bubble.agent { align-self: flex-start; background: #fff; border-left: 3px solid var(--primary); max-width: 75%; }
+        .bubble.user { align-self: flex-end; background: var(--blue-50); max-width: 70%; border-bottom-right-radius: 4px; }
+        .bubble.agent { align-self: flex-start; background: #fff; border-left: 3px solid var(--primary); max-width: 85%; }
         .dark .bubble.agent { background: var(--g100); }
         .bubble.error { align-self: flex-start; background: var(--error-light); border-left: 3px solid var(--error); }
         .bubble h3 { font-size: 12px; font-weight: 600; margin: 8px 0 4px; }
@@ -269,6 +269,13 @@
         }
         .options-block .opt-item.selected .opt-letter {
           background: var(--primary); border-color: var(--primary); color: #fff;
+        }
+        /* Multi-select: square checkbox instead of circle */
+        .options-block.multi .opt-item .opt-letter {
+          border-radius: 3px;
+        }
+        .options-block.multi .opt-item.selected .opt-letter {
+          border-radius: 3px;
         }
         .options-block .opt-item .opt-text { flex: 1; }
         .options-block .opt-item .opt-desc { font-size: 11px; color: var(--g500); margin-top: 1px; }
@@ -685,24 +692,39 @@
 
     <!-- ===== Chat Page ===== -->
     <div class="page" id="page-chat">
-        <!-- Banner: API Key 验证中 -->
-        <div class="banner info" id="chatBanner" style="display:none;">
+        <!-- Banner: API Key 验证中 — 点击关闭 -->
+        <div class="banner info" id="chatBanner" style="display:none;cursor:pointer;"
+             onclick="this.remove()">
             <span>🔄 正在验证 API Key...</span>
         </div>
 
         <!-- Banner: API Key 无效 -->
-        <div class="banner err" id="chatBannerError" style="display:none;">
+        <div class="banner err" id="chatBannerError" style="display:none;cursor:pointer;"
+             onclick="this.remove()">
             <span>❌ API Key 无效，请检查 Settings</span>
             <span class="banner-actions">
-                <button class="btn btn-danger btn-xs">✕ 关闭</button>
                 <button class="btn btn-secondary btn-xs"
-                        onclick="switchPage('settings')">⚙ Settings</button>
+                        onclick="event.stopPropagation();switchPage('settings')">⚙ Settings</button>
             </span>
         </div>
 
         <!-- Banner: 429 速率限制 -->
-        <div class="banner warn" id="chatBanner429" style="display:none;">
+        <div class="banner warn" id="chatBanner429" style="display:none;cursor:pointer;"
+             onclick="this.remove()">
             <span>⏸ 速率限制，30s 后自动重试...</span>
+        </div>
+
+        <!-- Banner: 连接/API 错误 — 点击关闭 -->
+        <div class="banner err" id="chatBannerApiErr" style="cursor:pointer;"
+             onclick="this.remove()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                 style="flex-shrink:0;">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="12" y1="8" x2="12" y2="12"/>
+                <line x1="12" y1="16" x2="12.01" y2="16"/>
+            </svg>
+            <span>错误: 连接中断，请检查网络后重试。</span>
         </div>
 
         <!-- Title bar -->
@@ -714,15 +736,6 @@
                         points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>重构 UserService — 添加 suspend 支持</span>
             <div style="display:flex;gap:6px;">
                 <button class="btn btn-secondary btn-xs" title="新建会话">＋ 新建</button>
-                <button class="btn btn-secondary btn-xs" title="清空会话">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
-                         stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                         stroke-linejoin="round" style="vertical-align:middle;margin-right:2px;">
-                        <polyline points="3 6 5 6 21 6"/>
-                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                    </svg>
-                    清空
-                </button>
             </div>
         </div>
 
@@ -814,8 +827,9 @@
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
                          stroke="currentColor" stroke-width="2" stroke-linecap="round"
                          stroke-linejoin="round" style="vertical-align:middle;margin-right:2px;">
-                        <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
-                        <line x1="12" y1="17" x2="12.01" y2="17"/>
+                        <path d="M12 2a7 7 0 0 0-7 7c0 2.38 1.19 4.47 3 5.74V17a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.26A6.98 6.98 0 0 0 19 9a7 7 0 0 0-7-7z"/>
+                        <path d="M9 21h6"/>
+                        <path d="M10 18h4"/>
                     </svg>
                     思考过程 <span
                         style="margin-left:auto;font-size:11px;opacity:.7;">1.2s</span>
@@ -912,7 +926,7 @@
                 </div><!-- /tool-collapsible -->
             </div>
 
-            <!-- ToolCallCard - ERROR with retry -->
+            <!-- ToolCallCard - ERROR -->
             <div class="tool-card collapsed">
                 <div class="tool-card-header" onclick="toggleToolCard(this)">
                     <span class="arrow">▶</span>
@@ -934,16 +948,6 @@
                     </div>
                     <div class="tool-card-footer">
                         <span>耗时: 5.2s</span>
-                        <button class="btn btn-primary btn-xs">
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
-                                 stroke="currentColor" stroke-width="2.5" stroke-linecap="round"
-                                 stroke-linejoin="round"
-                                 style="vertical-align:middle;margin-right:2px;">
-                                <polyline points="1 4 1 10 7 10"/>
-                                <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>
-                            </svg>
-                            重试
-                        </button>
                     </div>
                 </div><!-- /tool-collapsible -->
             </div>
@@ -968,10 +972,40 @@
                 </div>
             </div>
 
-            <!-- ToolCallCard - AWAITING_APPROVAL — 始终展开，不可折叠 -->
+            <!-- ToolCallCard - AWAITING_APPROVAL（常规首次审批，3 按钮） -->
+            <div class="tool-card awaiting" id="toolCardApprovalReg">
+                <div class="tool-card-header">
+                    <span class="arrow" style="visibility:hidden;">▾</span>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
+                         stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                         stroke-linejoin="round" style="vertical-align:middle;margin-right:2px;">
+                        <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
+                    </svg>
+                    Read <span class="state state-awaiting">🔒 AWAITING_APPROVAL</span>
+                </div>
+                <div class="tool-card-body">
+                    <div class="tool-card-params">filePath: "UserService.kt"</div>
+                    <div class="tool-approval">
+                        <span class="msg">首次使用 Read 工具，需要你的授权</span>
+                        <div class="btn-row">
+                            <button class="btn btn-primary btn-xs"
+                                    onclick="approveTool('toolCardApprovalReg')">允许一次
+                            </button>
+                            <button class="btn btn-secondary btn-xs"
+                                    onclick="approveToolSession('toolCardApprovalReg')">允许此会话
+                            </button>
+                            <button class="btn btn-danger btn-xs"
+                                    onclick="rejectTool('toolCardApprovalReg')">拒绝
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ToolCallCard - AWAITING_APPROVAL（危险命令, 仅 2 按钮, 无"允许此会话"） -->
             <div class="tool-card awaiting" id="toolCardApproval">
-                <div class="tool-card-header" onclick="toggleToolCard(this)">
-                    <span class="arrow">▾</span>
+                <div class="tool-card-header">
+                    <span class="arrow" style="visibility:hidden;">▾</span>
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
                          stroke="currentColor" stroke-width="2" stroke-linecap="round"
                          stroke-linejoin="round" style="vertical-align:middle;margin-right:2px;">
@@ -996,7 +1030,7 @@
             </div>
 
             <!-- ToolCallCard - TIMEOUT -->
-            <div class="tool-card" style="display:none;" id="toolCardTimeout">
+            <div class="tool-card collapsed" id="toolCardTimeout">
                 <div class="tool-card-header" onclick="toggleToolCard(this)">
                     <span class="arrow">▾</span>
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
@@ -1018,7 +1052,44 @@
                 </div>
             </div>
 
-            <!-- Options Block -->
+            <!-- Options Block — 多选 -->
+            <div class="options-block multi">
+                <div class="opt-header">你需要哪些功能？（多选）</div>
+                <div class="opt-item selected" onclick="toggleMultiOption(this)">
+                    <div class="opt-letter">✓</div>
+                    <div class="opt-text">
+                        <div>代码补全</div>
+                        <div class="opt-desc">基于上下文的智能代码建议</div>
+                    </div>
+                </div>
+                <div class="opt-item selected" onclick="toggleMultiOption(this)">
+                    <div class="opt-letter">✓</div>
+                    <div class="opt-text">
+                        <div>Agent 对话</div>
+                        <div class="opt-desc">AI 编程代理，支持工具调用</div>
+                    </div>
+                </div>
+                <div class="opt-item" onclick="toggleMultiOption(this)">
+                    <div class="opt-letter"></div>
+                    <div class="opt-text">
+                        <div>Git Commit Message</div>
+                        <div class="opt-desc">自动生成 Conventional Commits</div>
+                    </div>
+                </div>
+                <div class="opt-item" onclick="toggleMultiOption(this)">
+                    <div class="opt-letter"></div>
+                    <div class="opt-text">
+                        <div>MCP 外部工具</div>
+                        <div class="opt-desc">连接数据库、文件系统等外部服务</div>
+                    </div>
+                </div>
+                <div class="opt-footer">
+                    <button class="btn btn-primary btn-xs">确认选择</button>
+                    <span class="selected-label">已选: 2 项</span>
+                </div>
+            </div>
+
+            <!-- Options Block — 单选 -->
             <div class="options-block">
                 <div class="opt-header">选择下一步操作：</div>
                 <div class="opt-item selected" onclick="selectOption(this, 'A')">
@@ -1072,27 +1143,6 @@
                     <span>14:33</span>
                     <span>tokens: 1.2K+0.4K</span>
                 </div>
-            </div>
-
-            <!-- Error bubble -->
-            <div class="msg-row error">
-                <div class="bubble error">
-                    <p>❌ <strong>错误:</strong> 连接中断，请检查网络后重试。</p>
-                    <button class="btn btn-primary btn-xs" style="margin-top:8px;">
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
-                             stroke="currentColor" stroke-width="2.5" stroke-linecap="round"
-                             stroke-linejoin="round"
-                             style="vertical-align:middle;margin-right:2px;">
-                            <polyline points="1 4 1 10 7 10"/>
-                            <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>
-                        </svg>
-                        重试
-                    </button>
-                    <button class="btn btn-secondary btn-xs" style="margin-top:8px;">📋
-                        复制错误信息
-                    </button>
-                </div>
-                <div class="msg-ts">14:35</div>
             </div>
 
             <!-- Multi-Agent Block -->
@@ -1307,8 +1357,9 @@
                 <p>开始一段对话，会话将自动保存</p>
             </div>
 
-            <div style="font-size:12px;color:var(--g500);padding:12px 0;display:flex;gap:12px;">
-                <span>共 24 个会话，总消耗 156K tokens</span>
+            <div id="sessionsBottomBar"
+                 style="font-size:12px;color:var(--g500);padding:12px 0;display:flex;gap:12px;">
+                <span id="sessionsStats">共 24 个会话，总消耗 156K tokens</span>
                 <button class="btn btn-secondary btn-xs">全选</button>
                 <button class="btn btn-danger btn-xs"
                         onclick="showConfirm('删除会话', '确定删除 <span class=highlight>选中的会话</span>？此操作不可撤销。', function(){ showToast('已删除选中会话', 'warning'); }, true)">
@@ -1582,10 +1633,18 @@
                 </p>
             </div>
 
-            <div style="font-size:11px;color:var(--g400);padding:8px 0;">
-                配置文件: .code-assistant/mcp-config.json
-                <button class="btn btn-secondary btn-xs" style="margin-left:8px;">📂 打开文件
-                </button>
+            <div style="font-size:11px;color:var(--g400);padding:8px 0;line-height:1.8;">
+                配置文件（点击打开）:<br>
+                <span style="color:var(--primary);cursor:pointer;text-decoration:underline;"
+                      onclick="showToast('打开配置文件', 'success')">&nbsp;&nbsp;.code-assistant/mcp-config.json</span><br>
+                <span style="color:var(--primary);cursor:pointer;text-decoration:underline;"
+                      onclick="showToast('打开配置文件', 'success')">&nbsp;&nbsp;.mcp.json</span><br>
+                <span style="color:var(--primary);cursor:pointer;text-decoration:underline;"
+                      onclick="showToast('打开配置文件', 'success')">&nbsp;&nbsp;~/.claude/.mcp.json</span><br>
+                <span style="color:var(--primary);cursor:pointer;text-decoration:underline;"
+                      onclick="showToast('打开配置文件', 'success')">&nbsp;&nbsp;.codex/mcp.json</span><br>
+                <span style="color:var(--primary);cursor:pointer;text-decoration:underline;"
+                      onclick="showToast('打开配置文件', 'success')">&nbsp;&nbsp;~/.codex/mcp.json</span>
             </div>
         </div>
     </div>
@@ -1607,13 +1666,6 @@
                 <button class="btn btn-primary btn-xs" onclick="toggleSkillForm()">➕ 新建 Skill
                 </button>
             </div>
-            <div style="font-size:11px;color:var(--g400);margin-bottom:12px;">
-                扫描目录: .code-assistant/skills/ .claude/skills/ ~/.claude/skills/<br>.codex/skills/
-                ~/.codex/skills/
-                <button class="btn btn-secondary btn-xs" style="margin-left:8px;">📂 打开目录
-                </button>
-            </div>
-
             <!-- New Skill Inline Form -->
             <div class="card" id="skillAddForm" style="margin-bottom:12px;display:none;">
                 <div style="font-size:13px;font-weight:600;margin-bottom:10px;">新建 Skill</div>
@@ -1711,6 +1763,20 @@
                             onclick="showSkillDetail('code-review')">详情
                     </button>
                 </div>
+            </div>
+
+            <div style="font-size:11px;color:var(--g400);padding:8px 0;line-height:1.8;">
+                扫描目录（点击打开）:<br>
+                <span style="color:var(--primary);cursor:pointer;text-decoration:underline;"
+                      onclick="showToast('打开目录', 'success')">&nbsp;&nbsp;.code-assistant/skills/</span><br>
+                <span style="color:var(--primary);cursor:pointer;text-decoration:underline;"
+                      onclick="showToast('打开目录', 'success')">&nbsp;&nbsp;.claude/skills/</span><br>
+                <span style="color:var(--primary);cursor:pointer;text-decoration:underline;"
+                      onclick="showToast('打开目录', 'success')">&nbsp;&nbsp;~/.claude/skills/</span><br>
+                <span style="color:var(--primary);cursor:pointer;text-decoration:underline;"
+                      onclick="showToast('打开目录', 'success')">&nbsp;&nbsp;.codex/skills/</span><br>
+                <span style="color:var(--primary);cursor:pointer;text-decoration:underline;"
+                      onclick="showToast('打开目录', 'success')">&nbsp;&nbsp;~/.codex/skills/</span>
             </div>
 
             <div class="empty-state" id="skillsEmpty" style="display:none;">
@@ -1823,7 +1889,7 @@
       el.className = 'toast ' + type;
       el.innerHTML = '<span>' + msg + '</span><span class="toast-close" onclick="this.parentElement.remove()">×</span>';
       container.appendChild(el);
-      setTimeout(function() { if (el.parentElement) el.remove(); }, 3500);
+      setTimeout(function() { if (el.parentElement) el.remove(); }, 3000);
     }
 
     // ===== Confirm Dialog =====
@@ -2036,6 +2102,14 @@
       el.classList.add('selected');
       el.closest('.options-block').querySelector('.selected-label').textContent = '已选: ' + letter;
     }
+    function toggleMultiOption(el) {
+      el.classList.toggle('selected');
+      var letter = el.querySelector('.opt-letter');
+      letter.textContent = el.classList.contains('selected') ? '✓' : '';
+      var block = el.closest('.options-block');
+      var count = block.querySelectorAll('.opt-item.selected').length;
+      block.querySelector('.selected-label').textContent = '已选: ' + count + ' 项';
+    }
 
     // ===== Plan Card =====
     function togglePlanCard() {
@@ -2141,7 +2215,14 @@
           if (match) visible++;
         });
         const emptyEl = document.getElementById('sessionsEmpty');
-        if (emptyEl) emptyEl.style.display = visible === 0 ? '' : 'none';
+        const bottomBar = document.getElementById('sessionsBottomBar');
+        if (query && visible === 0) {
+          if (emptyEl) emptyEl.style.display = '';
+          if (bottomBar) bottomBar.style.display = 'none';
+        } else {
+          if (emptyEl) emptyEl.style.display = 'none';
+          if (bottomBar) bottomBar.style.display = '';
+        }
       }, 300);
     }
     function now() {

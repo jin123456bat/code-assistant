@@ -186,7 +186,7 @@ object ToolRegistry {
             )
         )
         register(
-            "CreatePlan",
+            "createPlan",
             CreatePlan::class.java,
             ToolInfo(
                 "createPlan",
@@ -195,7 +195,7 @@ object ToolRegistry {
             )
         )
         register(
-            "ListPlans",
+            "listPlans",
             ListPlans::class.java,
             ToolInfo(
                 "listPlans",
@@ -204,7 +204,7 @@ object ToolRegistry {
             )
         )
         register(
-            "RemovePlan",
+            "removePlan",
             RemovePlan::class.java,
             ToolInfo(
                 "removePlan",
@@ -213,16 +213,16 @@ object ToolRegistry {
             )
         )
         register(
-            "ReorderPlans",
+            "reorderPlans",
             ReorderPlans::class.java,
             ToolInfo(
                 "reorderPlans",
                 "重排 PAUSED 计划项的顺序",
-                "传入新的 planId 序列，调整剩余 PAUSED 项的执��顺序。"
+                "传入新的 planId 序列，调整剩余 PAUSED 项的执行顺序。"
             )
         )
         register(
-            "MarkPlanDone",
+            "markPlanDone",
             MarkPlanDone::class.java,
             ToolInfo(
                 "markPlanDone",

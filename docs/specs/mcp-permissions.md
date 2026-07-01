@@ -4,7 +4,9 @@
 
 ## 一、当前状态
 
-MCP 权限模型**尚未实现**。当前的 `McpManager` 仅负责 Server 生命周期管理（启动/停止/崩溃恢复），不涉及工具级别的权限控制。
+MCP 权限模型已实现基础的 **Server 粒度审批**：首次调用某个 MCP Server 的工具时，UI 在
+ToolCallCard 中提供 `[允许一次]` / `[允许此 Server]` / `[拒绝]`。其中 `[允许此 Server]` 会将
+Server ID 写入 Session JSON 的 `approvedMcpServers`；资源访问控制、网络限制和沙箱隔离仍未实现。
 
 ## 二、Server 生命周期
 
@@ -46,6 +48,7 @@ MCP 配置文件结构见 [persistence.md §6.3 MCP Config](persistence.md#63-mc
 ```
 首次调用某 MCP Server 的任意工具
   → ToolCallCard 弹窗："允许此 Server 的所有工具？"（serverName + 工具列表预览）
+  → [允许一次] → 仅本次 tool_use 放行，并记录该 server 已完成首次确认；不写入 approvedMcpServers
   → [允许此 Server] → 该 Server 所有工具加入 approvedMcpServers，持久化到 Session JSON
   → [拒绝] → 发送拒绝 tool_result，LLM 可选择不使用该 Server 或更换方式
   → /clear 或 /new → 不清除 approvedMcpServers（与 approvedTools 同等对待）
@@ -53,12 +56,13 @@ MCP 配置文件结构见 [persistence.md §6.3 MCP Config](persistence.md#63-mc
 
 ### 与内置工具审批的关系
 
-| 维度       | 内置工具                              | MCP 工具                                        |
-|----------|-----------------------------------|-----------------------------------------------|
-| 审批粒度     | 按工具名（Read/Write/Edit/Bash/Agent）  | 按 Server ID                                   |
-| 首次弹窗     | "允许此会话使用 Read？"                   | "允许此会话使用 Server mysql 的所有工具？"                 |
-| 持久化      | `approvedTools: ["Read", "Edit"]` | `approvedMcpServers: ["mysql", "filesystem"]` |
-| 危险命令二次确认 | ✅（Bash dangerous=true）            | ❌（MCP 工具不参与危险命令检测）                            |
+| 维度       | 内置工具                              | MCP 工具                                             |
+|----------|-----------------------------------|----------------------------------------------------|
+| 审批粒度     | 按工具名（Read/Write/Edit/Bash/Agent）  | 按 Server ID                                        |
+| 首次弹窗     | "允许此会话使用 Read？"                   | "允许此会话使用 Server mysql 的所有工具？"                      |
+| 持久化      | `approvedTools: ["Read", "Edit"]` | `approvedMcpServers: ["mysql", "filesystem"]`      |
+| 允许一次     | 仅本次工具调用放行，不加入 `approvedTools`     | 仅本次 tool_use 放行；不加入 `approvedMcpServers`，但不再重复首用确认 |
+| 危险命令二次确认 | ✅（Bash dangerous=true）            | ❌（MCP 工具不参与危险命令检测）                                 |
 
 ## 六、工具白名单与资源访问（待实现）
 

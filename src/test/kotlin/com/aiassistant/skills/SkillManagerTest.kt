@@ -53,18 +53,38 @@ class SkillManagerTest {
         assertFalse("/test" in commands, "Expected /test to be disabled")
     }
 
-    private fun writeSkill(root: java.nio.file.Path, name: String, command: String) {
+    @Test
+    fun `accepts documented lowercase plan tool names`() {
+        val root = createTempDirectory()
+        writeSkill(root, "planner", "planner", tools = listOf("createPlan", "listPlans"))
+
+        val skill =
+            SkillManager(projectAt(root.toString())).loadSkills().single { it.name == "planner" }
+
+        assertFalse(skill.hasMissingTools)
+        assertEquals(emptyList(), skill.missingTools)
+    }
+
+    private fun writeSkill(
+        root: java.nio.file.Path,
+        name: String,
+        command: String,
+        tools: List<String> = emptyList()
+    ) {
         val skillDir = root.resolve(".code-assistant/skills/$name").createDirectories()
-        skillDir.resolve("SKILL.md").writeText(
-            """
-            ---
-            name: $name
-            description: $name skill
-            command: $command
-            ---
-            $name body.
-            """.trimIndent()
-        )
+        val content = buildString {
+            appendLine("---")
+            appendLine("name: $name")
+            appendLine("description: $name skill")
+            appendLine("command: $command")
+            if (tools.isNotEmpty()) {
+                appendLine("tools:")
+                tools.forEach { appendLine("  - $it") }
+            }
+            appendLine("---")
+            appendLine("$name body.")
+        }
+        skillDir.resolve("SKILL.md").writeText(content)
     }
 
     private fun projectAt(basePath: String): Project =

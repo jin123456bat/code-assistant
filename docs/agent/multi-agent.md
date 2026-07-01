@@ -53,7 +53,7 @@
 
 ### 工具白名单
 
-子 Agent的工具范围由系统预配置，LLM 调用 `Agent` 时无需传类型参数。
+子 Agent 的工具范围由系统预配置，LLM 调用 `Agent` 时无需传类型参数。
 
 | 系统预配置           | 可用工具                   | 说明            |
 |-----------------|------------------------|---------------|
@@ -63,8 +63,8 @@
 **General-purpose 默认可用工具（11 个）：** `Read`, `Write`, `Edit`, `Bash`, `Glob`, `Grep`,
 `readLints`, `WebSearch`, `WebFetch`, `AskUserQuestion`, `Symbol`
 
-> **不可用：** `Agent`（禁止嵌套）、`Skill`（Skill 注入由父 Agent 管理，子 Agent不加载 Skill）。计划管理工具（
-`createPlan` 等 5 个）在子 Agent中不可用——子 Agent的任务由父 Agent 通过 prompt 直接描述。
+> **不可用：** `Agent`（禁止嵌套）、`Skill`（Skill 注入由父 Agent 管理，子 Agent 不加载 Skill）。计划管理工具（
+`createPlan` 等 5 个）在子 Agent 中不可用——子 Agent 的任务由父 Agent 通过 prompt 直接描述。
 
 ### 工具限制规则
 
@@ -77,13 +77,14 @@
 
 **始终不可用的工具：**
 
-| 工具      | 原因                                   |
-|---------|--------------------------------------|
-| `Agent` | 当前仅支持 1 层嵌套（子不可 spawn 孙）             |
-| `Skill` | Skill 注入由父 Agent 管理，子 Agent不加载 Skill |
+| 工具      | 原因                                    |
+|---------|---------------------------------------|
+| `Agent` | 当前仅支持 1 层嵌套（子不可 spawn 孙）              |
+| `Skill` | Skill 注入由父 Agent 管理，子 Agent 不加载 Skill |
 
-> 对齐 Claude Code：`AskUserQuestion`、`EnterPlanMode` 等依赖父会话状态的工具在子 Agent中不可用。当前项目因嵌套上限为
-> 1 层，`Agent` 工具在子 Agent中同样不可用。
+> 对齐 Claude Code：`AskUserQuestion`、`EnterPlanMode` 等依赖父会话状态的工具在子 Agent
+> 中不可用。当前项目因嵌套上限为
+> 1 层，`Agent` 工具在子 Agent 中同样不可用。
 
 ### 与父 Agent 审批的区别
 

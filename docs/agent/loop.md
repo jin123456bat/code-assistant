@@ -83,7 +83,7 @@ IDLE ──sendMessage()──→ PROCESSING ──LLM 返回输出──→ IDL
   │                        └── 无审批 → EXECUTING → PROCESSING
   │
   ├── 用户点 Stop → CANCELLED（清理 → IDLE）
-  └── API error → ERROR（显示错误气泡 + [重试]）
+  └── API error → ERROR（显示错误横幅 + [重试]）
 ```
 
 ### 状态说明
@@ -166,6 +166,16 @@ IDLE ──sendMessage()──→ PROCESSING ──LLM 返回输出──→ IDL
 - 已完成的流式内容：保留 + 持久化
 - 未完成的流式内容：保留 + 持久化（存已收到的部分），尾部标注 `[连接中断]`
 - 用户点击 [重试]：发送相同的 `params` 重新开始当前 turn，LLM 从中断处继续
+
+### 错误横幅
+
+API 调用失败或网络中断时，Chat 页面顶部渲染错误横幅（banner）：
+
+- **触发条件**：API 5xx/网络超时（退避 3 次失败）、API 401 认证失败、连接中断
+- **位置**：Chat 页面顶部，消息流上方
+- **结构**：错误图标 + 错误描述文本
+- **交互**：点击横幅任意位置关闭
+- **风格**：红底 `#FEE2E2`、文字 `#EF4444`
 
 ### Escape 键行为
 

@@ -228,22 +228,8 @@ object ChatBubbleRenderer {
         val wrapper = JPanel(BorderLayout()).apply {
             putClientProperty("bubbleType", "error")
             accessibleContext.accessibleDescription = "错误消息: ${msg.content.take(100)}"
+            isOpaque = false
         }
-        val retry = JButton("🔄 重试").apply {
-            isEnabled = onRetry != null
-            accessibleContext.accessibleDescription = "重新发送失败的消息"
-            if (onRetry != null) addActionListener { onRetry() }
-        }
-        val copy = JButton("📋 复制").apply {
-            accessibleContext.accessibleDescription = "复制错误消息到剪贴板"
-            addActionListener {
-                runCatching {
-                    Toolkit.getDefaultToolkit().systemClipboard
-                        .setContents(StringSelection(msg.content), null)
-                }
-            }
-        }
-        val btns = JPanel().apply { add(retry); add(copy) }
         wrapper.add(
             JLabel(
                 "<html><body style='width:100%;max-width:480px;margin:0;padding:0'>❌ ${
@@ -252,13 +238,33 @@ object ChatBubbleRenderer {
                     )
                 }</body></html>"
             ).apply {
-            isOpaque = true; background = AppColors.errorBg
+                isOpaque = true
+                background = AppColors.errorBg
             border = BorderFactory.createCompoundBorder(
                 BorderFactory.createEmptyBorder(6, 10, 6, 10),
                 BorderFactory.createMatteBorder(0, 3, 0, 0, AppColors.error)
             )
         }, BorderLayout.CENTER)
-        wrapper.add(btns, BorderLayout.SOUTH)
+        wrapper.add(JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0)).apply {
+            isOpaque = false
+            onRetry?.let {
+                add(JButton("🔄 重试").apply {
+                    accessibleContext.accessibleDescription = "重新发送失败的消息"
+                    addActionListener { it() }
+                })
+            }
+            add(JButton("📋 复制").apply {
+                accessibleContext.accessibleDescription = "复制错误消息到剪贴板"
+                addActionListener {
+                    runCatching {
+                        Toolkit.getDefaultToolkit().systemClipboard.setContents(
+                            StringSelection(msg.content),
+                            null
+                        )
+                    }
+                }
+            })
+        }, BorderLayout.SOUTH)
         return wrapper
     }
 

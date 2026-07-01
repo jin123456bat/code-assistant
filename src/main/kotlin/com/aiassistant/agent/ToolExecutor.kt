@@ -73,7 +73,6 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
             val approvalCtx =
                 ToolApprovalPolicy.ApprovalContext(session, toolName, toolUse, project)
             val (needsApproval, reason) = ToolApprovalPolicy.needsUserApproval(approvalCtx)
-            var markFirstUse = true
             if (needsApproval) {
                 when (val approvalResult = requestApproval(toolUse, reason)) {
                     ToolApprovalPolicy.ApprovalResult.REJECTED -> {
@@ -90,14 +89,11 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
 
                     ToolApprovalPolicy.ApprovalResult.ALLOW_ONCE -> {
                         // 仅本次放行，不加入白名单
-                        markFirstUse = !toolName.contains("/")
                     }
                 }
             }
             // 标记首次工具使用已完成（对齐 docs/agent/tools.md §六 首次工具使用）
-            if (markFirstUse) {
-                ToolApprovalPolicy.markFirstToolUse(session, toolName)
-            }
+            ToolApprovalPolicy.markFirstToolUse(session, toolName)
             onToolStateChanged?.invoke(toolUseId, ToolCallState.EXECUTING, null, null)
             val start = System.currentTimeMillis()
             val result = when (toolName) {

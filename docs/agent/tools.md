@@ -73,7 +73,7 @@
 
 ### Agent
 
-启动子 Agent执行子任务。通过 `run_in_background` 控制同步/异步模式。
+启动子 Agent 执行子任务。通过 `run_in_background` 控制同步/异步模式。
 
 | 特性       | 说明                                                                 |
 |----------|--------------------------------------------------------------------|
@@ -212,8 +212,8 @@
 | 文件删除                      | Bash 含 `rm ` 且目标在项目内                                | 关键操作确认            |
 
 **Agent 工具特殊规则：** Agent 工具本身首次使用时需审批（与普通工具一致），但 **Agent
-spawn 的子 Agent内部所有工具调用一律放行，无需审批**。子
-Agent的工具范围受白名单/黑名单限制，详见 [多 Agent
+spawn 的子 Agent 内部所有工具调用一律放行，无需审批**。子
+Agent 的工具范围受白名单/黑名单限制，详见 [多 Agent
 协作 §三](./multi-agent.md#三子-agent-审批与工具限制)。
 
 **实现细节：** `ToolApprovalPolicy.needsUserApproval()` 在方法体最顶部（危险命令检测之前）
@@ -331,7 +331,7 @@ ToolInfo (ToolRegistry 内部类):
 | `Edit`            | `newString 最多 3000 行。超过此限制的操作会被拒绝。`                                                                                                                                                                       |
 | `Write`           | `内容最多 3000 行。超过此限制的操作会被拒绝。`                                                                                                                                                                               |
 | `Skill`           | `执行指定 Skill。LLM 根据用户需求自主判断触发时机，将 SKILL.md 内容作为消息注入 conversation。`                                                                                                                                         |
-| `Agent`           | `启动子 Agent执行子任务。prompt 描述任务，timeout 子 Agent 超时秒数（必填，0=不限），run_in_background 是否异步（必填）。结果摘要最多 2000 tokens。完整执行过程保存为独立 Session。`                                                                             |
+| `Agent`           | `启动子 Agent 执行子任务。prompt 描述任务，timeout 子 Agent 超时秒数（必填，0=不限），run_in_background 是否异步（必填）。结果摘要最多 2000 tokens。完整执行过程保存为独立 Session。`                                                                            |
 | `WebSearch`       | `搜索网页，返回标题和 URL 列表。≤ 10 条/页，超出时用 offset 参数翻页。不支持缓存。`                                                                                                                                                      |
 | `WebFetch`        | `抓取 URL 内容并按提示提取信息。HTTP 自动升级为 HTTPS。不支持需认证的页面。不支持缓存。`                                                                                                                                                     |
 | `AskUserQuestion` | `向用户发起问题以澄清需求。一次 1-4 个问题，每题 2-4 个选项。支持多选。`                                                                                                                                                                |
@@ -392,6 +392,41 @@ ToolResultState = DONE | CANCELLED | ERROR
 | Agent        | 子任务摘要 + sub-session ID       | 子 Agent 崩溃、超时               |
 | Skill        | SKILL.md 正文                  | Skill 不存在                   |
 | MCP 工具（动态注册） | MCP Server 返回的原始内容           | MCP 调用失败、Server 断连          |
+
+---
+
+## 十、ToolCallCard UI 状态
+
+每个工具调用映射为对话流中的一个 `ToolCallCard` 组件，共 8 个生命周期状态：
+
+| 状态                   | 图标         | 颜色       | 说明                |
+|----------------------|------------|----------|-------------------|
+| ⏳ PENDING            | Plan_0     | Gray 500 | 等待执行              |
+| 🔒 AWAITING_APPROVAL | Warning    | 黄色       | 等待用户审批，始终展开不可折叠   |
+| 🔄 EXECUTING         | Plan_4 旋转  | 蓝色       | 执行中，不可折叠，显示进度条    |
+| ✅ DONE               | TestPassed | 绿色       | 执行成功              |
+| ❌ ERROR              | TestFailed | 红色       | 执行失败，由 LLM 判断是否重试 |
+| ⏰ TIMEOUT            | Warning    | 橙色       | 超时                |
+| 🚫 REJECTED          | Suspend    | 灰色       | 用户拒绝              |
+| ⛔ CANCELLED          | Suspend    | 灰色       | 用户终止              |
+
+### 折叠/展开规则
+
+- 所有状态默认折叠，用户点击头部展开
+- 箭头 ▾/▶ 切换
+- AWAITING_APPROVAL 始终展开不可折叠
+- EXECUTING 不可折叠
+- 结果区域 max-height=240px，超出滚动显示
+
+### Diff 可视化
+
+`Edit` 执行成功后，ToolCallCard 内联展示可视化 Diff（`SimpleDiff` 生成，ADD 绿色/DEL 红色/CTX
+灰色），替换纯文本的前后对比。
+
+> ToolCallCard 在 Chat 消息流中的 ASCII
+> 布局详见 [Chat 面板 §四](../ui/chat.md#四工具调用卡片toolcallcard)。
+
+---
 
 ### 在 Agent Loop 中的流转
 

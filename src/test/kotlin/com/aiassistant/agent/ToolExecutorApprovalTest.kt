@@ -34,7 +34,7 @@ class ToolExecutorApprovalTest {
     }
 
     @Test
-    fun `mcp allow once does not approve the whole server`() {
+    fun `mcp allow once marks server first use without approving the whole server`() {
         ToolRegistry.register(
             "github/search",
             McpToolStub::class.java,
@@ -57,8 +57,9 @@ class ToolExecutorApprovalTest {
                     project = projectAt(createTempDirectory().toString())
                 )
             )
-            assertTrue(needsApproval)
-            assertEquals(ToolApprovalPolicy.ApprovalReason.FIRST_USE, reason)
+            assertEquals(false, "github" in session.approvedMcpServers)
+            assertEquals(false, needsApproval)
+            assertEquals(null, reason)
         } finally {
             ToolRegistry.unregister("github/search")
         }

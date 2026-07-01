@@ -341,7 +341,7 @@ API 调用失败
 
 Agent Loop 异常
   │
-  └── catch → SessionStore.save() 保存已生成内容 → UI 显示错误气泡 + [重试] 按钮
+  └── catch → SessionStore.save() 保存已生成内容 → UI 显示错误横幅 + [重试] 按钮
 ```
 
 ---

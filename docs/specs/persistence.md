@@ -120,6 +120,10 @@ Session JSON Schema 版本升级时采用**向后兼容 + 懒迁移**策略：
     "Write",
     "Edit",
     "Bash"
+  ],
+  "approvedMcpServers": [
+    "github",
+    "filesystem"
   ]
 }
 ```

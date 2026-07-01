@@ -24,7 +24,7 @@ import kotlinx.coroutines.CoroutineExceptionHandler
  * | 线程                                    | 注册方式                                           | 处理策略                                                             |
  * |---------------------------------------|------------------------------------------------|------------------------------------------------------------------|
  * | EDT                                   | Thread.setDefaultUncaughtExceptionHandler      | LoggingUncaughtExceptionHandler → 记录日志 + toast 提示"插件内部错误" + 不中断 IDE |
- * | PooledThread（Agent Loop / 工具执行）       | ExecutorService.execute 时设置                    | 记录日志 + session.markError() → 错误气泡展示给用户 + Agent 状态 → ERROR      |
+ * | PooledThread（Agent Loop / 工具执行）       | ExecutorService.execute 时设置                    | 记录日志 + session.markError() → 错误横幅展示给用户 + Agent 状态 → ERROR      |
  * | Swing Timer / ProcessHandler listener | 记录日志 + 静默恢复（根据上下文决定是否 toast）                          |                                                                  |
  * | Completion 协程                         | CoroutineExceptionHandler                      | 记录日志 + 静默（无候选，不打扰用户）                                           |
  *
@@ -181,7 +181,7 @@ object GlobalExceptionHandler : Thread.UncaughtExceptionHandler {
 
     /**
      * PooledThread 异常处理（Agent Loop / 工具执行）。
-     * 策略：记录日志 + session.markError() → 错误气泡展示给用户 + Agent 状态 → ERROR。
+     * 策略：记录日志 + session.markError() → 错误横幅展示给用户 + Agent 状态 → ERROR。
      */
     private fun handlePooledThreadException(t: Thread, e: Throwable) {
         when (e) {
@@ -198,7 +198,7 @@ object GlobalExceptionHandler : Thread.UncaughtExceptionHandler {
                 AppLogger.error("PooledThread [${t.name}]: 未捕获异常 — ${e.javaClass.simpleName}: ${e.message}")
                 AppLogger.error("PooledThread 异常堆栈:\n$stackTrace")
 
-                // 通过 MessageBus 广播异常事件，由 ChatViewModel 转换为错误气泡
+                // 通过 MessageBus 广播异常事件，由 ChatViewModel 转换为错误横幅
                 try {
                     MessageBus.publishSystemError(
                         "插件内部错误: ${e.javaClass.simpleName}",
