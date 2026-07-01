@@ -202,7 +202,7 @@ UNSET ──saveKey()──→ VALIDATING ──200──→ VALID
 │  └──────────────────────────────────────────────┘│
 │                                                  │
 │  配置文件: .code-assistant/mcp-config.json        │
-│  [📂 打开文件]                                    │
+│  （点击路径打开文件）                              │
 └──────────────────────────────────────────────────┘
 ```
 
@@ -246,7 +246,7 @@ UNSET ──saveKey()──→ VALIDATING ──200──→ VALID
 │    ~/.claude/skills/                              │
 │    .codex/skills/                                 │
 │    ~/.codex/skills/                               │
-│  [📂 打开目录]                                    │
+│  （点击路径打开目录）                              │
 ```
 
 - Skill 卡片：启用/禁用开关 + 名称 + 描述 + 触发词 + 所需工具
