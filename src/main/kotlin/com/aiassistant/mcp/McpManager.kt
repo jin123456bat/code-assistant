@@ -119,6 +119,19 @@ class McpManager(private val project: Project) {
     init {
         registerInstance(project, this)
         loadServers()
+
+        // 30s 请求超时检测：每 5 秒遍历所有 Server，若 lastRequestTimeMs 超过 30s 且状态为 RUNNING 则触发断连
+        scheduler.scheduleAtFixedRate({
+            servers.values.forEach { server ->
+                val lastReq = server.lastRequestTimeMs
+                if (lastReq != 0L && server.state == State.RUNNING &&
+                    System.currentTimeMillis() - lastReq > 30_000
+                ) {
+                    LOG.warn("MCP Server [${server.config.id}] 30s无响应，触发断连")
+                    handleDisconnection(server.config.id)
+                }
+            }
+        }, 5, 5, TimeUnit.SECONDS)
     }
 
     fun loadServers(): List<McpServer> {

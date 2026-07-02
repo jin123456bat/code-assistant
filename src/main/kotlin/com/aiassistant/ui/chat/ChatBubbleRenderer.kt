@@ -21,11 +21,11 @@ object ChatBubbleRenderer {
 
     // ponytail: JetBrains Mono → Monospaced fallback
     private val monoFont = run {
-        val jetbrains = Font("JetBrains Mono", Font.PLAIN, 12)
+        val jetbrains = Font("JetBrains Mono", Font.PLAIN, 13)
         if ("JetBrains Mono" in java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment().availableFontFamilyNames) {
             jetbrains
         } else {
-            Font(Font.MONOSPACED, Font.PLAIN, 12)
+            Font(Font.MONOSPACED, Font.PLAIN, 13)
         }
     }
 

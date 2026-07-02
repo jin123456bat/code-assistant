@@ -179,6 +179,15 @@ class SessionStore(private val project: Project) {
             session.parentId = dto.parentId
             session.compactSummary = dto.compactSummary
             session.compactCount = dto.compactCount
+            // IDE 重启后恢复状态：进行中的状态回退到 IDLE/PAUSED
+            session.state = try {
+                val raw = AgentSession.State.valueOf(dto.state ?: "IDLE")
+                when (raw) {
+                    AgentSession.State.PROCESSING, AgentSession.State.AWAITING_APPROVAL, AgentSession.State.EXECUTING -> AgentSession.State.IDLE
+                    AgentSession.State.PAUSED -> AgentSession.State.PAUSED
+                    else -> AgentSession.State.IDLE
+                }
+            } catch (_: Exception) { AgentSession.State.IDLE }
             session.totalTokens = dto.totalTokens?.let {
                 TokenUsage(inputTokens = it.inputTokens, outputTokens = it.outputTokens)
             } ?: TokenUsage()

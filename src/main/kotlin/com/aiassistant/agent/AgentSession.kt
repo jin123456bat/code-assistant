@@ -20,7 +20,7 @@ class AgentSession(
     var updatedAt: Instant = createdAt
 
     var state: State = State.IDLE
-        private set
+        internal set
 
     val messages = mutableListOf<Message>()
     var cancelled = false

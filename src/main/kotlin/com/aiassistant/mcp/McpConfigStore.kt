@@ -13,10 +13,13 @@ import java.nio.file.Paths
 /**
  * MCP 配置持久化存储。
  *
- * 支持 3 级配置文件加载，高优先级覆盖低优先级：
- * 1. `<project>/.code-assistant/mcp-config.json`（主配置文件，最高优先级）
- * 2. `<project>/.mcp.json`（兼容 Claude Code MCP 配置格式）
- * 3. `~/.claude/.mcp.json`（兼容 Claude Code 全局 MCP 配置，最低优先级）
+ * 支持 6 级配置文件加载，高优先级覆盖低优先级：
+ * 1. `<project>/.code-assistant/mcp-config.json`（项目主配置，最高优先级）
+ * 2. `<project>/.codex/mcp.json`（兼容 Codex 项目级配置）
+ * 3. `<project>/.mcp.json`（兼容 Claude Code 项目级 MCP 配置）
+ * 4. `~/Library/Application Support/Claude/claude_desktop_config.json`（Claude 桌面应用配置, macOS）
+ * 5. `~/.codex/mcp.json`（兼容 Codex 全局配置）
+ * 6. `~/.claude/.mcp.json`（兼容 Claude Code 全局 MCP 配置，最低优先级）
  *
  * 配置合并规则：同 id 的 Server 后加载覆盖先加载。
  */
@@ -58,9 +61,10 @@ class McpConfigStore(private val project: Project) {
     private val configFile: File get() = configPath.toFile()
 
     /**
-     * 从 3 级配置文件加载 MCP Server 配置列表。
+     * 从 6 级配置文件加载 MCP Server 配置列表。
      *
-     * 加载顺序：~/.claude/.mcp.json → .mcp.json → mcp-config.json
+     * 加载顺序（低优先级 → 高优先级）：
+     * ~/.claude/.mcp.json → ~/.codex/mcp.json → Claude 桌面配置 → .mcp.json → .codex/mcp.json → mcp-config.json
      * 同 id Server 后加载覆盖先加载，确保项目主配置拥有最高优先级。
      */
     fun load(): McpConfig {

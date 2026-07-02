@@ -6,12 +6,19 @@ import com.aiassistant.ui.toHtmlColor
 import com.intellij.icons.AllIcons
 import java.awt.BorderLayout
 import java.awt.Color
+import java.awt.Component
 import java.awt.Cursor
 import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.Font
+import java.awt.Graphics
+import java.awt.Graphics2D
+import java.awt.RenderingHints
+import java.awt.event.ActionEvent
+import java.awt.event.ActionListener
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
+import java.awt.geom.AffineTransform
 import javax.swing.*
 
 // 工具调用卡片 — 8 个状态 + 折叠，支持亮/暗主题
@@ -32,9 +39,9 @@ class ToolCallCard(
     )
 
     enum class ToolCallState(val label: String, val color: Color, val icon: Icon? = null) {
-        PENDING("等待执行", AppColors.textSecondary, AllIcons.Process.Step_1),
+        PENDING("等待执行", AppColors.textSecondary, AllIcons.Process.Plan_0),
         AWAITING_APPROVAL("等待授权", AppColors.warning, AllIcons.General.Warning),
-        EXECUTING("执行中...", AppColors.primary, AllIcons.Process.Step_2),
+        EXECUTING("执行中...", AppColors.primary, AllIcons.Process.Plan_4),
         DONE("完成", AppColors.success, AllIcons.RunConfigurations.TestPassed),
         ERROR("错误", AppColors.error, AllIcons.RunConfigurations.TestFailed),
         TIMEOUT("超时", AppColors.warning, AllIcons.General.Warning),
@@ -87,6 +94,14 @@ class ToolCallCard(
     // 当前状态是否允许折叠
     private val canCollapse: Boolean
         get() = state != ToolCallState.AWAITING_APPROVAL && state != ToolCallState.EXECUTING
+
+    // 旋转动画：EXECUTING 状态时 Plan_4 图标旋转
+    private var rotationAngle = 0.0
+    private val rotationTimer = Timer(50, ActionListener {
+        rotationAngle = (rotationAngle + Math.PI / 12) % (2 * Math.PI)
+        headerLabel.icon = RotatingIcon(ToolCallState.EXECUTING.icon!!, rotationAngle)
+        headerLabel.repaint()
+    })
 
     init {
         border = BorderFactory.createCompoundBorder(
@@ -177,12 +192,22 @@ class ToolCallCard(
             isCollapsed = false
             applyCollapseState()
         }
-        headerLabel.icon = newState.icon
+        headerLabel.icon = if (newState == ToolCallState.EXECUTING && newState.icon != null) {
+            RotatingIcon(newState.icon!!, rotationAngle)
+        } else {
+            newState.icon
+        }
         headerLabel.text = newState.label
         if (newState == ToolCallState.EXECUTING) {
             progressBar.isVisible = true
+            if (!rotationTimer.isRunning) {
+                rotationTimer.start()
+            }
         } else {
             progressBar.isVisible = false
+            if (rotationTimer.isRunning) {
+                rotationTimer.stop()
+            }
         }
         rebuildApprovalPanel()
         if (result != null) {
