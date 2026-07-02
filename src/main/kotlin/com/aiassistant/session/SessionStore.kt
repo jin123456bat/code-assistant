@@ -373,12 +373,17 @@ class SessionStore(private val project: Project) {
     }
 
     /**
-     * 检测指定 id 的 Session JSON 文件是否损坏（文件存在但 JSON 解析失败）。
-     * @return true 表示文件损坏，false 表示文件不存在或解析成功
+     * 检测指定 id 的 Session JSON 文件是否损坏（文件存在但 JSON 解析失败）
+     * 或文件不存在（索引中有条目但 JSON 文件丢失）。
+     * 文件不存在时，自动从索引中移除该条目。
+     * @return true 表示需跳过（损坏或文件不存在），false 表示文件正常
      */
     private fun checkCorrupted(id: String): Boolean {
         val file = File(dir, "$id.json")
-        if (!file.exists()) return false
+        if (!file.exists()) {
+            removeFromIndex(id)
+            return true
+        }
         return runCatching { gson.fromJson(file.readText(), SessionDTO::class.java) }.isFailure
     }
 
