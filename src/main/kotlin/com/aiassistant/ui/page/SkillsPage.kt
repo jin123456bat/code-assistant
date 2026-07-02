@@ -34,13 +34,18 @@ class SkillsPage(project: Project) : JPanel(BorderLayout()) {
         titleRow.add(actions, BorderLayout.EAST)
         titleRow.border = BorderFactory.createEmptyBorder(4, 8, 4, 8)
 
-        // 目录说明行
-        val dimHex = AppColors.textTertiary.toHtmlColor()
+        // 目录说明行（可点击链接样式）
+        val linkColor = AppColors.textTertiary.toHtmlColor()
         val dirRow = JPanel(BorderLayout())
-        dirRow.add(
-            JLabel("<html><span style='font-size:11px;color:$dimHex'>目录: .code-assistant/skills/ · 兼容 .claude/skills/ · .codex/skills/</span></html>"),
-            BorderLayout.WEST
-        )
+        val dirLabel = JLabel("<html><a href='#' style='font-size:11px;color:$linkColor'>目录: .code-assistant/skills/ · 兼容 .claude/skills/ · .codex/skills/</a></html>").apply {
+            cursor = java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR)
+            addMouseListener(object : java.awt.event.MouseAdapter() {
+                override fun mouseClicked(e: java.awt.event.MouseEvent) {
+                    openSkillsDir()
+                }
+            })
+        }
+        dirRow.add(dirLabel, BorderLayout.WEST)
         dirRow.border = BorderFactory.createEmptyBorder(0, 8, 4, 8)
 
         val topPanel = JPanel(BorderLayout())
