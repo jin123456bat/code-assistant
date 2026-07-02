@@ -145,8 +145,17 @@ class GenerateCommitAction : AnAction() {
                         return
                     }
                     // ponytail: 流式完成后兜底覆盖，防止 invokeLater 异步插入丢失内容
+                    // 仅在用户未手动编辑时才做最终覆盖，否则保留用户编辑
                     app.invokeAndWait {
-                        app.runWriteAction { editor.document?.setText(message) }
+                        app.runWriteAction {
+                            val doc = editor.document ?: return@runWriteAction
+                            val currentText = doc.text
+                            // 文档内容与流式写入一致或为流式写入的子串（用户未编辑），才做最终覆盖
+                            if (currentText.length <= message.length || currentText.startsWith(message.take(currentText.length))) {
+                                doc.setText(message)
+                            }
+                            // 否则保留用户的编辑
+                        }
                     }
                     // 文档 §一 流程图：isGenerating = false 放在 Task.Backgroundable 的最后一步
                     isGenerating = false
