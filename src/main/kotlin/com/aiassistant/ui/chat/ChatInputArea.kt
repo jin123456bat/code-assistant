@@ -414,6 +414,11 @@ class ChatInputArea(
             layout = BoxLayout(this, BoxLayout.X_AXIS)
             border = BorderFactory.createEmptyBorder(0, 8, 6, 8)
             add(addFileButton)
+            add(Box.createHorizontalStrut(8))
+            add(JLabel("输入 @ 选择文件").apply {
+                font = font.deriveFont(11f)
+                foreground = AppColors.textSecondary
+            })
             add(Box.createHorizontalGlue())
             add(stopButton)
             add(Box.createHorizontalStrut(8))

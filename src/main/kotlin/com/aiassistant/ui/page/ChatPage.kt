@@ -33,6 +33,20 @@ class ChatPage(
     }
     private var autoScroll = true
     private val toolCards = mutableMapOf<String, ToolCallCard>()
+    /** 暂停自动滚动时显示的"滚动到底部"浮动按钮 */
+    private val scrollToBottomBtn = JButton("↓").apply {
+        toolTipText = "滚动到底部"
+        font = font.deriveFont(16f).deriveFont(java.awt.Font.BOLD)
+        isContentAreaFilled = false
+        isBorderPainted = false
+        isFocusPainted = false
+        isVisible = false
+        addActionListener {
+            autoScroll = true
+            isVisible = false
+            scrollToBottom()
+        }
+    }
     private val scrollPane = JScrollPane(messageContainer).apply {
         verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED
         horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_NEVER
@@ -41,6 +55,7 @@ class ChatPage(
             if (!e.valueIsAdjusting) {
                 val bar = verticalScrollBar; autoScroll =
                     bar.value + bar.visibleAmount >= bar.maximum - 50
+                scrollToBottomBtn.isVisible = !autoScroll
             }
         }
     }
@@ -98,7 +113,19 @@ class ChatPage(
         northPanel.add(titleBar, BorderLayout.NORTH)
         northPanel.add(planCard, BorderLayout.SOUTH)
         add(northPanel, BorderLayout.NORTH)
-        add(scrollPane, BorderLayout.CENTER)
+        // 使用 JLayeredPane 叠加浮动"滚动到底部"按钮
+        val layeredPane = JLayeredPane().apply {
+            add(scrollPane, JLayeredPane.DEFAULT_LAYER)
+            add(scrollToBottomBtn, JLayeredPane.PALETTE_LAYER)
+            addComponentListener(object : java.awt.event.ComponentAdapter() {
+                override fun componentResized(e: java.awt.event.ComponentEvent?) {
+                    scrollPane.setBounds(0, 0, width, height)
+                    val btnW = 36; val btnH = 36; val margin = 12
+                    scrollToBottomBtn.setBounds(width - btnW - margin, height - btnH - margin, btnW, btnH)
+                }
+            })
+        }
+        add(layeredPane, BorderLayout.CENTER)
 
         val inputArea = ChatInputArea(
             onSend = { text ->

@@ -101,6 +101,9 @@ class AgentLoop(
     private var lastFailedToolUseId: String? = null
     private var consecutiveToolFailureCount: Int = 0
 
+    /** compact 后标记 builder 需要从 session.messages 重新构建，避免消息重复 */
+    private var needsRebuild: Boolean = false
+
     /**
      * 标记错误并触发连续错误升级检测。
      * 对齐 docs/agent/loop.md §三：
@@ -184,7 +187,7 @@ class AgentLoop(
             return Result.Error("请先配置 DeepSeek API Key")
         }
 
-        val builder = buildRequestBuilder(userMessage, images, slashCommand, mode)
+        var builder = buildRequestBuilder(userMessage, images, slashCommand, mode)
 
         session.startProcessing()
         val output = StringBuilder()

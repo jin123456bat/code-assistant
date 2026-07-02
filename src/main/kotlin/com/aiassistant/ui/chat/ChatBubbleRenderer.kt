@@ -241,8 +241,8 @@ object ChatBubbleRenderer {
                 isOpaque = true
                 background = AppColors.errorBg
             border = BorderFactory.createCompoundBorder(
-                BorderFactory.createEmptyBorder(6, 10, 6, 10),
-                BorderFactory.createMatteBorder(0, 3, 0, 0, AppColors.error)
+                BorderFactory.createMatteBorder(0, 3, 0, 0, AppColors.error),
+                BorderFactory.createEmptyBorder(6, 10, 6, 10)
             )
         }, BorderLayout.CENTER)
         wrapper.add(JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0)).apply {
