@@ -4,8 +4,13 @@ import com.aiassistant.ui.AppColors
 import com.aiassistant.ui.toHtmlColor
 import com.intellij.openapi.options.ShowSettingsUtil
 import java.awt.BorderLayout
+import java.awt.Cursor
+import java.awt.Desktop
 import java.awt.Dimension
 import java.awt.FlowLayout
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
+import java.net.URI
 import javax.swing.BorderFactory
 import javax.swing.Box
 import javax.swing.BoxLayout
@@ -23,13 +28,7 @@ class SettingsPage : JPanel(BorderLayout()) {
             background = AppColors.pageBg
         }
 
-        content.add(
-            card(
-                "关于",
-                "Code Assistant v2.0.0",
-                "JetBrains IDE 内的代码助手，支持 Agent、补全和 Git message 生成。"
-            )
-        )
+        content.add(createAboutCard())
         content.add(Box.createVerticalStrut(10))
         content.add(
             card(
@@ -61,6 +60,31 @@ class SettingsPage : JPanel(BorderLayout()) {
         }
         card.add(buttonRow, BorderLayout.SOUTH)
         return card
+    }
+
+    private fun createAboutCard(): JPanel {
+        val aboutCard = card(
+            "关于",
+            "Code Assistant v2.0.0",
+            "JetBrains IDE 内的代码助手，支持 Agent、补全和 Git message 生成。"
+        )
+        val dimHex = AppColors.textSecondary.toHtmlColor()
+        val githubLabel = JLabel(
+            "<html><a href='#' style='color:$dimHex;font-size:11px'>https://github.com/jin123456bat/code-assistant</a></html>"
+        ).apply {
+            cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+            addMouseListener(object : MouseAdapter() {
+                override fun mouseClicked(e: MouseEvent) {
+                    try {
+                        Desktop.getDesktop().browse(URI("https://github.com/jin123456bat/code-assistant"))
+                    } catch (_: Exception) {
+                        // 无法打开浏览器时静默忽略
+                    }
+                }
+            })
+        }
+        aboutCard.add(githubLabel, BorderLayout.SOUTH)
+        return aboutCard
     }
 
     private fun card(title: String, primary: String, secondary: String): JPanel {

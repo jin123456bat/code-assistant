@@ -781,7 +781,7 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
         val runInBackground = ToolInput.bool(input, "run_in_background") ?: false
         // 接线子 Agent 事件回调，使 UI 可以实时展示子 Agent 进度
         multiAgent.onSubAgentEvent = onSubAgentEvent
-        return multiAgent.spawnAgent(prompt, session, timeoutSec, runInBackground)
+        return multiAgent.spawnAgent(prompt, session, timeoutSec, runInBackground, input)
     }
 
     // ── WebSearch ──

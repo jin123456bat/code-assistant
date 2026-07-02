@@ -140,15 +140,6 @@ class MultiAgentManager(private val project: Project) {
     private val sessionStore = com.aiassistant.session.SessionStore(project)
 
     /**
-     * 子 Agent 工具白名单。默认使用 General-purpose（11 个工具）。
-     * 对齐 docs/agent/multi-agent.md §三 工具白名单：
-     * - General-purpose：Read, Write, Edit, Bash, Glob, Grep, readLints, WebSearch, WebFetch, AskUserQuestion, Symbol
-     * - Explore（只读）：Read, Grep, Glob
-     * - 不可用：Agent（禁止嵌套）、Skill、createPlan 等计划管理工具
-     */
-    private var subAgentToolsFilter: List<Class<*>> = GENERAL_PURPOSE_TOOLS
-
-    /**
      * 启动子 Agent 处理子任务。
      * 对齐 docs/agent/multi-agent.md §二：
      * - 上下文独立构建（仅 System Prompt 基础部分 + 父 prompt）
@@ -169,7 +160,8 @@ class MultiAgentManager(private val project: Project) {
         prompt: String,
         parentSession: AgentSession,
         timeoutSec: Int = 0,
-        runInBackground: Boolean = false
+        runInBackground: Boolean = false,
+        params: Map<String, Any?> = emptyMap()
     ): String {
         if (!runInBackground) {
             // 同步模式：FIFO 公平排队获取信号量
@@ -181,7 +173,7 @@ class MultiAgentManager(private val project: Project) {
             }
 
             return try {
-                executeSubAgent(prompt, parentSession, timeoutSec)
+                executeSubAgent(prompt, parentSession, timeoutSec, params)
             } finally {
                 getSemaphore().release()
             }
@@ -195,7 +187,7 @@ class MultiAgentManager(private val project: Project) {
                     return@runAsync
                 }
                 try {
-                    executeSubAgentAsync(prompt, parentSession, timeoutSec)
+                    executeSubAgentAsync(prompt, parentSession, timeoutSec, params)
                 } finally {
                     getSemaphore().release()
                 }
@@ -214,7 +206,8 @@ class MultiAgentManager(private val project: Project) {
     private fun executeSubAgent(
         prompt: String,
         parentSession: AgentSession,
-        timeoutSec: Int
+        timeoutSec: Int,
+        params: Map<String, Any?> = emptyMap()
     ): String {
         val startTime = System.currentTimeMillis()
 
@@ -224,14 +217,20 @@ class MultiAgentManager(private val project: Project) {
             parentId = parentSession.id
         )
 
+        // 根据 subagent_type 参数选择工具白名单
+        val toolFilter = when (params["subagent_type"] as? String) {
+            "explore" -> EXPLORE_TOOLS
+            else -> GENERAL_PURPOSE_TOOLS
+        }
+
         // 2. 创建子 AgentLoop（独立上下文，不继承父对话历史）
         // AgentLoop.run() -> buildSystemPrompt() 构建 System Prompt（角色指令 + 工具描述 + 环境信息）
         // subSession.messages 初始为空，不包含父 Agent 的任何历史消息
         // prompt 作为首条 user message 传入 run()
         val subLoop = AgentLoop(project, subSession).apply {
-            // 设置工具白名单，限制子 Agent 仅获得 11 个 General-purpose 工具
+            // 设置工具白名单，根据 subagent_type 选择白名单
             // 对齐 docs/agent/multi-agent.md §三 工具白名单
-            toolsFilter = this@MultiAgentManager.subAgentToolsFilter
+            toolsFilter = toolFilter
         }
 
         val agentId = subSession.id
@@ -342,7 +341,8 @@ class MultiAgentManager(private val project: Project) {
     private fun executeSubAgentAsync(
         prompt: String,
         parentSession: AgentSession,
-        timeoutSec: Int
+        timeoutSec: Int,
+        params: Map<String, Any?> = emptyMap()
     ) {
         val startTime = System.currentTimeMillis()
 
@@ -352,11 +352,17 @@ class MultiAgentManager(private val project: Project) {
             parentId = parentSession.id
         )
 
+        // 根据 subagent_type 参数选择工具白名单
+        val toolFilter = when (params["subagent_type"] as? String) {
+            "explore" -> EXPLORE_TOOLS
+            else -> GENERAL_PURPOSE_TOOLS
+        }
+
         // 2. 创建子 AgentLoop（独立上下文）
         val subLoop = AgentLoop(project, subSession).apply {
-            // 设置工具白名单，限制子 Agent 仅获得 11 个 General-purpose 工具
+            // 设置工具白名单，根据 subagent_type 选择白名单
             // 对齐 docs/agent/multi-agent.md §三 工具白名单
-            toolsFilter = this@MultiAgentManager.subAgentToolsFilter
+            toolsFilter = toolFilter
         }
 
         val agentId = subSession.id

@@ -154,6 +154,7 @@ class ToolCallCard(
         bodyPanel.add(progressBar)
         resultScrollPane.setViewportView(resultComponent)
         bodyPanel.add(resultScrollPane)
+        bodyPanel.add(childTokenLabel)
         add(bodyPanel, BorderLayout.CENTER)
 
         footerLabel.font = footerLabel.font.deriveFont(10f)
