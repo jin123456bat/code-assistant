@@ -100,7 +100,8 @@ class DeepSeekFimClient(
             model = settings.getModel(),
             prompt = prompt,
             suffix = suffix,
-            maxTokens = settings.getCompletionMaxTokens()
+            maxTokens = settings.getCompletionMaxTokens(),
+            stop = listOf("\n\n")
         )
         return executeWithRetry(request, apiKey)
     }
