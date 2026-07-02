@@ -38,11 +38,20 @@ class AppSettingsService {
             FIXED_MODEL to "DeepSeek V4 Pro"
         )
 
-        val DEFAULT_COMMIT_PROMPT =
-            """Generate a concise git commit message following Conventional Commits (feat:/fix:/refactor:/chore:/docs:/test:). Output ONLY the commit message, no explanations. The diff is provided in the user message.""".trimIndent()
+        val DEFAULT_COMMIT_PROMPT_ZH = """请基于以下 git diff 生成一条 Conventional Commits 规范的 commit message。
 
-        val DEFAULT_COMMIT_PROMPT_ZH =
-            """根据以下 git diff 生成简洁的中文 git commit message，遵循 Conventional Commits 规范（feat:/fix:/refactor:/chore:/docs:/test:）。只输出 commit message，不要解释。Diff 在用户消息中提供。""".trimIndent()
+{diff}
+
+要求：
+- 使用中文描述
+- 格式：<type>(<scope>): <description>
+- type 可选：feat, fix, refactor, chore, docs, test, style, perf
+"""
+
+        val DEFAULT_COMMIT_PROMPT = """Generate a concise git commit message following Conventional Commits (feat:/fix:/refactor:/chore:/docs:/test:). Output ONLY the commit message, no explanations.
+
+{diff}
+"""
 
         val DEFAULT_MERGE_COMMIT_PROMPT =
             """Generate a concise merge commit message describing the merged content.""".trimIndent()
