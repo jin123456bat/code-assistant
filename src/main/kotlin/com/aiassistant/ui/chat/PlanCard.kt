@@ -274,6 +274,7 @@ class PlanCard(
             it.label.text?.contains("🗑") == true || it.label.text?.contains("✅") == true
         }
         if (allDone || allCancelled) {
+            planState = PlanState.COMPLETED
             isVisible = false
             revalidate()
             repaint()
