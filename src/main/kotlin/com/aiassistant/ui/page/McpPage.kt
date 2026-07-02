@@ -208,6 +208,35 @@ class McpPage(project: Project) : JPanel(BorderLayout()) {
                 }
             }
         })
+        // CRASHED/ERROR/INIT_ERROR 状态显示"查看日志"按钮
+        val showLogBtn = server.state == McpManager.State.CRASHED
+                || server.state == McpManager.State.ERROR
+                || server.state == McpManager.State.INIT_ERROR
+        if (showLogBtn) {
+            actions.add(JButton("📋 查看日志").apply {
+                font = font.deriveFont(11f)
+                addActionListener {
+                    val logs = manager.getServerLogs(server.config.id)
+                    val textArea = JTextArea().apply {
+                        font = java.awt.Font("JetBrains Mono", java.awt.Font.PLAIN, 11)
+                        isEditable = false
+                        lineWrap = false
+                        rows = 25
+                        columns = 80
+                        text = if (logs.isEmpty()) "(无日志)" else logs.joinToString("\n")
+                        caretPosition = text.length // 滚动到末尾
+                    }
+                    val scrollPane = JScrollPane(textArea)
+                    scrollPane.preferredSize = java.awt.Dimension(650, 400)
+                    JOptionPane.showMessageDialog(
+                        this@McpPage,
+                        scrollPane,
+                        "MCP Server 日志: ${server.config.id}",
+                        JOptionPane.PLAIN_MESSAGE
+                    )
+                }
+            })
+        }
         actions.add(JButton("✏ 编辑").apply {
             font = font.deriveFont(11f)
             addActionListener {

@@ -651,6 +651,7 @@ class McpManager(private val project: Project) {
                 while (reader.readLine().also { line = it } != null) {
                     val currentLine = line ?: continue
                     LOG.info("MCP Server [$serverId] stderr: ${currentLine.take(500)}")
+                    appendLogLine(server, "[stderr] ${currentLine.take(500)}")
                 }
             } catch (e: Exception) {
                 // stderr 读取线程退出，忽略
@@ -1037,6 +1038,24 @@ class McpManager(private val project: Project) {
         cancelPendingTask(id)
         val future = scheduler.schedule(Runnable { action() }, delayMs, TimeUnit.MILLISECONDS)
         pendingTasks[id] = future
+    }
+
+    /** 向 server 日志缓冲区追加一行（线程安全，最多保留 MAX_LOG_LINES 行） */
+    private fun appendLogLine(server: McpServer, line: String) {
+        synchronized(server.recentLogLines) {
+            if (server.recentLogLines.size >= MAX_LOG_LINES) {
+                server.recentLogLines.removeAt(0)
+            }
+            server.recentLogLines.add(line)
+        }
+    }
+
+    /** 获取指定 Server 最近的日志行，供 UI "查看日志" 功能使用 */
+    fun getServerLogs(id: String): List<String> {
+        val server = servers[id] ?: return emptyList()
+        return synchronized(server.recentLogLines) {
+            server.recentLogLines.toList()
+        }
     }
 
     /**
