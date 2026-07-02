@@ -467,6 +467,12 @@ class ChatViewModel(
         updateInputState(images = updated)
     }
 
+    /**
+     * 发送用户消息到 Agent 循环。
+     *
+     * @param text 用户输入的文本内容。附件（attachments）和图片（images）不在此参数传入，
+     *             而是从当前 [inputState] 中获取，由 ChatInputArea 的 tagsPanel 管理状态。
+     */
     fun sendMessage(text: String) {
         resetCancellationForNextTurn()
         val userMsg = ChatMessage(
