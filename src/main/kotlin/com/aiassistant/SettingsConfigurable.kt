@@ -110,7 +110,22 @@ class SettingsConfigurable : Configurable {
         s.setCompletionMaxTokens(maxTokensSpinner.value as Int)
         s.setAgentMaxLoops(agentMaxLoopsSpinner.value as Int)
         s.setAgentMaxConcurrency(agentMaxConcurrencySpinner.value as Int)
-        s.setPrompt(promptArea.text)
+
+        val prompt = promptArea.text
+        if (prompt.isNotBlank() && !prompt.contains("{diff}")) {
+            val result = JOptionPane.showConfirmDialog(
+                mainPanel,
+                "Commit Prompt 中未包含 {diff} 占位符，\n保存后 git diff 内容将不会被注入到 prompt 中。\n是否继续保存？",
+                "缺少 {diff} 占位符",
+                JOptionPane.YES_NO_OPTION,
+                JOptionPane.WARNING_MESSAGE
+            )
+            if (result != JOptionPane.YES_OPTION) {
+                return
+            }
+        }
+
+        s.setPrompt(prompt)
         statusLabel.text = "设置已保存"
     }
 
