@@ -298,12 +298,12 @@ ExecutorService.execute {
 
 ### 处理策略
 
-| 线程                                    | 异常处理                                                                        |
-|---------------------------------------|-----------------------------------------------------------------------------|
-| EDT                                   | `LoggingUncaughtExceptionHandler` → 记录日志 + toast 提示"插件内部错误，请查看日志" + 不中断 IDE |
-| PooledThread（Agent Loop / 工具执行）       | 记录日志 + `session.markError()` → 错误横幅展示给用户 + Agent 状态 → ERROR                 |
-| Swing Timer / ProcessHandler listener | 记录日志 + 静默恢复（根据上下文决定是否 toast）                                                |
-| Completion 协程                         | `CoroutineExceptionHandler` → 记录日志 + 静默（无候选，不打扰用户）                          |
+| 线程                                    | 异常处理                                                                                                                     |
+|---------------------------------------|--------------------------------------------------------------------------------------------------------------------------|
+| EDT                                   | `LoggingUncaughtExceptionHandler` → 记录日志 + toast 提示"插件内部错误，请查看日志" + 不中断 IDE                                              |
+| PooledThread（Agent Loop / 工具执行）       | 未捕获异常记录日志 + `MessageBus.publishSystemError()` → ChatPage 顶部错误横幅；AgentLoop 捕获到的 API/工具错误仍由 `session.markError()` 进入 ERROR |
+| Swing Timer / ProcessHandler listener | 记录日志 + 静默恢复（根据上下文决定是否 toast）                                                                                             |
+| Completion 协程                         | `CoroutineExceptionHandler` → 记录日志 + 静默（无候选，不打扰用户）                                                                       |
 
 ### 降级行为
 

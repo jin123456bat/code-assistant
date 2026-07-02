@@ -24,7 +24,7 @@ import kotlinx.coroutines.CoroutineExceptionHandler
  * | 线程                                    | 注册方式                                           | 处理策略                                                             |
  * |---------------------------------------|------------------------------------------------|------------------------------------------------------------------|
  * | EDT                                   | Thread.setDefaultUncaughtExceptionHandler      | LoggingUncaughtExceptionHandler → 记录日志 + toast 提示"插件内部错误" + 不中断 IDE |
- * | PooledThread（Agent Loop / 工具执行）       | ExecutorService.execute 时设置                    | 记录日志 + session.markError() → 错误横幅展示给用户 + Agent 状态 → ERROR      |
+ * | PooledThread（Agent Loop / 工具执行）       | ExecutorService.execute 时设置                    | 记录日志 + MessageBus.publishSystemError() → ChatPage 错误横幅展示给用户      |
  * | Swing Timer / ProcessHandler listener | 记录日志 + 静默恢复（根据上下文决定是否 toast）                          |                                                                  |
  * | Completion 协程                         | CoroutineExceptionHandler                      | 记录日志 + 静默（无候选，不打扰用户）                                           |
  *
@@ -95,12 +95,12 @@ object GlobalExceptionHandler : Thread.UncaughtExceptionHandler {
      * }
      * ```
      *
-     * @param session 当前 AgentSession，异常时用于 markError；可为 null（Completion/非 Agent 场景）
+     * @param session 当前 AgentSession，用于在线程名中标记来源；可为 null（Completion/非 Agent 场景）
      */
     fun decoratePooledThread(session: AgentSession? = null) {
         val currentThread = Thread.currentThread()
         currentThread.uncaughtExceptionHandler = this
-        // 将 session 关联到线程，供异常处理时使用
+        // 将 session id 标记到线程名，方便异常日志追踪来源。
         if (session != null) {
             currentThread.name = "${currentThread.name}#agent-${session.id.take(8)}"
         }
@@ -181,7 +181,7 @@ object GlobalExceptionHandler : Thread.UncaughtExceptionHandler {
 
     /**
      * PooledThread 异常处理（Agent Loop / 工具执行）。
-     * 策略：记录日志 + session.markError() → 错误横幅展示给用户 + Agent 状态 → ERROR。
+     * 策略：记录日志 + MessageBus.publishSystemError() → ChatPage 错误横幅展示给用户。
      */
     private fun handlePooledThreadException(t: Thread, e: Throwable) {
         when (e) {
@@ -198,7 +198,7 @@ object GlobalExceptionHandler : Thread.UncaughtExceptionHandler {
                 AppLogger.error("PooledThread [${t.name}]: 未捕获异常 — ${e.javaClass.simpleName}: ${e.message}")
                 AppLogger.error("PooledThread 异常堆栈:\n$stackTrace")
 
-                // 通过 MessageBus 广播异常事件，由 ChatViewModel 转换为错误横幅
+                // 通过 MessageBus 广播异常事件，由 ChatPage 转换为错误横幅
                 try {
                     MessageBus.publishSystemError(
                         "插件内部错误: ${e.javaClass.simpleName}",

@@ -7,17 +7,20 @@ import kotlin.test.assertTrue
 class AppSettingsServiceTest {
 
     @Test
-    fun `AVAILABLE_MODELS 包含 deepseek-v4-pro`() {
+    fun `AVAILABLE_MODELS 只包含固定 deepseek-v4-pro`() {
         val models = AppSettingsService.AVAILABLE_MODELS
-        assertTrue(models.any { it.first == "deepseek-v4-pro" }, "应包含 deepseek-v4-pro 模型")
-        assertTrue(models.any { it.first == "deepseek-v4-flash" }, "应包含 deepseek-v4-flash 模型")
-        assertEquals(2, models.size)
+        assertEquals(listOf("deepseek-v4-pro" to "DeepSeek V4 Pro"), models)
     }
 
     @Test
     fun `AVAILABLE_MODELS 条目包含 ID 和显示名`() {
         val proModel = AppSettingsService.AVAILABLE_MODELS.first { it.first == "deepseek-v4-pro" }
         assertEquals("DeepSeek V4 Pro", proModel.second)
+    }
+
+    @Test
+    fun `Agent 并发上限允许 0 表示不限`() {
+        assertEquals(0, AppSettingsService.normalizeAgentMaxConcurrency(0))
     }
 
     @Test

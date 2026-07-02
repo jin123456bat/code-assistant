@@ -33,9 +33,9 @@ class AppSettingsService {
         private const val AGENT_MAX_LOOPS_KEY = "$SERVICE_NAME.AGENT.MAX_LOOPS"
         private const val AGENT_MAX_CONCURRENCY_KEY = "$SERVICE_NAME.AGENT.MAX_CONCURRENCY"
         private const val COMMIT_ENABLED_KEY = "$SERVICE_NAME.COMMIT.ENABLED"
+        private const val FIXED_MODEL = "deepseek-v4-pro"
         val AVAILABLE_MODELS = listOf(
-            "deepseek-v4-flash" to "DeepSeek V4 Flash",
-            "deepseek-v4-pro" to "DeepSeek V4 Pro"
+            FIXED_MODEL to "DeepSeek V4 Pro"
         )
 
         val DEFAULT_COMMIT_PROMPT =
@@ -66,11 +66,15 @@ class AppSettingsService {
         PasswordSafe.instance.set(credentialAttributes, Credentials(null, key))
     }
 
-    fun getModel(): String = com.intellij.ide.util.PropertiesComponent.getInstance()
-        .getValue(MODEL_KEY, "deepseek-v4-pro") ?: "deepseek-v4-pro"
+    fun getModel(): String {
+        val raw = com.intellij.ide.util.PropertiesComponent.getInstance()
+            .getValue(MODEL_KEY, FIXED_MODEL)
+        return raw?.takeIf { it == FIXED_MODEL } ?: FIXED_MODEL
+    }
 
     fun setModel(model: String) =
-        com.intellij.ide.util.PropertiesComponent.getInstance().setValue(MODEL_KEY, model)
+        com.intellij.ide.util.PropertiesComponent.getInstance()
+            .setValue(MODEL_KEY, model.takeIf { it == FIXED_MODEL } ?: FIXED_MODEL)
 
     fun getModelDisplayName(): String =
         AVAILABLE_MODELS.firstOrNull { it.first == getModel() }?.second ?: getModel()

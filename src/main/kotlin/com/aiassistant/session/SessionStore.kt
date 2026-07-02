@@ -182,11 +182,13 @@ class SessionStore(private val project: Project) {
             session.totalTokens = dto.totalTokens?.let {
                 TokenUsage(inputTokens = it.inputTokens, outputTokens = it.outputTokens)
             } ?: TokenUsage()
-            session.approvedTools.addAll(dto.approvedTools)
-            session.approvedMcpServers.addAll(dto.approvedMcpServers)
+            val approvedTools = dto.approvedTools.orEmpty()
+            session.approvedTools.addAll(approvedTools)
+            session.approvedMcpServers.addAll(dto.approvedMcpServers.orEmpty())
             session.errorCount = dto.errorCount
-            session.calledSkills.addAll(dto.calledSkills)
-            session.firstToolUseDone.addAll(dto.firstToolUseDone)
+            session.calledSkills.addAll(dto.calledSkills.orEmpty())
+            session.firstToolUseDone.addAll(dto.firstToolUseDone.orEmpty())
+            session.firstToolUseDone.addAll(approvedTools)
             session.plan = dto.plan?.let { plan ->
                 com.aiassistant.agent.PlanExecutor.Plan(
                     id = plan.id,

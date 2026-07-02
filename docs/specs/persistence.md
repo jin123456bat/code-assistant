@@ -124,9 +124,23 @@ Session JSON Schema 版本升级时采用**向后兼容 + 懒迁移**策略：
   "approvedMcpServers": [
     "github",
     "filesystem"
+  ],
+  "calledSkills": [
+    "review"
+  ],
+  "firstToolUseDone": [
+    "Read",
+    "Write",
+    "Edit",
+    "Bash",
+    "mcp:github",
+    "mcp:filesystem"
   ]
 }
 ```
+
+旧版 Session JSON 可能只有 `approvedTools`、没有 `firstToolUseDone`。加载时 `SessionStore.load()` 会把
+`approvedTools` 补入 `firstToolUseDone`，避免已批准工具在重启后再次触发首次使用确认。
 
 ### Message 字段说明
 

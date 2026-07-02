@@ -244,17 +244,17 @@ AgentSession:
 
 **生命周期：**
 
-| 事件              | 白名单行为                                                     |
-|-----------------|-----------------------------------------------------------|
-| 用户点击 [允许此会话]    | `approvedTools.add(toolName)`，持久化到 Session JSON           |
-| 后续同工具调用         | 检查 `approvedTools.contains(toolName)` → 跳过审批              |
-| 用户点击 [允许一次]     | 仅本次放行，不加入白名单                                              |
-| `/clear` `/new` | **不受影响**——白名单是会话级配置，`/clear`（`/new` 是其别名）仅清空对话上下文，不重置审批信任 |
-| IDE 重启          | 从 Session JSON 恢复白名单，信任关系保留                               |
-| 危险命令            | **无视白名单**，始终需二次确认                                         |
+| 事件              | 白名单行为                                                                                                  |
+|-----------------|--------------------------------------------------------------------------------------------------------|
+| 用户点击 [允许此会话]    | `firstToolUseDone.add(toolName)` + `approvedTools.add(toolName)`，持久化到 Session JSON                     |
+| 后续同工具调用         | 先通过首次使用检查，再检查 `approvedTools.contains(toolName)` → 跳过审批                                                |
+| 用户点击 [允许一次]     | `firstToolUseDone.add(toolName)`，仅本次放行，不加入白名单                                                          |
+| `/clear` `/new` | **不受影响**——白名单是会话级配置，`/clear`（`/new` 是其别名）仅清空对话上下文，不重置审批信任                                              |
+| IDE 重启          | 从 Session JSON 恢复 `approvedTools` 和 `firstToolUseDone`；旧 JSON 会把 `approvedTools` 补入 `firstToolUseDone` |
+| 危险命令            | **无视白名单**，始终需二次确认                                                                                      |
 
 **持久化位置：** Session JSON 的 `approvedTools` 字段（`List<String>`），与其他会话数据一同通过
-`SessionStore.save()` 原子写入。
+`SessionStore.save()` 原子写入；首次使用记录写入 `firstToolUseDone` 字段。
 
 **审批判定流程：**
 
@@ -262,6 +262,9 @@ AgentSession:
 工具调用到达 ToolExecutor
   ├─ 危险命令检测（rm -rf、git push --force、sudo、chmod 777）
   │     → 始终提示确认，不检查白名单
+  │
+  ├─ firstToolUseDone 不包含当前工具？
+  │     → ToolCallCard → AWAITING_APPROVAL（首次使用确认）
   │
   ├─ approvedTools.contains(toolName)?
   │     → 是：跳过审批，直接执行

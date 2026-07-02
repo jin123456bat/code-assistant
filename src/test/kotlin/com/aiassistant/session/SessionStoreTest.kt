@@ -9,6 +9,7 @@ import com.aiassistant.agent.ToolCallRecord
 import com.aiassistant.agent.ToolCallState
 import com.intellij.openapi.project.Project
 import java.lang.reflect.Proxy
+import java.nio.file.Path
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertContains
@@ -109,6 +110,31 @@ class SessionStoreTest {
         assertEquals(setOf("github"), restored.approvedMcpServers)
     }
 
+    @Test
+    fun `loading legacy approved tools marks first use done`() {
+        val root = createTempDirectory()
+        val project = projectAt(root.toString())
+        writeSessionJson(
+            root,
+            "legacy-approved-tools",
+            """
+            {
+              "id": "legacy-approved-tools",
+              "title": "Legacy",
+              "createdAt": "2026-01-01T00:00:00Z",
+              "updatedAt": "2026-01-01T00:00:00Z",
+              "state": "IDLE",
+              "approvedTools": ["Read"],
+              "messages": []
+            }
+            """.trimIndent()
+        )
+
+        val restored = assertNotNull(SessionStore(project).load("legacy-approved-tools"))
+
+        assertContains(restored.firstToolUseDone, "Read")
+    }
+
     private fun projectAt(basePath: String): Project =
         Proxy.newProxyInstance(
             Project::class.java.classLoader,
@@ -121,4 +147,10 @@ class SessionStoreTest {
                 else -> null
             }
         } as Project
+
+    private fun writeSessionJson(root: Path, id: String, json: String) {
+        val dir = root.resolve(".code-assistant/sessions").toFile()
+        dir.mkdirs()
+        dir.resolve("$id.json").writeText(json)
+    }
 }

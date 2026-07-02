@@ -4,6 +4,7 @@ import com.aiassistant.agent.MultiAgentManager
 import com.aiassistant.ui.AppColors
 import com.aiassistant.ui.Banner
 import com.aiassistant.ui.EditorSelectionListener
+import com.aiassistant.ui.MessageBus
 import com.aiassistant.ui.chat.*
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.wm.ToolWindowManager
@@ -48,6 +49,12 @@ class ChatPage(
     private var reasoningBubble: JPanel? = null
     private val reasoningBuf = StringBuilder()
     private var reasoningStartTime = 0L
+    private val messageBusListener = object : MessageBus.MessageBusListener {
+        override fun onSystemError(title: String, message: String) {
+            SwingUtilities.invokeLater { showErrorBanner("$title: $message") }
+        }
+    }
+    private var messageBusRegistered = false
 
     // ── MultiAgentBlock（子 Agent 进度展示）──
     private val multiAgentBlock = MultiAgentBlock(
@@ -60,7 +67,7 @@ class ChatPage(
             onDeleteStep = { stepId -> viewModel.removePlanStep(stepId) }
         ).apply { isVisible = false }
 
-        // 标题行：会话标题 + 清空按钮 + 关闭按钮，对齐 docs/ui/pages.md §十二 ChatPage 组件树
+        // 标题行：会话标题 + 关闭按钮，对齐 docs/ui/pages.md §十二 ChatPage 组件树
         // 初始显示当前会话标题（默认为"新会话"），标题生成后通过 onTitleChanged 回调更新
         val titleLabel = JLabel(viewModel.session.title).apply {
             font = font.deriveFont(12f).deriveFont(java.awt.Font.BOLD)
@@ -102,11 +109,7 @@ class ChatPage(
             onStop = { viewModel.cancel() },
             onNewSession = {
                 viewModel.newSession()
-                messageContainer.removeAll()
-                toolCards.clear()
-                resetMultiAgentBlock()
-                reasoningBuf.clear(); reasoningBubble = null
-                streamingBuf.clear(); streamingBubble = null
+                clearTransientUi()
                 addTimestampMarker()
                 messageContainer.revalidate()
                 messageContainer.repaint()
@@ -138,6 +141,7 @@ class ChatPage(
             )
         }
         add(inputArea, BorderLayout.SOUTH)
+        registerMessageBusListener()
 
         viewModel.onMessageAdded = { msg ->
             streamingBubble?.let { messageContainer.remove(it); streamingBubble = null }
@@ -400,14 +404,7 @@ class ChatPage(
      */
     fun restoreSession(sessionId: String?) {
         planCard.isVisible = false
-        messageContainer.removeAll()
-        toolCards.clear()
-        resetMultiAgentBlock()
-        streamingBuf.clear()
-        streamingBubble = null
-        reasoningBuf.clear()
-        reasoningBubble = null
-        reasoningStartTime = 0L
+        clearTransientUi()
         autoScroll = true
         viewModel.restoreSession(sessionId)
         addTimestampMarker()
@@ -418,6 +415,40 @@ class ChatPage(
         messageContainer.revalidate()
         messageContainer.repaint()
         scrollToBottom()
+    }
+
+    override fun addNotify() {
+        super.addNotify()
+        registerMessageBusListener()
+    }
+
+    override fun removeNotify() {
+        unregisterMessageBusListener()
+        super.removeNotify()
+    }
+
+    private fun registerMessageBusListener() {
+        if (messageBusRegistered) return
+        MessageBus.register(messageBusListener)
+        messageBusRegistered = true
+    }
+
+    private fun unregisterMessageBusListener() {
+        if (!messageBusRegistered) return
+        MessageBus.unregister(messageBusListener)
+        messageBusRegistered = false
+    }
+
+    private fun clearTransientUi() {
+        dismissErrorBanner()
+        messageContainer.removeAll()
+        toolCards.clear()
+        resetMultiAgentBlock()
+        streamingBuf.clear()
+        streamingBubble = null
+        reasoningBuf.clear()
+        reasoningBubble = null
+        reasoningStartTime = 0L
     }
 
     private fun scrollToBottom() {
