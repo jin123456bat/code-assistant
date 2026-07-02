@@ -450,9 +450,7 @@ class SessionStore(private val project: Project) {
                 id = dto.id, title = dto.title,
                 createdAt = dto.createdAt, updatedAt = dto.updatedAt,
                 messageCount = dto.messages.size,
-                totalTokens = dto.messages.sumOf {
-                    (it.tokenUsage?.inputTokens ?: 0L) + (it.tokenUsage?.outputTokens ?: 0L)
-                },
+                totalTokens = dto.totalTokens?.let { it.inputTokens + it.outputTokens } ?: 0L,
                 toolCallCount = dto.messages.sumOf { it.toolCalls?.size ?: 0 },
                 hasActivePlan = dto.plan != null && dto.plan.status != "COMPLETED" && dto.plan.status != "CANCELLED",
                 parentId = dto.parentId,
