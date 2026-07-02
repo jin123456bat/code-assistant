@@ -192,6 +192,11 @@ class SkillsPage(project: Project) : JPanel(BorderLayout()) {
                 }</span>"
             )
         }
+        if (skill.conflictCommand != null) {
+            sb.append(
+                " <span style='color:$errHex;font-size:10px'>⚠ 命令冲突: '${skill.conflictCommand}' 与其他 Skill 冲突</span>"
+            )
+        }
         sb.append("<br><span style='font-size:11px;color:$dimHex'>调用: /${skill.command} · ${skill.description}</span>")
 
         if (skill.triggerWords.isNotEmpty()) {

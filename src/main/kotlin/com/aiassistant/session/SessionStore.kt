@@ -470,20 +470,29 @@ class SessionStore(private val project: Project) {
         writeIndexWithLock(list)
     }
 
+    /**
+     * 原子写入 index.json（带锁保护），供外部调用方使用。
+     * 注意：updateIndex() 自行管理锁，不通过此方法。
+     */
     private fun writeIndexWithLock(list: List<SessionIndexDTO>) {
         val lock = acquireLock("index.json")
         try {
-            val tmp = File(dir, "index.json.tmp")
-            tmp.writeText(gson.toJson(list))
-            Files.move(
-                tmp.toPath(),
-                indexFile.toPath(),
-                StandardCopyOption.ATOMIC_MOVE,
-                StandardCopyOption.REPLACE_EXISTING
-            )
+            writeIndexFile(list)
         } finally {
             lock?.release()
         }
+    }
+
+    /** 不带锁的文件写入，调用方需自行持有 index.json 锁。 */
+    private fun writeIndexFile(list: List<SessionIndexDTO>) {
+        val tmp = File(dir, "index.json.tmp")
+        tmp.writeText(gson.toJson(list))
+        Files.move(
+            tmp.toPath(),
+            indexFile.toPath(),
+            StandardCopyOption.ATOMIC_MOVE,
+            StandardCopyOption.REPLACE_EXISTING
+        )
     }
 
     private fun readIndex(): List<SessionIndexDTO> {

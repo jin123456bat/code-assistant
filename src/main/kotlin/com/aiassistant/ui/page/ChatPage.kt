@@ -100,6 +100,19 @@ class ChatPage(
                 toolWindow?.hide(null)
             }
         }
+        val newSessionButton = JButton("[+]").apply {
+            toolTipText = "新建会话"
+            font = font.deriveFont(12f)
+            isContentAreaFilled = false
+            border = BorderFactory.createEmptyBorder(2, 6, 2, 2)
+            addActionListener {
+                viewModel.newSession()
+                clearTransientUi()
+                addTimestampMarker()
+                messageContainer.revalidate()
+                messageContainer.repaint()
+            }
+        }
         val titleBar = JPanel(BorderLayout()).apply {
             border = BorderFactory.createCompoundBorder(
                 BorderFactory.createMatteBorder(0, 0, 1, 0, AppColors.border),
@@ -107,6 +120,7 @@ class ChatPage(
             )
             add(titleLabel, BorderLayout.WEST)
             add(JPanel().apply {
+                add(newSessionButton)
                 add(closeButton)
             }, BorderLayout.EAST)
         }

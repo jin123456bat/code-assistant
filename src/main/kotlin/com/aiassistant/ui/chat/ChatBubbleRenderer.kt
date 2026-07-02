@@ -321,25 +321,66 @@ object ChatBubbleRenderer {
     /**
      * 流式 Markdown 渲染 — 30ms 防抖批量合并 token，减少闪烁。
     fun renderStreaming(markdownText: String): JComponent {
-        val bubble = render(
+        streamingPendingText = markdownText
+
+        // 取消之前的延迟重建定时器
+        streamingRebuildTimer?.stop()
+
+        if (streamingPanel == null) {
+            // 首次调用：立即创建完整组件
+            streamingPanel = buildStreamingPanel(markdownText)
+        }
+
+        // 30ms 防抖：批量合并连续 token 后再一次性重建 UI
+        streamingRebuildTimer = javax.swing.Timer(30) {
+            val panel = streamingPanel ?: return@Timer
+            panel.removeAll()
+            val rendered = render(
+                ChatMessage(
+                    type = ChatMessage.Type.AGENT_TEXT,
+                    content = streamingPendingText,
+                    timestamp = java.time.Instant.now()
+                )
+            )
+            if (rendered is JPanel) {
+                rendered.components.forEach { panel.add(it) }
+            }
+            // 重新添加闪烁光标
+            val cursor = JLabel("▍").apply {
+                foreground = AppColors.primary
+                font = font.deriveFont(13f)
+                isOpaque = false
+            }
+            panel.add(cursor)
+            panel.revalidate()
+            panel.repaint()
+        }.apply { isRepeats = false; start() }
+
+        return streamingPanel!!
+    }
+
+    /** 构建带闪烁光标的流式气泡面板（首次调用时创建） */
+    private fun buildStreamingPanel(markdownText: String): JPanel {
+        val bubble = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            isOpaque = false
+        }
+        val rendered = render(
             ChatMessage(
                 type = ChatMessage.Type.AGENT_TEXT,
                 content = markdownText,
                 timestamp = java.time.Instant.now()
             )
         )
-        // ponytail: 光标▍追加到气泡末尾
+        if (rendered is JPanel) {
+            rendered.components.forEach { bubble.add(it) }
+        }
         val cursor = JLabel("▍").apply {
             foreground = AppColors.primary
             font = font.deriveFont(13f)
             isOpaque = false
         }
-        if (bubble is JPanel) {
-            // 将光标添加到 CENTER 区域的最后一行（body panel 末尾）
-            val body =
-                bubble.components.firstOrNull { it is JPanel && it.layout is BoxLayout } as? JPanel
-            body?.add(cursor)
-        }
+        bubble.add(cursor)
         val blinkTimer = javax.swing.Timer(500) { cursor.isVisible = !cursor.isVisible }
         blinkTimer.start()
         bubble.addHierarchyListener {
