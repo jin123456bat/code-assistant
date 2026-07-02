@@ -4,6 +4,7 @@ import com.intellij.openapi.editor.EditorFactory
 import com.intellij.openapi.editor.event.SelectionEvent
 import com.intellij.openapi.editor.event.SelectionListener
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.vfs.VfsUtil
 
 // ponytail: monitors editor selection → updates ChatViewModel's selectionRef
 
@@ -30,7 +31,7 @@ class EditorSelectionListener(
                 val startLine = editor.document.getLineNumber(selection.selectionStart) + 1
                 val endLine = editor.document.getLineNumber(selection.selectionEnd) + 1
                 val content = selection.selectedText ?: return
-                val path = file.presentableName
+                val path = VfsUtil.getRelativePath(file, project.baseDir) ?: file.presentableName
                 val key = Triple(path, startLine..endLine, content)
                 if (key != lastSelection) {
                     lastSelection = key
