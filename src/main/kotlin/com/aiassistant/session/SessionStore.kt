@@ -459,7 +459,7 @@ class SessionStore(private val project: Project) {
                 parentTotalTokens = dto.parentTotalTokens
             )
             if (existing >= 0) list[existing] = entry else list.add(entry)
-            writeIndexUnsafe(list)
+            writeIndexFile(list)
         } finally {
             lock?.release()
         }
