@@ -2,6 +2,7 @@ package com.aiassistant.ui.page
 
 import com.aiassistant.agent.MultiAgentManager
 import com.aiassistant.ui.AppColors
+import com.aiassistant.ui.AppAnimations
 import com.aiassistant.ui.Banner
 import com.aiassistant.ui.EditorSelectionListener
 import com.aiassistant.ui.MessageBus

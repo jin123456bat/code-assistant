@@ -546,8 +546,22 @@ class MultiAgentManager(private val project: Project) {
     ) {
         // 子 Agent 的 fileStamps 记录了它读取/修改过的所有文件及其 stamp
         // 将子 Agent 涉及的文件的父 Agent stamp 清除，迫使父 Agent 重新 Read
+        val modifiedFiles = mutableListOf<String>()
         for (path in subSession.fileStamps.keys) {
             parentSession.fileStamps.remove(path)
+            modifiedFiles.add(path)
+        }
+
+        // 向父 session 添加系统消息，告知哪些文件被子 Agent 修改
+        if (modifiedFiles.isNotEmpty()) {
+            val fileList = modifiedFiles.joinToString("\n") { "  - $it" }
+            parentSession.addMessage(
+                Message(
+                    role = Role.SYSTEM,
+                    contentType = ContentType.TOOL_RESULT,
+                    content = "子 Agent 可能已修改以下文件，父 Agent 缓存已失效:\n$fileList"
+                )
+            )
         }
     }
 

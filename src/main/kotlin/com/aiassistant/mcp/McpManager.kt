@@ -79,6 +79,9 @@ class McpManager(private val project: Project) {
 
         /** Schema 校验失败的工具列表，格式: "toolName: 失败原因"，供 UI 展示 */
         val schemaValidationFailures: MutableList<String> = mutableListOf()
+
+        /** 最近的 stdout/stderr 日志行（最多保留 MAX_LOG_LINES 行），供 UI "查看日志" 功能使用 */
+        val recentLogLines: MutableList<String> = mutableListOf()
     }
 
     /**
