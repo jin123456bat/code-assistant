@@ -725,13 +725,7 @@ class ChatViewModel(
         resetCancellationForNextTurn()
 
         // 清除会话内容（复用 session.id，对齐 docs/ui/components.md §4）
-        // 显式保留 approvedTools：clearSession() 复用同一 session 对象，approvedTools 自然保留。
-        // 此处显式声明意图以对齐文档要求：session.approvedTools 保留（不清除审批信任）。
-        val preservedApprovedTools = session.approvedTools.toMutableSet()
-        val preservedApprovedMcpServers = session.approvedMcpServers.toMutableSet()
         session.messages.clear()
-        session.approvedTools.addAll(preservedApprovedTools)
-        session.approvedMcpServers.addAll(preservedApprovedMcpServers)
         session.compactSummary = null
         session.compactCount = 0
         session.plan = null
