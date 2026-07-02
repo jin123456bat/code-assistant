@@ -146,6 +146,7 @@ class AgentLoop(
 
     fun close() {
         session.cancel()
+        try { client?.close() } catch (_: Exception) {}
     }
 
     enum class AgentMode { CHAT, AGENT, PLAN }
