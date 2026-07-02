@@ -76,6 +76,9 @@ class McpManager(private val project: Project) {
         /** 最后一次发送 JSON-RPC 请求的时间戳（用于 30s 无响应断连检测，对齐 docs/agent/mcp.md §四） */
         @Volatile
         internal var lastRequestTimeMs: Long = 0
+
+        /** Schema 校验失败的工具列表，格式: "toolName: 失败原因"，供 UI 展示 */
+        val schemaValidationFailures: MutableList<String> = mutableListOf()
     }
 
     /**

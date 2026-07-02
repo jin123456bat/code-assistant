@@ -369,6 +369,8 @@ class ToolCallCard(
     // 子任务 Token 消耗标签
     private val childTokenLabel = JLabel().apply {
         font = font.deriveFont(10f)
+        foreground = AppColors.textSecondary
+        border = BorderFactory.createEmptyBorder(2, 8, 2, 8)
         isVisible = false
     }
 }

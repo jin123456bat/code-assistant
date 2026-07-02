@@ -174,7 +174,7 @@ class SessionsPage(
             cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
             addMouseListener(object : MouseAdapter() {
                 override fun mouseClicked(e: MouseEvent) {
-                    if (e.x > 30) onRestore(s.id)
+                    if (e.component != cb) onRestore(s.id)
                 }
             })
         }
