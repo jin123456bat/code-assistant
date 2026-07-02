@@ -54,14 +54,37 @@ class SessionManager(private val project: Project) {
 
     fun getAllSessions(): List<SessionIndex> = store.listAll()
 
+    /**
+     * 软删除：标记 session 的 deleted=true，不删除物理文件。
+     * 可通过 undoDeleteSession() 撤销，或 purgeSession() 物理删除。
+     * 对齐 docs/agent/session.md §二 软删除操作。
+     */
     fun deleteSession(id: String) {
-        store.delete(id)
+        store.softDelete(id)
         if (currentSession?.id == id) currentSession = null
     }
 
     fun deleteSessions(ids: List<String>) {
-        store.deleteAll(ids)
+        for (id in ids) {
+            store.softDelete(id)
+        }
         if (currentSession?.id in ids) currentSession = null
+    }
+
+    /**
+     * 物理删除指定 session（文件 + index 条目），不可撤销。
+     * 软删除后的 session 可通过此方法彻底清除。
+     */
+    fun purgeSession(id: String) {
+        store.delete(id)
+        if (currentSession?.id == id) currentSession = null
+    }
+
+    /**
+     * 撤销软删除：将 session 的 deleted 标记恢复为 false。
+     */
+    fun undoDeleteSession(sessionId: String) {
+        store.undoDelete(sessionId)
     }
 
     fun saveSession(session: AgentSession) = store.save(session)

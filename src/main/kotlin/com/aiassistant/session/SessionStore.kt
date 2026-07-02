@@ -335,6 +335,50 @@ class SessionStore(private val project: Project) {
         writeIndexWithLock(list)
     }
 
+    /**
+     * 软删除：将 index 中指定 id 的 deleted 标记设为 true，不删除物理文件。
+     * 对齐 docs/agent/session.md §二 软删除操作。
+     */
+    fun softDelete(id: String) {
+        val lock = acquireLock("index.json")
+        try {
+            val list = readIndex().toMutableList()
+            val idx = list.indexOfFirst { it.id == id }
+            if (idx >= 0) {
+                list[idx] = list[idx].copy(deleted = true)
+                writeIndexWithLock(list)
+            }
+        } finally {
+            lock?.release()
+        }
+    }
+
+    /**
+     * 撤销软删除：将 index 中指定 id 的 deleted 标记恢复为 false。
+     */
+    fun undoDelete(id: String) {
+        val lock = acquireLock("index.json")
+        try {
+            val list = readIndex().toMutableList()
+            val idx = list.indexOfFirst { it.id == id }
+            if (idx >= 0) {
+                list[idx] = list[idx].copy(deleted = false)
+                writeIndexWithLock(list)
+            }
+        } finally {
+            lock?.release()
+        }
+    }
+
+    /**
+     * 物理删除所有已标记 deleted=true 的 session（文件 + index 条目）。
+     */
+    fun purgeDeleted() {
+        val deletedIds = readIndex().filter { it.deleted }.map { it.id }
+        if (deletedIds.isEmpty()) return
+        deleteAll(deletedIds)
+    }
+
     /** 清空所有会话（对齐 docs/ui/pages.md §四 [🗑 清空] 按钮） */
     fun clear() {
         deleteAll(listAll().map { it.id })
@@ -364,7 +408,8 @@ class SessionStore(private val project: Project) {
                     dto.hasActivePlan,
                     dto.parentId,
                     dto.parentTotalTokens,
-                    corrupted = corrupted
+                    corrupted = corrupted,
+                    deleted = dto.deleted
                 )
             }
         } catch (e: Exception) {
