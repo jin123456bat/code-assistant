@@ -2,16 +2,28 @@ package com.aiassistant.completion
 
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.project.Project
+import com.intellij.psi.PsiClass
+import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
+import com.intellij.psi.PsiMethod
+import com.intellij.psi.PsiRecursiveElementVisitor
 
 /**
- * PHP PSI 增强上下文采集。非 PHP 文件返回 null。
- * 通过反射加载 PHP PSI 类（com.jetbrains.php 可选依赖），不可用时静默降级。
+ * PSI 增强上下文采集。支持 PHP/Kotlin/Java 等多语言。
+ * PHP 使用专用的 PHP PSI 类（com.jetbrains.php 可选依赖），不可用时静默降级。
+ * 其他语言使用通用 PsiClass/PsiMethod 接口采集 class/method 声明和 import 语句。
  */
 object PsiCompletionStrategy {
     fun collectContext(editor: Editor, project: Project, psiFile: PsiFile, language: String): String? {
-        if (!language.equals("php", ignoreCase = true)) return null
+        return when {
+            language.equals("php", ignoreCase = true) -> collectPhpContext(editor, psiFile)
+            else -> collectGenericPsiContext(psiFile)
+        }
+    }
 
+    // ---- PHP 专用上下文采集 ----
+
+    private fun collectPhpContext(editor: Editor, psiFile: PsiFile): String? {
         val document = editor.document
         val offset = editor.caretModel.offset
         val sb = StringBuilder()
@@ -60,5 +72,61 @@ object PsiCompletionStrategy {
             }
         }
         return current.coerceAtMost(text.length)
+    }
+
+    // ---- 通用 PSI 上下文采集（Kotlin/Java 等非 PHP 语言） ----
+
+    /**
+     * 使用通用 IntelliJ PSI 接口（不依赖语言特定插件）遍历文件，
+     * 提取 import 语句、class/interface 声明、method/function 声明。
+     */
+    private fun collectGenericPsiContext(psiFile: PsiFile): String? {
+        val sb = StringBuilder()
+        val imports = mutableListOf<String>()
+        val classes = mutableListOf<String>()
+        val functions = mutableListOf<String>()
+
+        psiFile.accept(object : PsiRecursiveElementVisitor() {
+            override fun visitElement(element: PsiElement) {
+                when {
+                    // import 语句：识别以 "import " 开头的顶层声明
+                    element.text.trimStart().startsWith("import ") -> {
+                        imports.add(element.text.trim().take(200))
+                    }
+                    // class/interface/enum/object 声明
+                    element is PsiClass -> {
+                        val modifiers = mutableListOf<String>()
+                        if (element.hasModifierProperty("abstract")) modifiers.add("abstract")
+                        if (element.hasModifierProperty("open")) modifiers.add("open")
+                        val kind = when {
+                            element.isInterface -> "interface"
+                            element.isEnum -> "enum"
+                            else -> "class"
+                        }
+                        classes.add((modifiers + kind + (element.name ?: "")).joinToString(" "))
+                        // 继续递归进入类内部以收集方法声明
+                        super.visitElement(element)
+                    }
+                    // method/function 声明
+                    element is PsiMethod -> {
+                        val methodText = element.text.take(250).replace("\n", " ").trim()
+                        functions.add(methodText)
+                    }
+                    else -> super.visitElement(element)
+                }
+            }
+        })
+
+        if (imports.isNotEmpty()) {
+            imports.take(15).forEach { sb.appendLine("// $it") }
+            sb.appendLine()
+        }
+        classes.take(5).forEach { sb.appendLine("// $it") }
+        if (functions.isNotEmpty()) {
+            sb.appendLine()
+            functions.take(10).forEach { sb.appendLine("//   ${it.trim()}") }
+        }
+
+        return sb.takeIf { it.isNotBlank() }?.toString()
     }
 }
