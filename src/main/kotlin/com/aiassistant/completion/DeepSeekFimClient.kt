@@ -64,7 +64,8 @@ class DeepSeekFimClient(
         val prompt: String,
         val suffix: String?,
         @SerializedName("max_tokens") val maxTokens: Int,
-        val temperature: Double = 0.0
+        val temperature: Double = 0.0,
+        val stop: List<String>? = null
     )
 
     data class FimChoice(

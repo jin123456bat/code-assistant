@@ -26,6 +26,15 @@ class MultiAgentManager(private val project: Project) {
         /** 子 Agent 持有的文件锁路径映射（agentId → 文件路径集合），用于 crash 清理释放 */
         private val subAgentFileLocks = ConcurrentHashMap<String, MutableSet<String>>()
 
+        /** 获取或创建指定路径的文件写锁（静态方法，所有 Agent 共享同一锁表） */
+        fun acquireFileLock(path: String): ReentrantLock =
+            fileLocks.computeIfAbsent(path) { ReentrantLock() }
+
+        /** 释放指定路径的文件写锁（从锁表中移除，下次获取时重建） */
+        fun releaseFileLock(path: String) {
+            fileLocks.remove(path)
+        }
+
         /**
          * Explore（只读搜索）模式工具白名单。
          * 对齐 docs/agent/multi-agent.md §三：Explore 仅允许 Read、Grep、Glob。
@@ -578,9 +587,6 @@ class MultiAgentManager(private val project: Project) {
             // 持久化失败不影响父 Agent
         }
     }
-
-    fun acquireFileLock(path: String): ReentrantLock =
-        fileLocks.computeIfAbsent(path) { ReentrantLock() }
 
     /** 记录子 Agent 持有的文件锁路径，供 crash 清理时释放 */
     fun trackSubAgentFileLock(subAgentId: String, path: String) {

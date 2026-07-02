@@ -49,7 +49,7 @@ class ToolExecutorPathTest {
         val projectDir = root.resolve("project").toFile().apply { mkdirs() }
         val project = projectAt(projectDir.absolutePath)
         val file = projectDir.resolve("locked.txt")
-        val lock = MultiAgentManager(project).acquireFileLock(file.canonicalPath)
+        val lock = MultiAgentManager.acquireFileLock(file.canonicalPath)
         val locked = CountDownLatch(1)
         val release = CountDownLatch(1)
         val holder = Thread {
