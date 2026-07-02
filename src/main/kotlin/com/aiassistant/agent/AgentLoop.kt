@@ -800,9 +800,9 @@ class AgentLoop(
         session.compactSummary = summary
         session.compactCount++
 
-        // 重建 builder：System Prompt 重新构建、Tools 重新生成、
-        // Skill 正文从磁盘重新注入、@file 不重新注入
-        rebuildBuilderAfterCompact(builder, mode)
+        // 标记 builder 需要重建：下一轮 while 循环开始时从 session.messages 重新构建
+        // 不在此处直接修改 builder，避免 SDK builder 消息清理不完全导致消息重复
+        needsRebuild = true
 
         return true
     }
