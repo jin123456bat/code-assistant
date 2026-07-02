@@ -264,13 +264,7 @@ class SessionManager(private val project: Project) {
         // 如果当前 session 就是被生成标题的 session，更新内存中的引用
         currentSession?.let {
             if (it.id == sessionId) {
-                try {
-                    val titleField = AgentSession::class.java.getDeclaredField("title")
-                    titleField.isAccessible = true
-                    titleField.set(it, title)
-                } catch (_: Exception) {
-                    // 反射失败不影响持久化结果，下次从文件加载时会得到新标题
-                }
+                it.title = title
             }
         }
 
