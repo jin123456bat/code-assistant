@@ -139,7 +139,10 @@ class ChatInputArea(
     private fun adjustTextAreaRows() {
         val fontMetrics = textArea.getFontMetrics(textArea.font)
         val textWidth = textArea.width
-        if (textWidth <= 0) return  // 组件尚未布局，跳过
+        if (textWidth <= 0) {
+            textArea.rows = 2
+            return
+        }
 
         val text = textArea.text
         val lines = text.split("\n")
