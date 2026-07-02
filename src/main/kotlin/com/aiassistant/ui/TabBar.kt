@@ -96,6 +96,8 @@ class TabBar(
         updateSelection()
     }
 
+    fun getSelected(): Page = selected
+
     fun setSelected(page: Page) {
         selected = page; updateSelection()
     }
