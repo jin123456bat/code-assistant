@@ -605,6 +605,8 @@ class McpManager(private val project: Project) {
                         server.nonJsonConsecutiveCount.set(0)
                         server.lastRequestTimeMs = 0  // 收到响应，清除超时计时
                         server.responseQueue.offer(trimmed)
+                        // 记录到日志缓冲区（截断过长行）
+                        appendLogLine(server, "[stdout] ${trimmed.take(500)}")
                     } else {
                         // 非 JSON-RPC 行：跳过，记录 WARN 日志，计数器+1
                         val count = server.nonJsonConsecutiveCount.incrementAndGet()
@@ -615,6 +617,8 @@ class McpManager(private val project: Project) {
                                 )
                             }"
                         )
+                        // 记录到日志缓冲区
+                        appendLogLine(server, "[stdout] ${trimmed.take(500)}")
 
                         if (count >= NON_JSON_CONSECUTIVE_MAX) {
                             LOG.error("MCP Server [$serverId] 连续 $count 行非 JSON-RPC，判定异常，强制断开")
@@ -1071,6 +1075,9 @@ class McpManager(private val project: Project) {
 
         /** 连续非 JSON-RPC 行阈值，超过此值判定 Server 异常 */
         private const val NON_JSON_CONSECUTIVE_MAX = 100
+
+        /** 每个 Server 最多保留的日志行数，供 UI "查看日志" 功能使用 */
+        private const val MAX_LOG_LINES = 500
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
 
         /** 按 Project 查找已创建的 McpManager 实例，供 ToolExecutor 等组件查询 Server 状态 */

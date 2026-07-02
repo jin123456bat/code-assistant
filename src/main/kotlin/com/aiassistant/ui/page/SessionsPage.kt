@@ -165,6 +165,8 @@ class SessionsPage(
         val isChild = s.parentId != null
         val indentPixels = if (isChild) 24 else 0
 
+        val cb = JCheckBox().apply { checkboxes[s.id] = this }
+
         val card = JPanel(BorderLayout()).apply {
             border = BorderFactory.createCompoundBorder(
                 BorderFactory.createMatteBorder(0, 0, 1, 0, AppColors.border),
@@ -179,7 +181,6 @@ class SessionsPage(
             })
         }
 
-        val cb = JCheckBox().apply { checkboxes[s.id] = this }
         card.add(cb, BorderLayout.WEST)
 
         val formatter = DateTimeFormatter.ofPattern("MM-dd HH:mm").withZone(ZoneId.systemDefault())
