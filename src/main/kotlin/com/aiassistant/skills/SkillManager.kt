@@ -75,8 +75,7 @@ class SkillManager(private val project: Project) {
      * 清除内存缓存，下次 loadSkills() 会重新从磁盘读取。
      */
     fun reloadSkills() {
-        // loadSkills() 每次都从磁盘读取，无需额外缓存清除
-        // 保留此方法供 ChatViewModel 的 /reload-skill 命令调用
+        loadSkills()
     }
 
     fun getEnabledSkills(): List<Skill> =
