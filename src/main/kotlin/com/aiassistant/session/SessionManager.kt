@@ -79,21 +79,23 @@ class SessionManager(private val project: Project) {
         val allSessions = getAllSessions()
         val periods = mutableMapOf<LocalDate, TokenPeriod>()
 
-        for (session in allSessions) {
+        for (index in allSessions) {
+            val session = store.load(index.id) ?: continue
             val dateKey = when (range) {
-                TokenRange.DAY -> session.updatedAt.atZone(java.time.ZoneId.systemDefault())
+                TokenRange.DAY -> index.updatedAt.atZone(java.time.ZoneId.systemDefault())
                     .toLocalDate()
 
-                TokenRange.MONTH -> session.updatedAt.atZone(java.time.ZoneId.systemDefault())
+                TokenRange.MONTH -> index.updatedAt.atZone(java.time.ZoneId.systemDefault())
                     .toLocalDate().withDayOfMonth(1)
 
                 TokenRange.ALL -> LocalDate.ofEpochDay(0)
             }
 
             val existing = periods[dateKey]
-            val inputTokens = session.totalTokens
-            val childTokens = if (includeChildren) session.parentTotalTokens ?: 0 else 0
-            val outputTokens = 0L // SessionIndex.totalTokens 已聚合 input+output，这里按 total 处理
+            // 从消息级别累加实际的 input/output token 用量
+            val inputTokens = session.messages.sumOf { it.tokenUsage?.inputTokens ?: 0L }
+            val outputTokens = session.messages.sumOf { it.tokenUsage?.outputTokens ?: 0L }
+            val childTokens = if (includeChildren) index.parentTotalTokens ?: 0 else 0
 
             periods[dateKey] = if (existing == null) {
                 TokenPeriod(
