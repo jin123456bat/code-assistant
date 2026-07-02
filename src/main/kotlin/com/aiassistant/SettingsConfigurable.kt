@@ -47,11 +47,7 @@ class SettingsConfigurable : Configurable {
         content.add(modelComboBox)
         content.add(Box.createVerticalStrut(12))
 
-        // Completion
-        completionEnabledCheckBox.addActionListener {
-            AppSettingsService.getInstance()
-                .setCompletionEnabled(completionEnabledCheckBox.isSelected)
-        }
+        // Completion（启用开关由 apply() 统一持久化，不在这里添加 addActionListener 立即保存）
         content.add(completionEnabledCheckBox)
         content.add(Box.createVerticalStrut(8))
 
