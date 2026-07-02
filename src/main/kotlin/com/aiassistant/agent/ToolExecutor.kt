@@ -24,6 +24,8 @@ import java.net.URLEncoder
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
+import com.intellij.execution.configurations.GeneralCommandLine
+import com.intellij.execution.process.OSProcessHandler
 
 data class ToolApprovalRequest(
     val toolUseId: String,
@@ -449,8 +451,15 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
             if (f.isDirectory) f else f.parentFile
         } ?: return "错误: 工作目录 \"$workDir\" 超出项目根，已拒绝访问"
 
-        val process = Runtime.getRuntime().exec(arrayOf("/bin/bash", "-c", command), null, dir)
+        val cmdLine = GeneralCommandLine("/bin/bash", "-c", command)
+            .withWorkDirectory(dir)
+            .withCharset(Charsets.UTF_8)
+        val handler = OSProcessHandler(cmdLine)
+        handler.startNotify()
+        val process = handler.process
         session.runningProcesses.add(process)
+
+        val start = System.currentTimeMillis()
 
         val stdoutFuture = java.util.concurrent.CompletableFuture.supplyAsync {
             process.inputStream.bufferedReader().use { it.readText() }
@@ -477,11 +486,11 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
         } else {
             val out = stdoutFuture.get()
             val err = stderrFuture.get()
-            process.waitFor()
+            val effectiveTimeout = if (timeoutSec == 0) 300 else timeoutSec
+            process.waitFor(effectiveTimeout, TimeUnit.SECONDS)
             Pair(out, err)
         }
 
-        val start = System.currentTimeMillis()
         val exitCode = process.exitValue()
         val elapsed = (System.currentTimeMillis() - start) / 1000
         val rawOutput = stdout + stderr
