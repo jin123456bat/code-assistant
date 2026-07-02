@@ -77,6 +77,10 @@ class AgentSession(
     fun cancel() {
         cancelled = true
         state = State.CANCELLED
+        runningProcesses.forEach {
+            try { if (it.isAlive) it.destroyForcibly() } catch (_: Exception) {}
+        }
+        runningProcesses.clear()
     }
 
     // ── 状态转换方法 ──
