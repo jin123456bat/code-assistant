@@ -104,6 +104,11 @@ class AgentLoop(
     /** compact 后标记 builder 需要从 session.messages 重新构建，避免消息重复 */
     private var needsRebuild: Boolean = false
 
+    /** 流式 token 批量合并：首个 token 立即发送，后续 token 缓存 30ms 后批量发送，减少 UI 刷新频率 */
+    private val tokenBuffer = StringBuilder()
+    private var tokenTimer: java.util.Timer? = null
+    private var firstTokenSentThisTurn = false
+
     /**
      * 标记错误并触发连续错误升级检测。
      * 对齐 docs/agent/loop.md §三：

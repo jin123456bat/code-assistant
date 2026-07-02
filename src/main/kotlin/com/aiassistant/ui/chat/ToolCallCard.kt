@@ -232,9 +232,11 @@ class ToolCallCard(
         resultComponent.isVisible = true
         resultScrollPane.isVisible = true
         footerLabel.text = "${durationMs}ms"
-        // 结果到达后默认折叠（除非当前状态不可折叠）
-        if (canCollapse) {
-            isCollapsed = true
+        // 如果已经处于 DONE/ERROR/TIMEOUT 终态，保持展开（避免 setState(DONE) 展开后 setResult() 又折叠的闪烁）
+        if (state != ToolCallState.DONE && state != ToolCallState.ERROR && state != ToolCallState.TIMEOUT) {
+            if (canCollapse) {
+                isCollapsed = true
+            }
         }
         applyCollapseState()
     }

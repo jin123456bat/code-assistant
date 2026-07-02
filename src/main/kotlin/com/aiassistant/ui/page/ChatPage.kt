@@ -591,7 +591,7 @@ class ChatPage(
                 elapsed += frameMs
                 val progress = (elapsed.toFloat() / durationMs).coerceAtMost(1.0f)
                 // ease-out: t => 1 - (1-t)^2
-                val eased = 1.0f - (1.0f - progress) * (1.0f - progress)
+                val eased = AppAnimations.Timing.BUBBLE_APPEAR.easing(progress)
                 alpha = eased
                 translateY = (10 * (1.0f - eased)).toInt()
                 revalidate()
