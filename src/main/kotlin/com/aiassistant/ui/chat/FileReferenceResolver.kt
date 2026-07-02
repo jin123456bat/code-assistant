@@ -28,7 +28,7 @@ object FileReferenceResolver {
 
         val context = refs.joinToString("\n\n") { file ->
             val relativePath = file.relativeTo(root).path
-            val lines = file.readLines()
+            val lines = file.readLines(Charsets.UTF_8)
             val returned = lines.take(500)
             buildString {
                 appendLine("[File: $relativePath (${lines.size} lines)]")
