@@ -35,7 +35,10 @@ class AppSettingsService {
         private const val COMMIT_ENABLED_KEY = "$SERVICE_NAME.COMMIT.ENABLED"
         private const val FIXED_MODEL = "deepseek-v4-pro"
         val AVAILABLE_MODELS = listOf(
-            FIXED_MODEL to "DeepSeek V4 Pro"
+            "deepseek-v4-pro" to "DeepSeek V4 Pro",
+            "deepseek-chat" to "DeepSeek Chat",
+            "deepseek-coder" to "DeepSeek Coder",
+            "deepseek-reasoner" to "DeepSeek Reasoner (R1)"
         )
 
         val DEFAULT_COMMIT_PROMPT_ZH = """请基于以下 git diff 生成一条 Conventional Commits 规范的 commit message。
@@ -78,12 +81,12 @@ class AppSettingsService {
     fun getModel(): String {
         val raw = com.intellij.ide.util.PropertiesComponent.getInstance()
             .getValue(MODEL_KEY, FIXED_MODEL)
-        return raw?.takeIf { it == FIXED_MODEL } ?: FIXED_MODEL
+        return raw?.takeIf { it in AVAILABLE_MODELS.map { m -> m.first } } ?: FIXED_MODEL
     }
 
     fun setModel(model: String) =
         com.intellij.ide.util.PropertiesComponent.getInstance()
-            .setValue(MODEL_KEY, model.takeIf { it == FIXED_MODEL } ?: FIXED_MODEL)
+            .setValue(MODEL_KEY, model)
 
     fun getModelDisplayName(): String =
         AVAILABLE_MODELS.firstOrNull { it.first == getModel() }?.second ?: getModel()
