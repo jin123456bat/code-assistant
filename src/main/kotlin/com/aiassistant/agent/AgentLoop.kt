@@ -314,6 +314,10 @@ class AgentLoop(
                                 )
                             )
                             messageAlreadyPersisted = true
+                            // 遍历已提取的 toolUses，发送 ToolCallCancelled 事件，避免孤立的 tool_use 被持久化
+                            for (toolUse in toolUses) {
+                                onToolCallStateChanged?.invoke(toolUse.id(), ToolCallState.CANCELLED, null, null)
+                            }
                             break
                         }
 
