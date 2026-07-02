@@ -251,6 +251,10 @@ class AgentLoop(
                 session.filesReadThisTurn.clear()
                 session.filesModifiedThisTurn.clear()
 
+                // 重置流式 token 批量合并状态
+                firstTokenSentThisTurn = false
+                tokenBuffer.clear()
+
                 // 轮次预警：当 turn >= effectiveMaxTurns * turnWarningRatio 时附加系统提示
                 // effectiveMaxTurns == Int.MAX_VALUE（不限轮次）时跳过预警
                 // 对齐 docs/agent/loop.md §一
@@ -281,10 +285,29 @@ class AgentLoop(
                                     reasoningOutput.append(thinking.thinking())
                                     onReasoningContent?.invoke(thinking.thinking())
                                 }
-                                // 再处理普通文本
+                                // 再处理普通文本（30ms 批量合并减少 UI 刷新频率）
                                 contentDelta.text().ifPresent { text ->
                                     turnOutput.append(text.text())
-                                    onToken?.invoke(text.text())
+                                    if (!firstTokenSentThisTurn) {
+                                        // 首个 token 立即发送，降低首字延迟
+                                        firstTokenSentThisTurn = true
+                                        onToken?.invoke(text.text())
+                                    } else {
+                                        // 后续 token 缓存并 30ms 后批量发送
+                                        tokenBuffer.append(text.text())
+                                        tokenTimer?.cancel()
+                                        tokenTimer = java.util.Timer().apply {
+                                            schedule(object : java.util.TimerTask() {
+                                                override fun run() {
+                                                    val batched = tokenBuffer.toString()
+                                                    tokenBuffer.clear()
+                                                    if (batched.isNotEmpty()) {
+                                                        onToken?.invoke(batched)
+                                                    }
+                                                }
+                                            }, 30)
+                                        }
+                                    }
                                 }
                             } else if (event.isContentBlockStart()) {
                                 val start = event.asContentBlockStart()
