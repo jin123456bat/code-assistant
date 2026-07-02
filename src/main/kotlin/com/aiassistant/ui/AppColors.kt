@@ -66,7 +66,7 @@ object AppColors {
 
     // ---- 标签芯片 ----
     val tagBg = JBColor(0xEFF6FF, 0x1E3A5F)
-    val tagBorder = JBColor(0xBFDBFE, 0x2563EB)
+    val tagBorder = JBColor(0xBFDBFE, 0x1E40AF)
 
     // ---- 多 Agent 调度卡片 ----
     // 文档要求背景: #F0F7FF（亮）/#0F1D2F（暗），border=#BFDBFE
