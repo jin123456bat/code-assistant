@@ -132,8 +132,12 @@ class SessionManager(private val project: Project) {
      *
      * 遍历所有 session，找到 parentId == sessionId 的子 session，累加它们的 totalTokens，
      * 同时递归聚合子 session 的孙 session。
+     *
+     * @param sessionId 需要聚合子 token 的父 session ID
+     * @param visited 已访问的 session ID 集合，防止循环引用导致栈溢出
      */
-    fun aggregateChildTokens(sessionId: String): Long {
+    fun aggregateChildTokens(sessionId: String, visited: MutableSet<String> = mutableSetOf()): Long {
+        if (!visited.add(sessionId)) return 0L // 循环引用检测，已访问过则跳过
         val allSessions = getAllSessions()
         val childSessions = allSessions.filter { it.parentId == sessionId }
         if (childSessions.isEmpty()) return 0L
@@ -141,8 +145,8 @@ class SessionManager(private val project: Project) {
         var total = 0L
         for (child in childSessions) {
             total += child.totalTokens
-            // 递归聚合孙 session
-            total += aggregateChildTokens(child.id)
+            // 递归聚合孙 session，传递 visited 防止循环
+            total += aggregateChildTokens(child.id, visited)
         }
 
         // 将聚合结果写回 index
