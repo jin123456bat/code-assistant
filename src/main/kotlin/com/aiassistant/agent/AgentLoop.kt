@@ -207,6 +207,39 @@ class AgentLoop(
                 turn < effectiveMaxTurns &&
                 continueStreak <= maxAutoContinue
             ) {
+                // compact 后重建 builder：从 session.messages 重新构建，避免消息重复
+                if (needsRebuild) {
+                    needsRebuild = false
+                    builder = MessageCreateParams.builder()
+                        .model(model)
+                        .maxTokens(4096)
+                        .addSystemMessage(buildSystemPrompt(null))
+                        .apply {
+                            if (mode != AgentMode.CHAT) addRegisteredTools(this)
+                        }
+                    // 从 session.messages 重新填充消息历史
+                    val history = session.messages.filter { !it.deleted && it.content.isNotBlank() }
+                    for (msg in history) {
+                        when (msg.role) {
+                            Role.USER -> builder.addUserMessage(msg.content)
+                            Role.ASSISTANT -> builder.addAssistantMessage(msg.content)
+                            Role.SYSTEM -> builder.addUserMessage("[System]\n${msg.content}")
+                            Role.ERROR -> Unit
+                        }
+                    }
+                    // compact 后重新注入被调用过的 Skill 正文
+                    if (session.calledSkills.isNotEmpty()) {
+                        val skillManager = com.aiassistant.skills.SkillManager(project)
+                        val skills = skillManager.loadSkills()
+                        for (skillName in session.calledSkills) {
+                            val skill = skills.find { it.name == skillName || it.command == skillName }
+                            if (skill != null && skill.enabled && skill.missingTools.isEmpty()) {
+                                builder.addSystemMessage("## Skill（compact 重新注入）: ${skill.name}\n${skill.content}")
+                            }
+                        }
+                    }
+                }
+
                 // 每个 turn 开始时清空 filesReadThisTurn 和 filesModifiedThisTurn
                 // filesReadThisTurn：确保 Edit/Write 前置 Read 校验按 turn 粒度生效（对齐 docs/agent/tools.md §七）
                 // filesModifiedThisTurn：大范围修改审批检测（同一 turn ≥5 个文件）（对齐 docs/agent/tools.md §六）

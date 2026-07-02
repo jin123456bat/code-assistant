@@ -313,12 +313,13 @@ object ChatBubbleRenderer {
         }
     }
 
+    // 流式渲染防抖状态：避免每个 token 都触发完整 UI 重建
+    private var streamingPanel: JPanel? = null
+    private var streamingRebuildTimer: javax.swing.Timer? = null
+    private var streamingPendingText: String = ""
+
     /**
-     * 流式 Markdown 渲染 — 字符串缓冲累积，Block 闭合后通过 parseMarkdown() 渲染为组件。
-     * 未闭合 Markdown 块（如未配对的 ```）缓存等待，闭合后再渲染。
-     *
-     * 对齐 docs/ui/chat.md §二 "流式气泡"：末尾闪烁光标 ▍ (#3B82F6, 500ms blink)。
-     */
+     * 流式 Markdown 渲染 — 30ms 防抖批量合并 token，减少闪烁。
     fun renderStreaming(markdownText: String): JComponent {
         val bubble = render(
             ChatMessage(

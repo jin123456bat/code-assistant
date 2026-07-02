@@ -442,22 +442,27 @@ class SessionStore(private val project: Project) {
      * 对齐 docs/agent/session.md 一 "Session Index 同样保护"。
      */
     private fun updateIndex(dto: SessionDTO) {
-        val list = readIndex().toMutableList()
-        val existing = list.indexOfFirst { it.id == dto.id }
-        val entry = SessionIndexDTO(
-            id = dto.id, title = dto.title,
-            createdAt = dto.createdAt, updatedAt = dto.updatedAt,
-            messageCount = dto.messages.size,
-            totalTokens = dto.messages.sumOf {
-                (it.tokenUsage?.inputTokens ?: 0L) + (it.tokenUsage?.outputTokens ?: 0L)
-            },
-            toolCallCount = dto.messages.sumOf { it.toolCalls?.size ?: 0 },
-            hasActivePlan = dto.plan != null && dto.plan.status != "COMPLETED" && dto.plan.status != "CANCELLED",
-            parentId = dto.parentId,
-            parentTotalTokens = dto.parentTotalTokens
-        )
-        if (existing >= 0) list[existing] = entry else list.add(entry)
-        writeIndexWithLock(list)
+        val lock = acquireLock("index.json")
+        try {
+            val list = readIndex().toMutableList()
+            val existing = list.indexOfFirst { it.id == dto.id }
+            val entry = SessionIndexDTO(
+                id = dto.id, title = dto.title,
+                createdAt = dto.createdAt, updatedAt = dto.updatedAt,
+                messageCount = dto.messages.size,
+                totalTokens = dto.messages.sumOf {
+                    (it.tokenUsage?.inputTokens ?: 0L) + (it.tokenUsage?.outputTokens ?: 0L)
+                },
+                toolCallCount = dto.messages.sumOf { it.toolCalls?.size ?: 0 },
+                hasActivePlan = dto.plan != null && dto.plan.status != "COMPLETED" && dto.plan.status != "CANCELLED",
+                parentId = dto.parentId,
+                parentTotalTokens = dto.parentTotalTokens
+            )
+            if (existing >= 0) list[existing] = entry else list.add(entry)
+            writeIndexUnsafe(list)
+        } finally {
+            lock?.release()
+        }
     }
 
     private fun removeFromIndex(id: String) {

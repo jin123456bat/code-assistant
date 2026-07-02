@@ -184,15 +184,15 @@ class PlanExecutor(private val session: AgentSession) {
         }
     }
 
-    fun resumeNextStep(): PlanItem? {
+    fun skipCurrentStep(): PlanItem? {
         val plan = currentPlan ?: return null
         if (plan.currentPlanIndex >= plan.plans.size) {
             plan.status = Plan.Status.COMPLETED; return null
         }
         val item = plan.plans[plan.currentPlanIndex]
-        item.status = PlanItem.ItemStatus.COMPLETED
+        item.status = PlanItem.ItemStatus.CANCELLED
+        item.result = "用户跳过"
         plan.currentPlanIndex++
-        if (plan.currentPlanIndex >= plan.plans.size) plan.status = Plan.Status.COMPLETED
         return item
     }
 
