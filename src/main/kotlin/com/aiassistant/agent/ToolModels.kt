@@ -100,7 +100,7 @@ class ReadLints {
     var timeout: Int = 0
 }
 
-@JsonClassDescription("执行指定 Skill。LLM 根据用户需求自主判断触发时机，将 SKILL.md 内容作为消息注入 conversation。")
+@JsonClassDescription("调用已注册的技能。LLM 根据用户需求自主判断触发时机，将 SKILL.md 内容作为消息注入 conversation。skill 正文不参与上下文压缩。")
 class Skill {
     @JsonPropertyDescription("Skill 名称或命令，如 code-review 或 /review")
     var skill: String = ""
@@ -144,7 +144,7 @@ class WebSearch {
     var timeout: Int = 0
 }
 
-@JsonClassDescription("抓取 URL 内容并按提示提取信息。HTTP 自动升级为 HTTPS。不支持需认证的页面。不支持缓存。")
+@JsonClassDescription("获取指定URL的网页内容并提取关键信息，最多返回 8000 字符。HTTP 自动升级为 HTTPS。不支持需认证的页面。不支持缓存。")
 class WebFetch {
     @JsonPropertyDescription("要抓取的 URL")
     var url: String = ""
