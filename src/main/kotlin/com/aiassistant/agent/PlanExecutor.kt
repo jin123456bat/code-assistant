@@ -226,8 +226,8 @@ class PlanExecutor(private val session: AgentSession) {
         return currentPlan?.plans ?: emptyList()
     }
 
-    /** removePlan: 删除指定计划项（仅 PAUSED 状态可删） */
-    fun removePlan(planId: String): String {
+    /** cancelPlan: 取消指定计划项（仅 PAUSED 状态可取消） */
+    fun cancelPlan(planId: String): String {
         val plan = currentPlan ?: return "错误: 当前没有活跃计划"
         val item = plan.plans.find { it.id == planId }
             ?: return "错误: 未找到 ID 为 $planId 的计划项"

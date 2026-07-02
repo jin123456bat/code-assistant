@@ -1,30 +1,32 @@
 package com.aiassistant
 
-import com.anthropic.client.okhttp.AnthropicOkHttpClient
-import com.anthropic.models.beta.messages.MessageCreateParams
+import java.net.HttpURLConnection
+import java.net.URL
 
 /**
  * DeepSeek API Key 校验。
- * 返回 "valid" / "invalid" / "unknown"（网络不可达）。
+ * 通过简单的 HTTP GET 请求 /v1/models 端点验证 key 有效性。
  */
 object ApiKeyValidator {
 
-    fun validate(key: String): String {
+    enum class ApiKeyState { VALID, INVALID, UNKNOWN }
+
+    fun validate(key: String): ApiKeyState {
         return try {
-            val client = AnthropicOkHttpClient.builder()
-                .baseUrl("https://api.deepseek.com/anthropic")
-                .apiKey(key)
-                .build()
-            val params = MessageCreateParams.builder()
-                .model("deepseek-v4-pro")
-                .maxTokens(1)
-                .addUserMessage("hi")
-                .build()
-            client.beta().messages().create(params)
-            "valid"
+            val url = URL("https://api.deepseek.com/v1/models")
+            val conn = url.openConnection() as HttpURLConnection
+            conn.setRequestProperty("Authorization", "Bearer $key")
+            conn.connectTimeout = 10_000
+            conn.readTimeout = 10_000
+            val code = conn.responseCode
+            conn.disconnect()
+            when (code) {
+                200 -> ApiKeyState.VALID
+                401 -> ApiKeyState.INVALID
+                else -> ApiKeyState.UNKNOWN
+            }
         } catch (e: Exception) {
-            if (e.message?.contains("401") == true || e.message?.contains("Unauthorized") == true) "invalid"
-            else "unknown"
+            ApiKeyState.UNKNOWN
         }
     }
 }

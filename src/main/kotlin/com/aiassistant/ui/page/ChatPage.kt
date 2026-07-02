@@ -543,36 +543,6 @@ class ChatPage(
     }
 
     /**
-     * 检测系统是否启用了"减少动效"（prefers-reduced-motion）。
-     * 对齐 docs/ui/design-system.md §七 prefers-reduced-motion 适配。
-     */
-    private fun isReducedMotionEnabled(): Boolean {
-        val toolkit = Toolkit.getDefaultToolkit()
-        val propertyNames = arrayOf(
-            "awt.dynamicLayoutSupported",
-            "apple.awt.reduceMotion"
-        )
-        for (name in propertyNames) {
-            try {
-                val prop = toolkit.getDesktopProperty(name)
-                if (prop is Boolean && !prop) return true
-            } catch (_: Exception) {
-                // 忽略不支持的属性
-            }
-        }
-        val osName = System.getProperty("os.name", "").lowercase()
-        if (osName.contains("mac")) {
-            try {
-                val reduceMotion = toolkit.getDesktopProperty("awt.dynamicLayoutSupported")
-                if (reduceMotion is Boolean && !reduceMotion) return true
-            } catch (_: Exception) {
-                // ignore
-            }
-        }
-        return false
-    }
-
-    /**
      * 消息气泡出现动画：150ms ease-out，从下方 10px 滑入并淡入。
      * 对齐 docs/ui/design-system.md §七 动效：消息气泡出现 150ms ease-out。
      *
@@ -582,7 +552,7 @@ class ChatPage(
      * 如果系统启用了减少动效（prefers-reduced-motion），直接添加 component 不包裹动画。
      */
     private fun animateBubbleAppear(component: JComponent) {
-        if (isReducedMotionEnabled()) {
+        if (AppAnimations.isReducedMotionEnabled()) {
             messageContainer.add(component)
             return
         }
@@ -593,7 +563,8 @@ class ChatPage(
 
     /**
      * 消息气泡出现动画包装器。
-     * 150ms ease-out：alpha 0→1，translateY 10→0（从下方滑入）。
+     * 使用 AppAnimations.Timing.BUBBLE_APPEAR 参数：durationMs/easing。
+     * alpha 0→1，translateY 10→0（从下方滑入）。
      */
     private inner class AnimatedBubbleWrapper(private val child: JComponent) :
         JPanel(BorderLayout()) {
@@ -601,7 +572,7 @@ class ChatPage(
         private var translateY = 10
         private val timer: Timer
         private var elapsed = 0
-        private val durationMs = 150
+        private val durationMs = AppAnimations.Timing.BUBBLE_APPEAR.durationMs
         private val frameMs = 10 // ~100fps
 
         init {

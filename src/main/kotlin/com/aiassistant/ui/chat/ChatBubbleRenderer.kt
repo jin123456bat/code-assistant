@@ -320,6 +320,9 @@ object ChatBubbleRenderer {
 
     /**
      * 流式 Markdown 渲染 — 30ms 防抖批量合并 token，减少闪烁。
+     *
+     * 对齐 docs/ui/chat.md §二 "流式气泡"：末尾闪烁光标 ▍ (#3B82F6, 500ms blink)。
+     */
     fun renderStreaming(markdownText: String): JComponent {
         streamingPendingText = markdownText
 

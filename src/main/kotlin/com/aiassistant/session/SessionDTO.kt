@@ -103,8 +103,7 @@ data class ToolCallDTO(
  */
 data class TokenUsageDTO(
     val inputTokens: Long = 0,
-    val outputTokens: Long = 0,
-    val timestamp: Instant = Instant.now()
+    val outputTokens: Long = 0
 )
 
 /**

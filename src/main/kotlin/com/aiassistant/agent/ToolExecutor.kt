@@ -114,7 +114,7 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
                 "Symbol" -> symbol(toolUse)
                 "CreatePlan", "createPlan" -> createPlan(toolUse)
                 "ListPlans", "listPlans" -> listPlans()
-                "RemovePlan", "removePlan" -> removePlan(toolUse)
+                "RemovePlan", "removePlan" -> cancelPlan(toolUse)
                 "ReorderPlans", "reorderPlans" -> reorderPlans(toolUse)
                 "MarkPlanDone", "markPlanDone" -> markPlanDone(toolUse)
                 else -> {
@@ -1564,10 +1564,10 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
         return sb.toString()
     }
 
-    private fun removePlan(toolUse: BetaToolUseBlock): String {
+    private fun cancelPlan(toolUse: BetaToolUseBlock): String {
         val input = toolUse._input()
         val planId = ToolInput.string(input, "planId") ?: return "错误: 缺少 planId 参数"
-        return planExecutor.removePlan(planId)
+        return planExecutor.cancelPlan(planId)
     }
 
     private fun reorderPlans(toolUse: BetaToolUseBlock): String {
