@@ -214,10 +214,10 @@ object ChatBubbleRenderer {
         bottomRow.add(renderTimestamp(msg, tokenInfo), BorderLayout.WEST)
 
         wrapper.add(bottomRow)
-        // 对齐 docs/ui/components.md：padding=12px + left accent bar 3px
+        // 对齐 docs/ui/components.md：padding=12px + left accent bar 3px（accent bar 紧贴左边缘）
         wrapper.border = BorderFactory.createCompoundBorder(
-            BorderFactory.createEmptyBorder(12, 12, 12, 12),
-            BorderFactory.createMatteBorder(0, 3, 0, 0, AppColors.primary)
+            BorderFactory.createMatteBorder(0, 3, 0, 0, AppColors.primary),
+            BorderFactory.createEmptyBorder(12, 12, 12, 12)
         )
         wrapper.isOpaque = true
         wrapper.background = AppColors.cardBg

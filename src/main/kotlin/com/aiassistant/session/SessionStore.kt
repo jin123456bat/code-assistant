@@ -197,7 +197,6 @@ class SessionStore(private val project: Project) {
             session.errorCount = dto.errorCount
             session.calledSkills.addAll(dto.calledSkills.orEmpty())
             session.firstToolUseDone.addAll(dto.firstToolUseDone.orEmpty())
-            session.firstToolUseDone.addAll(approvedTools)
             session.plan = dto.plan?.let { plan ->
                 com.aiassistant.agent.PlanExecutor.Plan(
                     id = plan.id,

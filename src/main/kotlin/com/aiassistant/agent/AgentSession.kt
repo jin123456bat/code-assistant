@@ -5,7 +5,7 @@ import java.util.UUID
 
 class AgentSession(
     val id: String = UUID.randomUUID().toString(),
-    val title: String = "新会话",
+    var title: String = "新会话",
     /** 父 Session ID，子 Agent 独立持久化时通过此字段关联父 Session（对齐 docs/agent/multi-agent.md §二） */
     var parentId: String? = null
 ) {

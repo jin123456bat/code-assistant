@@ -327,4 +327,35 @@ class ToolCallCard(
     private fun escapeHtml(s: String): String = s
         .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         .replace("\"", "&quot;")
+
+    /**
+     * 旋转图标包装器，用于 EXECUTING 状态的旋转动画。
+     * 每次 paintIcon() 时根据当前角度旋转绘制原始图标。
+     */
+    private class RotatingIcon(
+        private val delegate: Icon,
+        private val angle: Double
+    ) : Icon {
+        override fun paintIcon(c: Component?, g: Graphics, x: Int, y: Int) {
+            val g2d = g.create() as Graphics2D
+            try {
+                g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+                val cx = x + delegate.iconWidth / 2.0
+                val cy = y + delegate.iconHeight / 2.0
+                g2d.rotate(angle, cx, cy)
+                delegate.paintIcon(c, g2d, x, y)
+            } finally {
+                g2d.dispose()
+            }
+        }
+
+        override fun getIconWidth(): Int = delegate.iconWidth
+        override fun getIconHeight(): Int = delegate.iconHeight
+    }
+
+    // 子任务 Token 消耗标签
+    private val childTokenLabel = JLabel().apply {
+        font = font.deriveFont(10f)
+        isVisible = false
+    }
 }
