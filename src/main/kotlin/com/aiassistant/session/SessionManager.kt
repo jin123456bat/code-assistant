@@ -45,6 +45,7 @@ class SessionManager(private val project: Project) {
 
     fun createSession(title: String = "新会话"): AgentSession {
         val session = AgentSession(title = title)
+        session.finishTurn() // 确保状态为 IDLE，对齐 constructor 默认值
         currentSession = session
         return session
     }

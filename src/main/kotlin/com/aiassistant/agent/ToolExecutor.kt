@@ -429,10 +429,13 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
         displayPath: String,
         writeAction: () -> String?
     ): String? {
-        val lock = multiAgent.acquireFileLock(file.canonicalPath)
+        val canonicalPath = file.canonicalPath
+        val lock = multiAgent.acquireFileLock(canonicalPath)
         if (!lock.tryLock()) {
             return "错误: 文件 \"$displayPath\" 正在被其他 Agent 修改，请稍后重试。"
         }
+        // 记录子 Agent 持有的文件锁，供 crash 清理时释放
+        multiAgent.trackSubAgentFileLock(session.id, canonicalPath)
         return try {
             writeAction()
         } finally {

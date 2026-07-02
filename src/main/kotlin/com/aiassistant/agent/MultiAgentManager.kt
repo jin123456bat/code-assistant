@@ -23,6 +23,9 @@ class MultiAgentManager(private val project: Project) {
         /** 文件写锁表，所有 Agent 共享（对齐 docs/agent/multi-agent.md §一 文件写锁） */
         private val fileLocks = ConcurrentHashMap<String, ReentrantLock>()
 
+        /** 子 Agent 持有的文件锁路径映射（agentId → 文件路径集合），用于 crash 清理释放 */
+        private val subAgentFileLocks = ConcurrentHashMap<String, MutableSet<String>>()
+
         /**
          * Explore（只读搜索）模式工具白名单。
          * 对齐 docs/agent/multi-agent.md §三：Explore 仅允许 Read、Grep、Glob。
@@ -550,6 +553,11 @@ class MultiAgentManager(private val project: Project) {
         }
         subSession.runningProcesses.clear()
 
+        // 释放子 Agent 持有的所有文件锁
+        subAgentFileLocks.remove(subSession.id)?.forEach { path ->
+            fileLocks.remove(path)
+        }
+
         // 信号量释放由 spawnAgent 的 finally 块保证
     }
 
@@ -567,6 +575,13 @@ class MultiAgentManager(private val project: Project) {
 
     fun acquireFileLock(path: String): ReentrantLock =
         fileLocks.computeIfAbsent(path) { ReentrantLock() }
+
+    /** 记录子 Agent 持有的文件锁路径，供 crash 清理时释放 */
+    fun trackSubAgentFileLock(subAgentId: String, path: String) {
+        subAgentFileLocks.getOrPut(subAgentId) {
+            java.util.Collections.synchronizedSet(mutableSetOf())
+        }.add(path)
+    }
 
     fun getActiveCount(): Int = maxConcurrent - getSemaphore().availablePermits()
 

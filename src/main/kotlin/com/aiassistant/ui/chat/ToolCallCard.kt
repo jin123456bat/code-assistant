@@ -77,7 +77,7 @@ class ToolCallCard(
     private val resultScrollPane = JScrollPane().apply {
         verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED
         horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED
-        maximumSize = Dimension(Int.MAX_VALUE, 180)
+        maximumSize = Dimension(Int.MAX_VALUE, 240)
         border = BorderFactory.createEmptyBorder()
         isOpaque = true
         viewport.isOpaque = true
