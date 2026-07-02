@@ -61,11 +61,11 @@ class SkillManager(private val project: Project) {
             }
         }
 
-        // command 冲突检测：同名 command 双方禁用
+        // command 冲突检测：同名 command 双方禁用，并标记 conflictCommand
         val commandCounts = skills.groupBy { it.command }
         val finalSkills = skills.map { skill ->
             val conflict = (commandCounts[skill.command]?.size ?: 0) > 1
-            if (conflict) skill.copy(enabled = false) else skill
+            if (conflict) skill.copy(enabled = false, conflictCommand = skill.command) else skill
         }
 
         return finalSkills

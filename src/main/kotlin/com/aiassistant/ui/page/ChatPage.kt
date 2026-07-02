@@ -37,8 +37,10 @@ class ChatPage(
     private val scrollToBottomBtn = JButton("↓").apply {
         toolTipText = "滚动到底部"
         font = font.deriveFont(16f).deriveFont(java.awt.Font.BOLD)
-        isContentAreaFilled = false
-        isBorderPainted = false
+        foreground = AppColors.textSecondary
+        background = AppColors.cardBg
+        isContentAreaFilled = true
+        border = BorderFactory.createLineBorder(AppColors.border)
         isFocusPainted = false
         isVisible = false
         addActionListener {
