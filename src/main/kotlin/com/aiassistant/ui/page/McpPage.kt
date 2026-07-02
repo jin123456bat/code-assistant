@@ -142,6 +142,13 @@ class McpPage(project: Project) : JPanel(BorderLayout()) {
                 ).ifEmpty { "(none)" }
             } (${server.registeredToolNames.size})</span>")
 
+            // Schema 校验失败警告
+            if (server.schemaValidationFailures.isNotEmpty()) {
+                append("<br><span style='color:$amberHex;font-size:11px'>⚠ Schema 校验失败: ${
+                    server.schemaValidationFailures.joinToString("; ")
+                }</span>")
+            }
+
             // 初始化中：显示"最多等待 3 分钟"提示
             if (server.state == McpManager.State.INITIALIZING) {
                 append("<br><span style='color:$dimHex;font-size:11px'>正在安装依赖 (npm install)...</span>")

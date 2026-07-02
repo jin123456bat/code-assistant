@@ -414,7 +414,9 @@ class McpManager(private val project: Project) {
 
                 // Schema 校验
                 if (!isValidToolSchema(rawName, description, inputSchema)) {
-                    LOG.warn("MCP Server [$serverId] 工具 [$rawName] Schema 校验失败，跳过注册")
+                    val reason = buildSchemaFailureReason(rawName, description, inputSchema)
+                    LOG.warn("MCP Server [$serverId] 工具 [$rawName] Schema 校验失败: $reason，跳过注册")
+                    server.schemaValidationFailures.add("$rawName: $reason")
                     continue
                 }
 
@@ -553,6 +555,27 @@ class McpManager(private val project: Project) {
             if (properties == null || properties.size() == 0) return false
         }
         return true
+    }
+
+    /**
+     * 构建 Schema 校验失败的可读原因，供 UI 展示。
+     */
+    private fun buildSchemaFailureReason(
+        name: String,
+        description: String,
+        inputSchema: JsonObject?
+    ): String {
+        if (name.isEmpty()) return "工具名为空"
+        if (name.length > 64) return "工具名过长 (${name.length}>64)"
+        if (!name.matches(Regex("^[a-zA-Z0-9_-]+$"))) return "工具名包含非法字符"
+        if (description.isEmpty()) return "描述为空"
+        if (description.length > 1024) return "描述过长 (${description.length}>1024)"
+        if (inputSchema != null) {
+            if (inputSchema.get("type")?.asString != "object") return "inputSchema.type 不是 object"
+            val properties = inputSchema.getAsJsonObject("properties")
+            if (properties == null || properties.size() == 0) return "inputSchema.properties 为空"
+        }
+        return "未知原因"
     }
 
     /**
