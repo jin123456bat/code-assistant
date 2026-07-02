@@ -257,6 +257,16 @@ class ToolCallCard(
     fun setRejected() = setState(ToolCallState.REJECTED)
     fun setCancelled() = setState(ToolCallState.CANCELLED)
 
+    /**
+     * 设置子任务的 Token 消耗并在卡片底部显示估算费用。
+     * DeepSeek 定价: 输入 $0.27/M tokens, 输出 $1.10/M tokens。
+     */
+    fun setChildTokenCost(inputTokens: Long, outputTokens: Long) {
+        val cost = (inputTokens * 0.27 + outputTokens * 1.10) / 1_000_000
+        childTokenLabel.text = "子任务 Token: $inputTokens in / $outputTokens out (约￥${"%.4f".format(cost)})"
+        childTokenLabel.isVisible = true
+    }
+
     private fun rebuildApprovalPanel() {
         approvalPanel.removeAll()
         val actions = approvalActions

@@ -141,7 +141,9 @@ data class SessionIndex(
     val parentId: String? = null,
     val parentTotalTokens: Long? = null,
     /** Session JSON 文件损坏标记（对齐 docs/agent/session.md §一 "损坏文件用户感知"） */
-    val corrupted: Boolean = false
+    val corrupted: Boolean = false,
+    /** 软删除标记（对齐 docs/agent/session.md §二 删除操作） */
+    val deleted: Boolean = false
 )
 
 // ══════════════════════════════════════════════════════════════════
