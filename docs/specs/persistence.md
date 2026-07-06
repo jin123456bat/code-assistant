@@ -10,7 +10,7 @@ MCP 配置的数据结构。另附会话存储的写入流程与读取容错描�
 ## 存储概述
 
 - 目录：`<project>/.code-assistant/sessions/<uuid>.json`
-- 写入流程：Jackson 序列化 → `.tmp` 临时文件 → `Files.move(ATOMIC_MOVE)` 原子替换 →
+- 写入流程：Gson 序列化 → `.tmp` 临时文件 → `Files.move(ATOMIC_MOVE)` 原子替换 →
   `FileChannel.tryLock()` OS 级排他锁（跨进程写锁）
 - 读取容错：`JsonParseException` → 跳过损坏文件；`FileNotFoundException` → 从 index.json 移除条目
 - SessionStore 在 Background Thread 上执行保存
@@ -139,8 +139,9 @@ Session JSON Schema 版本升级时采用**向后兼容 + 懒迁移**策略：
 }
 ```
 
-旧版 Session JSON 可能只有 `approvedTools`、没有 `firstToolUseDone`。加载时 `SessionStore.load()` 会把
-`approvedTools` 补入 `firstToolUseDone`，避免已批准工具在重启后再次触发首次使用确认。
+旧版 Session JSON 可能只有 `approvedTools`、没有 `firstToolUseDone`。加载时 `SessionStore.load()`
+会分别恢复两个集合；
+缺失的 `firstToolUseDone` 使用空集合，不会从 `approvedTools` 自动补齐。
 
 ### Message 字段说明
 

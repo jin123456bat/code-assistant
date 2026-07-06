@@ -33,13 +33,13 @@ MCP 配置文件结构见 [persistence.md §6.3 MCP Config](persistence.md#63-mc
 
 ## 四、当前权限边界
 
-| 边界           | 当前状态               | 说明                                                                |
-|--------------|--------------------|-------------------------------------------------------------------|
-| Server 启用/禁用 | `enabled: boolean` | 唯一权限开关，`false` 时不启动                                               |
-| 工具审批         | ✅ Server 粒度审批      | 首个 MCP 工具调用时弹窗"允许此 Server 的所有工具"，通过后该 Server 所有工具自动放行，与内置工具审批流程独立 |
-| 资源访问控制       | ❌ 未实现              | MCP Server 可访问其进程能访问的一切资源                                         |
-| 网络限制         | ❌ 未实现              | HTTP 模式的 MCP Server 无网络限制                                         |
-| 环境变量隔离       | ❌ 未实现              | MCP Server 继承 IDE 进程环境变量                                          |
+| 边界           | 当前状态               | 说明                                                                                |
+|--------------|--------------------|-----------------------------------------------------------------------------------|
+| Server 启用/禁用 | `enabled: boolean` | 唯一权限开关，`false` 时不启动                                                               |
+| 工具审批         | ✅ Server 粒度审批      | 首个 MCP 工具调用时在 ToolCallCard 内显示"允许此 Server 的所有工具"，通过后该 Server 所有工具自动放行，与内置工具审批流程独立 |
+| 资源访问控制       | ❌ 未实现              | MCP Server 可访问其进程能访问的一切资源                                                         |
+| 网络限制         | ❌ 未实现              | HTTP 模式的 MCP Server 无网络限制                                                         |
+| 环境变量隔离       | ❌ 未实现              | MCP Server 继承 IDE 进程环境变量                                                          |
 
 ## 五、工具审批策略
 
@@ -47,7 +47,7 @@ MCP 配置文件结构见 [persistence.md §6.3 MCP Config](persistence.md#63-mc
 
 ```
 首次调用某 MCP Server 的任意工具
-  → ToolCallCard 弹窗："允许此 Server 的所有工具？"（serverName + 工具列表预览）
+  → ToolCallCard 内嵌审批："允许此 Server 的所有工具？"（serverName + 工具列表预览）
   → [允许一次] → 仅本次 tool_use 放行，并记录该 server 已完成首次确认；不写入 approvedMcpServers
   → [允许此 Server] → 该 Server 所有工具加入 approvedMcpServers，持久化到 Session JSON
   → [拒绝] → 发送拒绝 tool_result，LLM 可选择不使用该 Server 或更换方式
@@ -59,7 +59,7 @@ MCP 配置文件结构见 [persistence.md §6.3 MCP Config](persistence.md#63-mc
 | 维度       | 内置工具                              | MCP 工具                                             |
 |----------|-----------------------------------|----------------------------------------------------|
 | 审批粒度     | 按工具名（Read/Write/Edit/Bash/Agent）  | 按 Server ID                                        |
-| 首次弹窗     | "允许此会话使用 Read？"                   | "允许此会话使用 Server mysql 的所有工具？"                      |
+| 首次审批     | ToolCallCard 内嵌"允许此会话使用 Read？"    | ToolCallCard 内嵌"允许此会话使用 Server mysql 的所有工具？"       |
 | 持久化      | `approvedTools: ["Read", "Edit"]` | `approvedMcpServers: ["mysql", "filesystem"]`      |
 | 允许一次     | 仅本次工具调用放行，不加入 `approvedTools`     | 仅本次 tool_use 放行；不加入 `approvedMcpServers`，但不再重复首用确认 |
 | 危险命令二次确认 | ✅（Bash dangerous=true）            | ❌（MCP 工具不参与危险命令检测）                                 |

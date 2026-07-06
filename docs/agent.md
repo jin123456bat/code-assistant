@@ -142,7 +142,7 @@ Prompt → [system-prompt.md](specs/system-prompt.md)、线程 → [thread-model
 | 上下文超限处理       | Auto-Compact：摘要 + 保留近期原文                    | 对齐 Claude Code，避免粗暴截断丢失关键上下文                                           |
 | 上下文窗口大小       | 写死 1M tokens（DeepSeek V4 上限）                | 不需要动态检测，compact 阈值见 [loop.md §六](agent/loop.md#六agentloop-接口定义)        |
 | max_tokens 续写 | 自动发送"继续"，不持久化，≤5 次                          | 对齐 Claude Code，高频场景自动处理                                                |
-| /clear & /new | 创建全新会话（新 session.id），旧 session 保留           | 对齐 Claude Code，每次清理都是干净起点                                              |
+| /clear & /new | `/clear` 清空当前上下文；`/new` 新建 session；两者保留审批信任 | 避免重复审批，同时保持旧 session 可从 Sessions 列表访问                                  |
 | 会话标题          | LLM 异步生成（≤20 字，max_tokens=64）               | 对齐 Claude Code，Sessions 列表可读性                                          |
 | 会话清理          | 仅手动：Sessions 页面 `[全选]` + `[删除选中]`，不做自动清理    | 自动清理可能误删日志，无法恢复/回溯                                                     |
 | Token 估算      | 统一启发式：英文 字节/4，中文 字符×3/2，取 max               | 多处依赖，统一策略避免偏差                                                          |

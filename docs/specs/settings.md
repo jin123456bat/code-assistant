@@ -57,7 +57,7 @@ Settings 页面实际为关于页 + 快捷键参考 + IDE 设置入口卡片，�
 | 补全 max_tokens   | `256`               | 1-1024             | `PropertiesComponent` | [completion.md](../completion.md#八配置项)          |
 | Commit Prompt   | `""`（使用默认）          | 自定义模板              | `PropertiesComponent` | [git-message.md](../git-message.md#八配置项)        |
 | Agent 最大轮次      | `20`                | 0=不限               | `PropertiesComponent` | [agent.md](../agent.md#配置项)                     |
-| 多 Agent 并发上限    | `3`                 | 0=不限               | `PropertiesComponent` | [multi-agent.md](../agent/multi-agent.md#二关键约束) |
+| 多 Agent 并发上限    | `3`                 | 0=不限，最大 10         | `PropertiesComponent` | [multi-agent.md](../agent/multi-agent.md#二关键约束) |
 | 补全缓存 TTL        | `60s`               | 固定                 | 内存（不可配）               | [completion.md](../completion.md#五缓存策略)         |
 | 上下文窗口           | `1M tokens`         | 固定（DeepSeek V4 上限） | 硬编码                   | [context.md](../agent/context.md)               |
 | Auto-Compact 阈值 | `70%` (700K tokens) | 固定                 | 硬编码                   | [auto-compact.md](auto-compact.md)              |

@@ -21,17 +21,22 @@ class ChatInputArea(
     private val onSend: (String) -> Unit,
     private val onStop: (() -> Unit)? = null,
     private val onNewSession: (() -> Unit)? = null,
+    private val onSendWithImages: ((String, List<ImageRef>) -> Unit)? = null,
     /** 输入内容变化回调（文本内容），用于 ChatViewModel 更新 InputState.tokenCount */
     private val onInputChanged: ((text: String) -> Unit)? = null,
     /** 获取上一条用户消息文本的回调，用于 ↑ 在空输入框时填充历史消息（对齐 docs/ui/pages.md §十） */
     private val onFillPreviousMessage: (() -> String?)? = null
 ) : JPanel(BorderLayout()) {
 
-    private val textArea = JTextArea(2, 0).apply {
-        lineWrap = true; wrapStyleWord = true; font = font.deriveFont(11f)
+    private val textArea = JTextArea(3, 0).apply {
+        lineWrap = true; wrapStyleWord = true; font = font.deriveFont(12f)
         background = AppColors.pageBg
+        // 对齐 ui-prototype.html .input-area textarea: padding: 10px 12px
+        border = BorderFactory.createEmptyBorder(10, 12, 10, 12)
     }
-    private val popup = JPopupMenu()
+
+    /** 当前显示的 @file /command 弹窗，hidePopup() 关闭 */
+    private var activePopup: javax.swing.Popup? = null
     private val popupMenuItems = mutableListOf<JMenuItem>()
 
     /** Tags 行（FlowLayout，文件+图片混合排列，位于输入框上方），对齐 docs/ui/chat.md §七 + §十四 tagsRow */
@@ -140,7 +145,7 @@ class ChatInputArea(
         val fontMetrics = textArea.getFontMetrics(textArea.font)
         val textWidth = textArea.width
         if (textWidth <= 0) {
-            textArea.rows = 2
+            textArea.rows = 3
             return
         }
 
@@ -150,7 +155,7 @@ class ChatInputArea(
         val totalLines = lines.sumOf { line ->
             if (line.isEmpty()) 1
             else maxOf(1, (fontMetrics.stringWidth(line) + textWidth - 1) / textWidth)
-        }.coerceIn(2, 10)
+        }.coerceIn(3, 10)
 
         textArea.rows = totalLines
         textArea.revalidate()
@@ -344,7 +349,7 @@ class ChatInputArea(
         textArea.addKeyListener(object : KeyAdapter() {
             override fun keyPressed(e: KeyEvent) {
                 // Popup navigation (handled before Enter/Escape for popup mode)
-                if (popup.isVisible) {
+                if (activePopup != null) {
                     when (e.keyCode) {
                         KeyEvent.VK_DOWN -> {
                             selectPopupItem(1); e.consume(); return
@@ -384,7 +389,7 @@ class ChatInputArea(
                     KeyEvent.VK_ESCAPE -> {
                         // 对齐 docs/ui/pages.md §十 快捷键 + docs/ui/chat.md §八：Escape 仅关闭 Popup
                         // 不中断 Agent、LLM、流式生成或工具执行
-                        if (popup.isVisible) popup.isVisible = false
+                        hidePopup()
                     }
                 }
                 // Ctrl+Shift+N = new session
@@ -455,9 +460,19 @@ class ChatInputArea(
         val fileMatch = Regex("""(?:^|\s)@(\S*)$""").find(before)
         if (fileMatch != null) {
             val filter = fileMatch.groupValues[1]
-            // ponytail: 使用缓存文件列表在 EDT 同步过滤+显示，避免 PSI 慢操作
-            val files = cachedFiles ?: emptyList()
-            showPopup(filter, files)
+            val files = cachedFiles
+            if (files == null) {
+                // 缓存未就绪：触发同步加载（首次 @ 触发时异步任务可能未完成）
+                val project = projectRef
+                cachedFiles = if (project != null) try {
+                    com.intellij.openapi.application.ReadAction.compute<List<ProjectFileEntry>, Throwable> {
+                        getProjectFiles("")
+                    }
+                } catch (_: Exception) {
+                    emptyList()
+                } else emptyList()
+            }
+            showPopup(filter, cachedFiles ?: emptyList())
             return
         }
         // /command trigger
@@ -469,11 +484,11 @@ class ChatInputArea(
             )
             return
         }
-        popup.isVisible = false
+        hidePopup()
     }
 
     private fun commandSuggestions(): List<String> {
-        val builtIns = listOf("/plan", "/clear")
+        val builtIns = listOf("/plan", "/clear", "/new")
         val project = projectRef ?: return builtIns
         return (builtIns + SkillManager(project).enabledSlashCommands()).distinct()
     }
@@ -484,7 +499,7 @@ class ChatInputArea(
             .filter { it.fileName.contains(filter, ignoreCase = true) }
             .take(50)
         if (filtered.isEmpty()) {
-            popup.isVisible = false; return
+            hidePopup(); return
         }
 
         // 按父目录分组（相对于项目根目录）
@@ -516,7 +531,7 @@ class ChatInputArea(
                     addActionListener {
                         // 使用相对路径作为 @file 引用，对齐 docs/ui/chat.md §七 @file 引用格式
                         addFileReference("@${entry.relativePath}")
-                        popup.isVisible = false
+                        hidePopup()
                     }
                 }
                 popupMenuItems.add(mi)
@@ -537,12 +552,16 @@ class ChatInputArea(
                 popupHeight
             )
         }
-        popup.removeAll()
-        popup.add(scrollPane)
-
-        // ponytail: textArea 在 JScrollPane viewport 内，popup.show(textArea, ...) 会被裁剪
-        // 改为相对 inputScrollPane 弹出，确保完全可见
-        popup.show(inputScrollPane, 0, inputScrollPane.height)
+        hidePopup()  // 关闭旧弹窗
+        scrollPane.border = BorderFactory.createLineBorder(AppColors.border)
+        // 弹窗显示在输入框上方，紧贴文本框
+        val anchor = runCatching { inputScrollPane.locationOnScreen }.getOrNull() ?: return
+        val x = anchor.x
+        val y = anchor.y - scrollPane.preferredSize.height
+        val factory = javax.swing.PopupFactory.getSharedInstance()
+        activePopup = factory.getPopup(inputScrollPane, scrollPane, x, y)
+        // invokeLater 确保 Popup 在布局完成后再显示，避免首次触发时静默失败
+        SwingUtilities.invokeLater { activePopup?.show() }
     }
 
     /** 计算 Popup 高度：累加前 maxRows 个组件的 preferredSize.height，确保 8 行可见约束准确 */
@@ -565,10 +584,9 @@ class ChatInputArea(
 
     /** 显示指令 Popup（/command），对齐 docs/ui/chat.md §八 */
     private fun showCommandPopup(filter: String, items: List<String>) {
-        popup.removeAll()
         val filtered = items.filter { it.contains(filter, ignoreCase = true) }.take(8)
         if (filtered.isEmpty()) {
-            popup.isVisible = false; return
+            hidePopup(); return
         }
 
         popupMenuItems.clear()
@@ -579,7 +597,7 @@ class ChatInputArea(
                 maximumSize = Dimension(Int.MAX_VALUE, preferredSize.height)
                 addActionListener {
                     insertAtCaret(item + " ")
-                    popup.isVisible = false
+                    hidePopup()
                 }
             }
             popupMenuItems.add(mi)
@@ -592,17 +610,26 @@ class ChatInputArea(
         val scrollPane = JScrollPane(menuPanel).apply {
             verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED
             horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_NEVER
-            border = null
-            preferredSize = Dimension(
-                menuPanel.preferredSize.width + verticalScrollBar.preferredSize.width,
-                popupHeight
-            )
+            border = BorderFactory.createLineBorder(AppColors.border)
         }
-        popup.add(scrollPane)
+        scrollPane.preferredSize = Dimension(
+            maxOf(
+                menuPanel.preferredSize.width + scrollPane.verticalScrollBar.preferredSize.width,
+                200
+            ),
+            popupHeight
+        )
+        hidePopup()  // 关闭旧弹窗
+        val anchor = runCatching { inputScrollPane.locationOnScreen }.getOrNull() ?: return
+        val y = anchor.y - scrollPane.preferredSize.height
+        val factory = javax.swing.PopupFactory.getSharedInstance()
+        activePopup = factory.getPopup(inputScrollPane, scrollPane, anchor.x, y)
+        SwingUtilities.invokeLater { activePopup?.show() }
+    }
 
-        // ponytail: textArea 在 JScrollPane viewport 内，popup.show(textArea, ...) 会被裁剪
-        // 改为相对 inputScrollPane 弹出，确保完全可见
-        popup.show(inputScrollPane, 0, inputScrollPane.height)
+    private fun hidePopup() {
+        activePopup?.hide()
+        activePopup = null
     }
 
     private var popupIndex = -1
@@ -828,7 +855,7 @@ class ChatInputArea(
     private fun doSend() {
         // 对齐 docs/ui/components.md §3.1 Loading 状态：不可点击/不可发送
         if (!sendButton.isEnabled) return
-        val text = textArea.text.trim()
+        val text = if (isTextAreaEmpty()) "" else textArea.text.trim()
         val hasTags =
             manualFileRefs.isNotEmpty() || selectionFileRef != null || imageRefs.isNotEmpty()
         if (text.isNotEmpty() || hasTags) {
@@ -840,7 +867,12 @@ class ChatInputArea(
             val message = listOf(fileRefText, text)
                 .filter { it.isNotBlank() }
                 .joinToString(" ")
-            onSend(prefix + message)
+            val images = imageRefs.toList()
+            if (onSendWithImages != null) {
+                onSendWithImages.invoke(prefix + message, images)
+            } else {
+                onSend(prefix + message)
+            }
             textArea.text = ""
             manualFileRefs.clear()
             selectionFileRef = null

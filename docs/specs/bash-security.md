@@ -8,14 +8,15 @@
 
 ```kotlin
 object ToolApprovalPolicy {
-    private val approvalRequiredTools = setOf("Write", "Edit", "Bash", "Task")
+    private val approvalRequiredTools = setOf("Write", "Edit", "Bash")
 
     fun requiresApproval(toolName: String): Boolean = toolName in approvalRequiredTools
 }
 ```
 
 Bash 工具包含 `dangerous` 必填参数（bool 类型），由 LLM 判断当前命令是否危险。`dangerous=true`
-时始终弹窗二次确认，无视白名单。`dangerous=false` 时走正常审批流程：首次调用需审批，用户点击"允许此会话"
+时始终在 ToolCallCard 内二次确认，无视白名单。`dangerous=false`
+时走正常审批流程：首次调用需审批，用户点击"允许此会话"
 后同会话内后续调用信任放行。
 
 ### 审批流程
@@ -24,7 +25,7 @@ Bash 工具包含 `dangerous` 必填参数（bool 类型），由 LLM 判断当�
 工具的审批流程与普通工具一致，详见 [tools.md §六 审批机制](../agent/tools.md#六审批机制)。
 
 `dangerous=true` 时，ToolCallCard 仅展示"允许一次"/"拒绝"按钮（无"允许此会话"），始终二次确认。
-`dangerous=false` 时，首次调用展示全部按钮。`dangerous=true` 的命令即使已在白名单中也必须弹出确认。
+`dangerous=false` 时，首次调用展示全部按钮。`dangerous=true` 的命令即使已在白名单中也必须内嵌确认。
 
 ## 二、输出上限
 
@@ -55,38 +56,46 @@ val process = Runtime.getRuntime().exec(
 - 进程注册到 `session.runningProcesses`（MutableSet）
 - 用户点击停止按钮时，遍历 `runningProcesses` 逐个 `destroyForcibly()`
 
-## 四、超时与资源限制
+## 四、超时与挂起检测
 
-| 限制项  | 值                           | 说明                                                                |
-|------|-----------------------------|-------------------------------------------------------------------|
-| 超时   | 由 LLM 在 `timeout` 参数中指定（必填） | 0 = 不限                                                            |
-| 返回内容 | 200 行 / 4,000 字符（取较小者）      | 中段截断：保留头部 30 行 + 尾部 30 行，中间标注 `... (省略 N 行)`。Bash 不支持翻页（重新执行有副作用） |
-| 超时行为 | `process.destroyForcibly()` | 强制终止                                                              |
+> **timeout 参数不再用于强制杀进程。** 命令始终等待自然结束，只通过输出心跳检测挂起。
 
-### 超时实现
+| 概念       | 含义          | 行为                   |
+|----------|-------------|----------------------|
+| **慢**    | 进程还在跑，间歇有输出 | 继续等待，不限时长            |
+| **hang** | 进程存活但长时间无输出 | 检测到后杀进程，返回已收集输出 + 警告 |
+
+| 参数        | 值                       | 说明                                                        |
+|-----------|-------------------------|-----------------------------------------------------------|
+| `timeout` | LLM 指定（必填，秒）            | 用于计算挂起阈值：`max(60s, timeout × 1.5)`                        |
+| 挂起阈值      | max(60s, timeout × 1.5) | LLM 的预估时间至少给 1.5 倍余量，最短 60s 兜底                            |
+| 轮询间隔      | 2s                      | 主线程 `process.waitFor(2s)` 短间隔醒来检查心跳                       |
+| 返回内容      | 200 行 / 4,000 字符（取较小者）  | 中段截断：保留头部 30 行 + 尾部 30 行，中间标注省略行数                         |
+| 用户 Stop   | 随时生效                    | `cancel()` → 遍历 `runningProcesses` 逐个 `destroyForcibly()` |
+
+### 挂起检测实现
+
+两个 daemon 线程逐行读取 stdout/stderr，每读到一行更新 `lastHeartbeat`（`AtomicLong`）。主线程每 2s 轮询：
 
 ```kotlin
-val (stdout, stderr) = if (timeoutSec > 0) {
-    try {
-        val out = stdoutFuture.get(timeoutSec.toLong(), TimeUnit.SECONDS)
-        val err = stderrFuture.get(1, TimeUnit.SECONDS)
-        process.waitFor(1, TimeUnit.SECONDS)
-        if (process.isAlive) {
-            process.destroyForcibly()
-            return "超时: 命令执行超过 ${timeoutSec}s，已强制终止"
-        }
-        Pair(out, err)
-    } catch (e: TimeoutException) {
-        process.destroyForcibly()
-        return "超时: 命令执行超过 ${timeoutSec}s，已强制终止"
-    }
-} else {
-    // timeout=0: 无限等待
-    val out = stdoutFuture.get()  // 无超时
-    val err = stderrFuture.get()
-    process.waitFor()
-    Pair(out, err)
+// 两个 daemon 线程逐行读，每行更新心跳
+stdoutRunner: Thread → process.inputStream → readLine() → stdout.add(line)+heartbeat.set(now)
+stderrRunner: Thread → process.errorStream → readLine() → stderr.add(line)+heartbeat.set(now)
+
+// 主线程：2s 间隔轮询，区分"慢"和"hang"
+var hung = false
+while (!hung) {
+    if (process.waitFor(2, SECONDS)) break   // 正常退出
+    if (!process.isAlive) break              // 进程已死
+    val idle = now() - heartbeat.get()
+    if (idle > hangThresholdMs) hung = true  // 判定挂起
 }
+
+if (hung) {
+    process.destroyForcibly()
+    return "⚠ 命令可能已挂起（${hangThresholdMs / 1000}s 无输出）..." + 已收集输出
+}
+// 正常退出 → 返回完整输出 + 退出码
 ```
 
 ## 五、危险命令检测
@@ -100,7 +109,7 @@ val (stdout, stderr) = if (timeoutSec > 0) {
 - `chmod 777` —— 开放全部权限
 - 其他破坏性文件操作、生产环境数据修改等
 
-`dangerous=true` 时 ToolCallCard 始终弹窗二次确认，无视白名单，不提供"允许此会话"选项。
+`dangerous=true` 时 ToolCallCard 始终内嵌二次确认，无视白名单，不提供"允许此会话"选项。
 `dangerous=false` 时走正常审批流程（首次授权后同会话信任）。
 
 ## 六、已知安全边界

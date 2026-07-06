@@ -2,14 +2,18 @@ package com.aiassistant.ui.chat
 
 import com.aiassistant.ui.AppColors
 import com.aiassistant.ui.RoundedBorder
-import com.aiassistant.ui.toHtmlColor
 import java.awt.BorderLayout
 import java.awt.Color
+import java.awt.Component
 import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.Font
+import java.awt.Graphics
+import java.awt.Graphics2D
+import java.awt.RenderingHints
 import java.awt.Toolkit
 import java.awt.datatransfer.StringSelection
+import javax.swing.JComponent
 import javax.swing.*
 import javax.swing.text.StyleConstants
 import javax.swing.text.StyleContext
@@ -44,41 +48,68 @@ object ChatBubbleRenderer {
     }
 
     private fun renderUserBubble(msg: ChatMessage): JPanel {
-        val wrapper = JPanel().apply {
-            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+        // 外层 FlowLayout.RIGHT 强制右对齐，不依赖 BoxLayout alignmentX
+        val outer = JPanel(FlowLayout(FlowLayout.RIGHT, 0, 0)).apply {
+            isOpaque = false
             putClientProperty("bubbleType", "user")
+        }
+        val content = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
             isOpaque = false
         }
-        // ponytail: FlowLayout 右对齐，高度仅由内容决定，避免 BorderLayout.EAST 纵向拉伸
-        val textRow = JPanel(FlowLayout(FlowLayout.RIGHT, 0, 0)).apply {
+        // 圆角气泡容器 — 自定义 painting 实现圆角填充背景
+        val bubble = JPanel().apply {
             isOpaque = false
         }
+        bubble.layout = FlowLayout(FlowLayout.LEFT, 0, 0)
         val text = JLabel(
-            "<html><body style='width:100%;max-width:480px;margin:0;padding:0'>${
+            "<html>${
                 escapeHtml(msg.content).replace("\n", "<br>")
-            }</body></html>"
+            }</html>"
         ).apply {
-            isOpaque = true; background = AppColors.userBubbleBg; font = font.deriveFont(14f)
+            isOpaque = false; font = font.deriveFont(14f)
             border = BorderFactory.createEmptyBorder(12, 12, 12, 12)
         }
-        textRow.add(text)
-        wrapper.add(textRow)
-        wrapper.add(renderTimestamp(msg))
-        return wrapper
+        bubble.add(text)
+        bubble.setUI(object : javax.swing.plaf.PanelUI() {
+            override fun paint(g: Graphics, c: JComponent) {
+                val g2 = g.create() as Graphics2D
+                g2.setRenderingHint(
+                    RenderingHints.KEY_ANTIALIASING,
+                    RenderingHints.VALUE_ANTIALIAS_ON
+                )
+                g2.color = AppColors.userBubbleBg
+                g2.fillRoundRect(0, 0, c.width - 1, c.height - 1, 24, 24)
+                g2.dispose()
+            }
+        })
+        content.add(bubble)
+        content.add(renderTimestamp(msg))
+        outer.add(content)
+        return capRowHeight(outer)
     }
 
     private fun renderAgentBubble(
         msg: ChatMessage,
         panelWidth: Int = 0
     ): JPanel {
+        // 外层 FlowLayout.LEFT 强制左对齐，不依赖 BoxLayout alignmentX
+        val outer = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
+            isOpaque = false
+            putClientProperty("bubbleType", "agent")
+        }
         // ponytail: BoxLayout.Y_AXIS 避免 BorderLayout.CENTER 纵向拉伸
         val wrapper = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            putClientProperty("bubbleType", "agent")
             isOpaque = true
             background = AppColors.cardBg
+            alignmentX = java.awt.Component.LEFT_ALIGNMENT
         }
-        val body = JPanel().apply { layout = BoxLayout(this, BoxLayout.Y_AXIS); isOpaque = false }
+        val body = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            isOpaque = false
+            alignmentX = java.awt.Component.LEFT_ALIGNMENT
+        }
 
         val blocks = parseMarkdown(msg.content)
         var i = 0
@@ -86,22 +117,21 @@ object ChatBubbleRenderer {
             val block = blocks[i]
             when (block) {
                 is MarkdownBlock.Paragraph -> {
-                    val rendered = block.text
+                    val rendered = escapeHtml(block.text)
                         .replace(Regex("`([^`]+)`")) {
-                            val codeBgHex = AppColors.inlineCodeBg.toHtmlColor()
-                            val codeBorderHex = AppColors.inlineCodeBorder.toHtmlColor()
-                            "<code style='font-family:JetBrains Mono,monospace;font-size:13px;background:${codeBgHex};padding:1px 6px;border-radius:3px;border:1px solid ${codeBorderHex}'>${it.groupValues[1]}</code>"
+                            "<code>${it.groupValues[1]}</code>"
                         }
                     body.add(
                         JLabel(
-                            "<html><body style='width:100%;max-width:520px;margin:0;padding:0'>${
-                                escapeHtml(
-                                    rendered
-                                ).replace("\n", "<br>")
-                            }</body></html>"
+                            "<html>${
+                                rendered.replace("\n", "<br>")
+                            }</html>"
                         ).apply {
                             font = font.deriveFont(12f)
                             border = BorderFactory.createEmptyBorder(1, 0, 1, 0)
+                            horizontalAlignment = SwingConstants.LEFT
+                            alignmentX = java.awt.Component.LEFT_ALIGNMENT
+                            maximumSize = Dimension(preferredSize.width, preferredSize.height)
                         })
                     i++
                 }
@@ -179,12 +209,20 @@ object ChatBubbleRenderer {
                 }
 
                 is MarkdownBlock.Header -> {
-                    body.add(JLabel("<html><b style='font-size:14px'>${escapeHtml(block.text)}</b></html>"))
+                    body.add(JLabel("<html><b style='font-size:14px'>${escapeHtml(block.text)}</b></html>").apply {
+                        horizontalAlignment = SwingConstants.LEFT
+                        alignmentX = java.awt.Component.LEFT_ALIGNMENT
+                        maximumSize = Dimension(preferredSize.width, preferredSize.height)
+                    })
                     i++
                 }
 
                 is MarkdownBlock.ListItem -> {
-                    body.add(JLabel("<html>&nbsp;&nbsp;• ${escapeHtml(block.text)}</html>"))
+                    body.add(JLabel("<html>&nbsp;&nbsp;• ${escapeHtml(block.text)}</html>").apply {
+                        horizontalAlignment = SwingConstants.LEFT
+                        alignmentX = java.awt.Component.LEFT_ALIGNMENT
+                        maximumSize = Dimension(preferredSize.width, preferredSize.height)
+                    })
                     i++
                 }
 
@@ -216,12 +254,16 @@ object ChatBubbleRenderer {
         wrapper.add(bottomRow)
         // 对齐 docs/ui/components.md：padding=12px + left accent bar 3px（accent bar 紧贴左边缘）
         wrapper.border = BorderFactory.createCompoundBorder(
-            BorderFactory.createMatteBorder(0, 3, 0, 0, AppColors.primary),
-            BorderFactory.createEmptyBorder(12, 12, 12, 12)
+            RoundedBorder(12, AppColors.border),
+            BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(0, 3, 0, 0, AppColors.primary),
+                BorderFactory.createEmptyBorder(12, 12, 12, 12)
+            )
         )
         wrapper.isOpaque = true
         wrapper.background = AppColors.cardBg
-        return wrapper
+        outer.add(wrapper)
+        return capRowHeight(outer)
     }
 
     private fun renderErrorBubble(msg: ChatMessage, onRetry: (() -> Unit)?): JPanel {
@@ -232,11 +274,11 @@ object ChatBubbleRenderer {
         }
         wrapper.add(
             JLabel(
-                "<html><body style='width:100%;max-width:480px;margin:0;padding:0'>❌ ${
+                "<html>❌ ${
                     escapeHtml(
                         msg.content
                     )
-                }</body></html>"
+                }</html>"
             ).apply {
                 isOpaque = true
                 background = AppColors.errorBg
@@ -313,60 +355,19 @@ object ChatBubbleRenderer {
         }
     }
 
-    // 流式渲染防抖状态：避免每个 token 都触发完整 UI 重建
-    private var streamingPanel: JPanel? = null
-    private var streamingRebuildTimer: javax.swing.Timer? = null
-    private var streamingPendingText: String = ""
-
     /**
-     * 流式 Markdown 渲染 — 30ms 防抖批量合并 token，减少闪烁。
+     * 流式 Markdown 渲染。
      *
      * 对齐 docs/ui/chat.md §二 "流式气泡"：末尾闪烁光标 ▍ (#3B82F6, 500ms blink)。
      */
-    fun renderStreaming(markdownText: String): JComponent {
-        streamingPendingText = markdownText
-
-        // 取消之前的延迟重建定时器
-        streamingRebuildTimer?.stop()
-
-        if (streamingPanel == null) {
-            // 首次调用：立即创建完整组件
-            streamingPanel = buildStreamingPanel(markdownText)
-        }
-
-        // 30ms 防抖：批量合并连续 token 后再一次性重建 UI
-        streamingRebuildTimer = javax.swing.Timer(30) {
-            val panel = streamingPanel ?: return@Timer
-            panel.removeAll()
-            val rendered = render(
-                ChatMessage(
-                    type = ChatMessage.Type.AGENT_TEXT,
-                    content = streamingPendingText,
-                    timestamp = java.time.Instant.now()
-                )
-            )
-            if (rendered is JPanel) {
-                rendered.components.forEach { panel.add(it) }
-            }
-            // 重新添加闪烁光标
-            val cursor = JLabel("▍").apply {
-                foreground = AppColors.primary
-                font = font.deriveFont(13f)
-                isOpaque = false
-            }
-            panel.add(cursor)
-            panel.revalidate()
-            panel.repaint()
-        }.apply { isRepeats = false; start() }
-
-        return streamingPanel!!
-    }
+    fun renderStreaming(markdownText: String): JComponent = buildStreamingPanel(markdownText)
 
     /** 构建带闪烁光标的流式气泡面板（首次调用时创建） */
     private fun buildStreamingPanel(markdownText: String): JPanel {
         val bubble = JPanel().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
             isOpaque = false
+            putClientProperty("bubbleType", "agent")
         }
         val rendered = render(
             ChatMessage(
@@ -375,9 +376,7 @@ object ChatBubbleRenderer {
                 timestamp = java.time.Instant.now()
             )
         )
-        if (rendered is JPanel) {
-            rendered.components.forEach { bubble.add(it) }
-        }
+        bubble.add(rendered)
         val cursor = JLabel("▍").apply {
             foreground = AppColors.primary
             font = font.deriveFont(13f)
@@ -391,7 +390,7 @@ object ChatBubbleRenderer {
                 if (!bubble.isDisplayable) blinkTimer.stop()
             }
         }
-        return bubble
+        return capRowHeight(bubble)
     }
 
     /**
@@ -399,6 +398,11 @@ object ChatBubbleRenderer {
      * 默认折叠，">" 箭头可点击展开/折叠，显示完整思考内容。
      */
     fun renderThinking(reasoning: String, durationMs: Long): JPanel {
+        val outer = JPanel(BorderLayout()).apply {
+            isOpaque = false
+            putClientProperty("bubbleType", "agent")  // 标记为 agent 类型，参与宽度约束
+            putClientProperty("fullWidth", true)
+        }
         val block = JPanel(BorderLayout()).apply {
             isOpaque = true
             background = AppColors.thinkingBg
@@ -442,21 +446,40 @@ object ChatBubbleRenderer {
             verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED
             horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_NEVER
             border = BorderFactory.createEmptyBorder()
+            preferredSize = Dimension(0, minOf(body.preferredSize.height, 140))
+            maximumSize = Dimension(Int.MAX_VALUE, 140)
             isVisible = false
-            maximumSize = Dimension(Int.MAX_VALUE, 160)
         }
-        header.addMouseListener(object : java.awt.event.MouseAdapter() {
+        val toggleThinking = object : java.awt.event.MouseAdapter() {
             override fun mouseClicked(e: java.awt.event.MouseEvent) {
                 val expand = !body.isVisible
                 body.isVisible = expand
                 bodyScroll.isVisible = expand
                 arrowLabel.text = if (expand) "▾" else "▶"
+                capRowHeight(outer)
                 block.revalidate()
                 block.repaint()
             }
-        })
+        }
+        addMouseListenerRecursively(header, toggleThinking)
         block.add(header, BorderLayout.NORTH); block.add(bodyScroll, BorderLayout.CENTER)
-        return block
+        outer.add(block, BorderLayout.CENTER)
+        return capRowHeight(outer)
+    }
+
+    private fun addMouseListenerRecursively(
+        component: Component,
+        listener: java.awt.event.MouseListener
+    ) {
+        component.addMouseListener(listener)
+        if (component is java.awt.Container) {
+            component.components.forEach { addMouseListenerRecursively(it, listener) }
+        }
+    }
+
+    private fun <T : JComponent> capRowHeight(row: T): T {
+        row.maximumSize = Dimension(Int.MAX_VALUE, row.preferredSize.height)
+        return row
     }
 
     /**
@@ -525,13 +548,25 @@ object ChatBubbleRenderer {
             when {
                 line.startsWith("```") -> {
                     val buf = StringBuilder()
+                    val fence = line
                     i++
                     while (i < lines.size && !lines[i].startsWith("```")) {
                         if (buf.isNotEmpty()) buf.append("\n")
                         buf.append(lines[i]); i++
                     }
-                    i++
-                    blocks.add(MarkdownBlock.CodeBlock(buf.toString()))
+                    if (i < lines.size) {
+                        i++
+                        blocks.add(MarkdownBlock.CodeBlock(buf.toString()))
+                    } else {
+                        blocks.add(
+                            MarkdownBlock.Paragraph(
+                                listOf(
+                                    fence,
+                                    buf.toString()
+                                ).filter { it.isNotEmpty() }.joinToString("\n")
+                            )
+                        )
+                    }
                 }
 
                 line.startsWith("#") -> {

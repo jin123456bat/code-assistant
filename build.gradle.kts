@@ -39,10 +39,11 @@ dependencies {
 }
 
 intellijPlatform {
+    autoReload = true
+    buildSearchableOptions = false
     pluginConfiguration {
         ideaVersion {
             sinceBuild = "243"
-            untilBuild = ""
         }
     }
 }

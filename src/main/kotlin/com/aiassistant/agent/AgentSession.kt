@@ -7,7 +7,8 @@ class AgentSession(
     val id: String = UUID.randomUUID().toString(),
     var title: String = "新会话",
     /** 父 Session ID，子 Agent 独立持久化时通过此字段关联父 Session（对齐 docs/agent/multi-agent.md §二） */
-    var parentId: String? = null
+    var parentId: String? = null,
+    val createdAt: Instant = Instant.now()
 ) {
     /** 是否为子 Agent 会话（parentId 非空时即为子 Agent） */
     val isSubAgent: Boolean get() = parentId != null
@@ -16,7 +17,6 @@ class AgentSession(
         IDLE, PROCESSING, AWAITING_APPROVAL, EXECUTING, PAUSED, CANCELLED, ERROR
     }
 
-    val createdAt: Instant = Instant.now()
     var updatedAt: Instant = createdAt
 
     var state: State = State.IDLE

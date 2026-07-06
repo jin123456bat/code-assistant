@@ -3,12 +3,13 @@ package com.aiassistant.ui.page
 import com.aiassistant.mcp.McpManager
 import com.aiassistant.ui.AppColors
 import com.aiassistant.ui.toHtmlColor
+import com.intellij.openapi.Disposable
 import com.intellij.openapi.project.Project
 import java.awt.BorderLayout
 import java.awt.FlowLayout
 import javax.swing.*
 
-class McpPage(project: Project) : JPanel(BorderLayout()) {
+class McpPage(project: Project) : JPanel(BorderLayout()), Disposable {
 
     private val manager = McpManager(project)
     private val listContainer = JPanel().apply { layout = BoxLayout(this, BoxLayout.Y_AXIS) }
@@ -16,6 +17,7 @@ class McpPage(project: Project) : JPanel(BorderLayout()) {
     private val nameField = JTextField(15)
     private val cmdField = JTextField(25)
     private var editingServerId: String? = null
+    private var disposed = false
 
     init {
         val header = JPanel(BorderLayout())
@@ -269,4 +271,10 @@ class McpPage(project: Project) : JPanel(BorderLayout()) {
             McpManager.State.ERROR, McpManager.State.CRASHED, McpManager.State.INIT_ERROR -> "🔄 重连"
             else -> "▶ 启动"
         }
+
+    override fun dispose() {
+        if (disposed) return
+        disposed = true
+        manager.dispose()
+    }
 }

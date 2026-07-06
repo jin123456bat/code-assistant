@@ -62,6 +62,10 @@ class MultiAgentManager(private val project: Project) {
             AskUserQuestion::class.java,
             Symbol::class.java
         )
+
+        /** 将并发数设置转换为 Semaphore permits 数（0=不限→Int.MAX_VALUE） */
+        fun semaphorePermitsForConcurrency(concurrency: Int): Int =
+            if (concurrency <= 0) Int.MAX_VALUE else concurrency
     }
 
     /**
@@ -121,8 +125,7 @@ class MultiAgentManager(private val project: Project) {
      */
     private fun createSemaphore(): Semaphore {
         val configured = com.aiassistant.AppSettingsService.getInstance().getAgentMaxConcurrency()
-        val permits = if (configured > 0) configured else DEFAULT_MAX_CONCURRENT
-        return Semaphore(permits, true)
+        return Semaphore(semaphorePermitsForConcurrency(configured), true)
     }
 
     @Volatile
@@ -615,6 +618,7 @@ class MultiAgentManager(private val project: Project) {
         get() {
             val configured =
                 com.aiassistant.AppSettingsService.getInstance().getAgentMaxConcurrency()
-            return if (configured > 0) configured else DEFAULT_MAX_CONCURRENT
+            return semaphorePermitsForConcurrency(configured)
         }
+
 }

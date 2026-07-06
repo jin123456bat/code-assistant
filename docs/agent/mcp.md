@@ -74,7 +74,7 @@ INIT_ERROR：初始化握手超时（退避重试 3 分钟后仍失败），需�
 
 ### 工具审批
 
-对齐 Claude Code：MCP 工具按 **Server 粒度**审批。首次调用某 Server 的任意工具时弹窗确认整个
+对齐 Claude Code：MCP 工具按 **Server 粒度**审批。首次调用某 Server 的任意工具时在 ToolCallCard 内确认整个
 Server，通过后该 Server 所有工具自动放行。详见 [mcp-permissions.md](../specs/mcp-permissions.md)。
 
 ### 心跳与存活检测

@@ -64,7 +64,7 @@
 │                                                                        │
 │  SessionManager ──uses──→ SessionStore                                │
 │       │                       │                                       │
-│  CRUD + 标题生成          Jackson → .tmp → ATOMIC_MOVE + FileLock     │
+│  CRUD + 标题生成          Gson → .tmp → ATOMIC_MOVE + FileLock        │
 │  + Token 聚合             sessions/<uuid>.json                        │
 │                           sessions/index.json                         │
 └───────────────────────────────────────────────────────────────────────┘
@@ -213,7 +213,7 @@ ChatViewModel.sendMessage(text, attachments, images) (EDT → PooledThread)
         │     │           └── toolResult 追加到 params.messages
         │     │
         │     ├── stop_reason = "end_turn" → break
-        │     ├── stop_reason = "max_tokens" → continueStreak++ → 自动续写（≤5 次）
+        │     ├── stop_reason = "max_tokens" → continueStreak++ → 自动续写（不限次数）
         │     └── stop_reason ≠ "end_turn" → turn++ → 继续循环
         │
         └── SessionStore.save(session)               // 每轮结束持久化

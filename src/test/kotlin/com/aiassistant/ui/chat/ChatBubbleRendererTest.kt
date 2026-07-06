@@ -6,8 +6,15 @@ import kotlin.test.assertIs
 import java.awt.Container
 import javax.swing.JButton
 import javax.swing.JLabel
+import javax.swing.JScrollPane
+import javax.swing.JTextPane
+import javax.swing.border.Border
+import javax.swing.border.CompoundBorder
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import kotlin.test.assertNotSame
 
 class ChatBubbleRendererTest {
 
@@ -135,6 +142,100 @@ class ChatBubbleRendererTest {
     }
 
     @Test
+    fun `tool card shows child token cost after it is set`() {
+        val card = ToolCallCard(
+            toolName = "SubAgent",
+            params = "task=review",
+            initialState = ToolCallCard.ToolCallState.DONE
+        )
+
+        card.setChildTokenCost(1000, 2000)
+
+        val labels = labelsIn(card).mapNotNull { it.text }
+        assertTrue(labels.any { it.contains("子任务 Token: 1000 in / 2000 out") })
+    }
+
+    @Test
+    fun `tool cards do not allow box layout to stretch their height`() {
+        listOf(
+            ToolCallCard("glob", "pattern=**/*.kt", ToolCallCard.ToolCallState.AWAITING_APPROVAL),
+            ToolCallCard("bash", "command=./gradlew test", ToolCallCard.ToolCallState.PENDING),
+            ToolCallCard("bash", "command=./gradlew test", ToolCallCard.ToolCallState.EXECUTING)
+        ).forEach { card ->
+            assertEquals(card.preferredSize.height, card.maximumSize.height)
+        }
+    }
+
+    @Test
+    fun `tool card params avoid swing html css`() {
+        val card =
+            ToolCallCard("glob", "pattern=**/*.kt", ToolCallCard.ToolCallState.AWAITING_APPROVAL)
+
+        assertTrue(labelsIn(card).any { it.text == "pattern=**/*.kt" })
+        assertTrue(labelsIn(card).none { it.text?.contains("style=") == true })
+    }
+
+    @Test
+    fun `tool card stops rotation timer when removed`() {
+        val card =
+            ToolCallCard("bash", "command=./gradlew test", ToolCallCard.ToolCallState.EXECUTING)
+        val timer = ToolCallCard::class.java.getDeclaredField("rotationTimer").let { field ->
+            field.isAccessible = true
+            field.get(card) as javax.swing.Timer
+        }
+
+        assertTrue(timer.isRunning)
+        card.removeNotify()
+
+        assertFalse(timer.isRunning)
+    }
+
+    @Test
+    fun `approval message renders inline instead of result scroll pane`() {
+        val card = ToolCallCard(
+            "glob",
+            "pattern=**/*.kt",
+            ToolCallCard.ToolCallState.AWAITING_APPROVAL,
+            approvalActions = ToolCallCard.ApprovalActions(
+                dangerous = false,
+                onAllowOnce = {},
+                onAllowSession = {},
+                onReject = {}
+            )
+        )
+
+        card.setState(
+            ToolCallCard.ToolCallState.AWAITING_APPROVAL,
+            "首次使用 glob 工具，需要你的授权"
+        )
+
+        assertContains(labelsIn(card).mapNotNull { it.text }.joinToString("\n"), "首次使用 glob")
+        assertTrue(scrollPanesIn(card).none { it.isVisible })
+    }
+
+    @Test
+    fun `empty pending tool card does not show an empty expanded body`() {
+        val card = ToolCallCard("bash", "", ToolCallCard.ToolCallState.PENDING)
+        val collapsedHeight = card.preferredSize.height
+        val header = card.getComponent(0)
+
+        header.dispatchEvent(
+            java.awt.event.MouseEvent(
+                header,
+                java.awt.event.MouseEvent.MOUSE_CLICKED,
+                System.currentTimeMillis(),
+                0,
+                1,
+                1,
+                1,
+                false
+            )
+        )
+
+        assertEquals(collapsedHeight, card.preferredSize.height)
+    }
+
+    @Test
     fun `error copy button has an action`() {
         val component = ChatBubbleRenderer.render(
             ChatMessage(
@@ -178,11 +279,172 @@ class ChatBubbleRendererTest {
         assertFalse("👎" in buttonTexts)
     }
 
+    @Test
+    fun `agent bubble exposes its row type on the outer component`() {
+        val component = ChatBubbleRenderer.render(
+            ChatMessage(type = ChatMessage.Type.AGENT_TEXT, content = "done")
+        )
+
+        assertEquals("agent", component.getClientProperty("bubbleType"))
+    }
+
+    @Test
+    fun `agent bubble keeps text left aligned inside a rounded card`() {
+        val component = ChatBubbleRenderer.render(
+            ChatMessage(type = ChatMessage.Type.AGENT_TEXT, content = "hello")
+        )
+
+        val card = panelsIn(component).firstOrNull { panel ->
+            panel.background == com.aiassistant.ui.AppColors.cardBg &&
+                    borderContainsRoundedBorder(panel.border)
+        }
+
+        assertNotNull(card)
+        labelsIn(component)
+            .filter { it.text?.contains("hello") == true }
+            .forEach { label ->
+                assertEquals(java.awt.Component.LEFT_ALIGNMENT, label.alignmentX)
+            }
+    }
+
+    @Test
+    fun `agent text labels keep their preferred width instead of centering in stretched rows`() {
+        val component = ChatBubbleRenderer.render(
+            ChatMessage(type = ChatMessage.Type.AGENT_TEXT, content = "hello\n- world")
+        )
+
+        labelsIn(component)
+            .filter { it.text?.contains("hello") == true || it.text?.contains("world") == true }
+            .forEach { label ->
+                assertEquals(javax.swing.SwingConstants.LEFT, label.horizontalAlignment)
+                assertEquals(label.preferredSize.width, label.maximumSize.width)
+            }
+    }
+
+    @Test
+    fun `thinking block marks itself as full width`() {
+        val component = ChatBubbleRenderer.renderThinking("thinking", 300)
+
+        assertEquals(true, component.getClientProperty("fullWidth"))
+    }
+
+    @Test
+    fun `chat rows do not allow box layout to stretch their height`() {
+        val rows = listOf(
+            ChatBubbleRenderer.render(
+                ChatMessage(
+                    type = ChatMessage.Type.USER_TEXT,
+                    content = "hello"
+                )
+            ),
+            ChatBubbleRenderer.render(
+                ChatMessage(
+                    type = ChatMessage.Type.AGENT_TEXT,
+                    content = "hello"
+                )
+            ),
+            ChatBubbleRenderer.renderThinking("thinking", 300)
+        )
+
+        rows.forEach { row ->
+            assertEquals(row.preferredSize.height, row.maximumSize.height)
+        }
+    }
+
+    @Test
+    fun `streaming bubble does not reuse the previous component`() {
+        val first = ChatBubbleRenderer.renderStreaming("first")
+        val second = ChatBubbleRenderer.renderStreaming("second")
+
+        assertNotSame(first, second)
+    }
+
+    @Test
+    fun `thinking expanded body keeps prototype height cap`() {
+        val component = ChatBubbleRenderer.renderThinking("line\n".repeat(80), 300)
+        val collapsedHeight = component.maximumSize.height
+        val thinkingLabel = labelsIn(component).first { it.text == "💭 思考过程" }
+        thinkingLabel.dispatchEvent(
+            java.awt.event.MouseEvent(
+                thinkingLabel,
+                java.awt.event.MouseEvent.MOUSE_CLICKED,
+                System.currentTimeMillis(),
+                0,
+                1,
+                1,
+                1,
+                false
+            )
+        )
+
+        val visibleScroll = scrollPanesIn(component).single { it.isVisible }
+        assertTrue(visibleScroll.preferredSize.height <= 140)
+        assertTrue(component.maximumSize.height > collapsedHeight)
+    }
+
+    @Test
+    fun `inline code renders as html code element`() {
+        val component = ChatBubbleRenderer.render(
+            ChatMessage(type = ChatMessage.Type.AGENT_TEXT, content = "Use `foo()` now")
+        )
+
+        val labelText = labelsIn(component).mapNotNull { it.text }.joinToString("\n")
+        assertContains(labelText, "<code")
+        assertFalse("&lt;code" in labelText)
+    }
+
+    @Test
+    fun `unclosed code fence stays as paragraph while streaming`() {
+        val component = ChatBubbleRenderer.render(
+            ChatMessage(type = ChatMessage.Type.AGENT_TEXT, content = "```kotlin\nval x = 1")
+        )
+
+        assertTrue(textPanesIn(component).isEmpty())
+        assertContains(labelsIn(component).mapNotNull { it.text }.joinToString("\n"), "```kotlin")
+    }
+
     private fun labelsIn(container: Container): List<JLabel> =
         container.components.flatMap { child ->
             when (child) {
                 is JLabel -> listOf(child)
                 is Container -> labelsIn(child)
+                else -> emptyList()
+            }
+        }
+
+    private fun panelsIn(container: Container): List<javax.swing.JPanel> =
+        container.components.flatMap { child ->
+            when (child) {
+                is javax.swing.JPanel -> listOf(child) + panelsIn(child)
+                is Container -> panelsIn(child)
+                else -> emptyList()
+            }
+        }
+
+    private fun borderContainsRoundedBorder(border: Border?): Boolean =
+        when (border) {
+            null -> false
+            is com.aiassistant.ui.RoundedBorder -> true
+            is CompoundBorder -> borderContainsRoundedBorder(border.outsideBorder) ||
+                    borderContainsRoundedBorder(border.insideBorder)
+
+            else -> false
+        }
+
+    private fun textPanesIn(container: Container): List<JTextPane> =
+        container.components.flatMap { child ->
+            when (child) {
+                is JTextPane -> listOf(child)
+                is Container -> textPanesIn(child)
+                else -> emptyList()
+            }
+        }
+
+    private fun scrollPanesIn(container: Container): List<JScrollPane> =
+        container.components.flatMap { child ->
+            when (child) {
+                is JScrollPane -> listOf(child)
+                is Container -> scrollPanesIn(child)
                 else -> emptyList()
             }
         }

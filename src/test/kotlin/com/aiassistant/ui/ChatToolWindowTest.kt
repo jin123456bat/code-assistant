@@ -20,4 +20,19 @@ class ChatToolWindowTest {
         assertFalse(source.contains("pages.add(skillsPage"))
         assertFalse(source.contains("pages.add(settingsPage"))
     }
+
+    @Test
+    fun `token usage page wires row selection to chat restore`() {
+        val source = java.io.File("src/main/kotlin/com/aiassistant/ui/ChatToolWindow.kt").readText()
+
+        kotlin.test.assertTrue(source.contains("onSessionSelected = { id -> replaceChatPage(id) }"))
+    }
+
+    @Test
+    fun `tool window content owns disposable panel`() {
+        val source =
+            java.io.File("src/main/kotlin/com/aiassistant/ui/ChatToolWindowFactory.kt").readText()
+
+        kotlin.test.assertTrue(source.contains("content.setDisposer(panel)"))
+    }
 }

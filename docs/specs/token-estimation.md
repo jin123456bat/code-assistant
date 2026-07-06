@@ -17,7 +17,7 @@ fun estimateTokens(text: String): Int {
     val asciiOnly = text.count { it.code <= 127 }
     val nonAscii = text.length - asciiOnly
     // 英文/代码 ~4 字节/token，中文 ~0.67 token/字符（即 1.5 字符/token）
-    return max(bytes / 4, asciiOnly / 4 + (nonAscii * 3) / 2)
+    return maxOf(1, bytes / 4, asciiOnly / 4 + (nonAscii * 3) / 2)
 }
 ```
 

@@ -119,17 +119,18 @@ while (turn < maxTurns && !cancelled):
 |----------|-----------------------------------------------------------------------|
 | 不持久化     | "继续"消息不持久化到 `session.messages`（避免污染会话历史），仅在当前 `params.messages` 中临时追加 |
 | 不增加 turn | 自动续写不增加 `turn` 计数，不计入 `maxTurns` 限制                                   |
-| 上限 5 次   | 最多连续续写 5 次，防止 LLM 陷入无限输出循环。`end_turn` 后 `continueStreak` 计数器重置        |
+| 上限       | 无次数上限，持续续写直到 LLM 返回 `end_turn`。`end_turn` 后 `continueStreak` 计数器重置    |
 | 生命周期     | 仅在当前会话生命周期内有效。重启 IDE 后不自动续写，被截断消息保持原样                                 |
 
 ## 四、/clear 和 /new
 
-`/clear` 和 `/new` 行为完全一致——创建全新会话。对齐 Claude Code 的 `/clear` 语义。
+`/clear` 和 `/new` 都会清空当前聊天上下文，但 session 生命周期不同；两者都保留审批信任，避免用户在同一项目内重复确认已信任的工具。
 
 **行为：**
 
-- 创建新 `AgentSession`（新 `session.id`），旧 session 保留在 Sessions 列表中
-- 新 session 的 `approvedTools` 为空（不继承旧 session 的审批白名单）
+- `/clear`：复用当前 `session.id`，清空 messages/plan/compactSummary/totalTokens 等上下文数据
+- `/new`：创建新的 `AgentSession`（新 `session.id`），旧 session 保留在 Sessions 列表中
+- `approvedTools`、`approvedMcpServers`、`firstToolUseDone` 会从旧 session 复制到新上下文，不清除审批信任
 - 旧 session 的 messages/plan/compactSummary/totalTokens 保持不变，后续可通过 Sessions 页面访问
 
 ## 五、Token 估算

@@ -9,7 +9,7 @@ import javax.swing.Timer
  *
  * 提供 Timing 枚举映射设计系统中所有动效参数：
  * - Toast 滑入 (300ms ease-out) / 滑出 (200ms ease-in)
- * - 审批弹窗出现 (200ms ease-out) / 消失 (150ms ease-in)
+ * - 审批操作出现 (200ms ease-out) / 消失 (150ms ease-in)
  * - 消息气泡出现 (150ms ease-out)
  * - 工具卡片展开/折叠 (200ms ease-out)
  * - hover 高亮 (100ms ease-out)
@@ -43,10 +43,10 @@ object AppAnimations {
         /** Toast 滑出 - 200ms ease-in */
         TOAST_SLIDE_OUT(200, EASE_IN),
 
-        /** 审批弹窗出现 - 200ms ease-out */
+        /** 审批操作出现 - 200ms ease-out */
         APPROVAL_APPEAR(200, EASE_OUT),
 
-        /** 审批弹窗消失 - 150ms ease-in */
+        /** 审批操作消失 - 150ms ease-in */
         APPROVAL_DISAPPEAR(150, EASE_IN),
 
         /** 消息气泡出现 - 150ms ease-out */

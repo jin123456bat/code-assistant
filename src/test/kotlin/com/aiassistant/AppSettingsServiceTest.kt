@@ -21,6 +21,7 @@ class AppSettingsServiceTest {
     @Test
     fun `Agent 并发上限允许 0 表示不限`() {
         assertEquals(0, AppSettingsService.normalizeAgentMaxConcurrency(0))
+        assertEquals(10, AppSettingsService.normalizeAgentMaxConcurrency(99))
     }
 
     @Test

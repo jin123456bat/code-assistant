@@ -214,4 +214,5 @@ Message:
 - **不做自动清理**：自动清理可能误删有价值的日志，导致无法恢复/回溯问题。系统不替用户做删除决定。
 - **手动批量删除**：Sessions 页面提供 `[全选]` + `[🗑 删除选中]` 按钮，对应
   `SessionManager.deleteSessions(ids)` / `SessionStore.deleteAll(sessionIds)`
-- **`/clear` 创建新 session**：旧 session 保留在 Sessions 列表中，新 session 干净启动
+- **`/clear` 清空当前 session 上下文**：复用当前 `session.id`，保留审批信任；`/new` 才创建新 session
+  并把旧 session 保留在 Sessions 列表中

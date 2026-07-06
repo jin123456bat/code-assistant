@@ -59,20 +59,20 @@ padding=12px
 底部: 时间戳 + token 消耗 Caption
 ```
 
-**流式渲染策略：** 流式输出时文本先追加到字符串缓冲，完整 Block 闭合后通过 `parseMarkdown()` 解析，
-渲染为对应的 Swing 组件（段落→JLabel，代码块→JTextArea）。未闭合 Markdown 块（如未配对的 ```）
-缓存等待，闭合后再渲染。`MessageAccumulator` 自动累积完整 Message 用于持久化。
+**流式渲染策略：** 流式输出时文本先追加到字符串缓冲，通过 `parseMarkdown()` 解析为对应的 Swing
+组件（段落→JLabel，代码块→JTextPane/JTextArea）。未闭合 Markdown 块（如未配对的 ```）先按普通段落显示，
+避免流式过程中提前渲染成完整代码块。`MessageAccumulator` 自动累积完整 Message 用于持久化。
 
 **代码块渲染：** 不真正 inline 嵌入。Markdown 文本拆分为"文本段 + 代码块 + 文本段"序列，每段独立组件，包裹在
-BoxLayout.Y_AXIS 的 BubblePanel 中。代码块使用 `JTextArea`（只读模式，JetBrains Mono 等宽字体），
-包裹在 `JScrollPane` 中。无语法高亮，无语言前缀映射。
+BoxLayout.Y_AXIS 的 BubblePanel 中。普通代码块使用 `JTextPane + StyledDocument` 做 Kotlin 语法高亮，
+窄面板连续代码块使用只读 `JTextArea` 纵向堆叠，外层包裹在 `JScrollPane` 中。
 
 ```
 ┌─────────────────────────────────────────┐
 │ 好的，先读取 UserService.kt...          │ ← 普通段落
 │                                         │
 │ ┌─────────────────────────────────┐     │
-│ │ fun findById(id: Long): User?  │     │ ← 代码块 (JTextArea)
+│ │ fun findById(id: Long): User?  │     │ ← 代码块 (JTextPane/JTextArea)
 │ │     return repo.findById(id)   │     │   等宽字体, 只读, block-level
 │ └─────────────────────────────────┘     │
 │                                         │
@@ -86,15 +86,17 @@ BoxLayout.Y_AXIS 的 BubblePanel 中。代码块使用 `JTextArea`（只读模�
 
 - 与 Agent 气泡样式相同
 - 末尾闪烁光标 ▍ (`#3B82F6`, 500ms blink)
-- 每个 token 到达后追加到字符串缓冲，完整 Block 闭合后通过 `parseMarkdown()` 解析为 JLabel/JTextArea
+- 每个 token 到达后追加到字符串缓冲，完整 Block 闭合后通过 `parseMarkdown()` 解析为
+  JLabel/JTextPane/JTextArea
   组件
-- 未闭合代码块 → 缓存等待
+- 未闭合代码块 → 按普通段落显示，避免流式输出中提前渲染成完整代码块
 
 ### 错误气泡
 
 API 调用失败或网络中断时，ChatPage 同时展示两层反馈：
 
 - 页面顶部错误横幅（banner）：持续可见，点击关闭。详见 [横幅](#十toast--横幅)。
+- 消息列表内错误气泡：保留失败上下文和重试入口；恢复旧会话或新建会话时会清理瞬态错误展示。
 
 ### 系统消息
 
@@ -120,6 +122,7 @@ DeepSeek V4 在流式响应中会先输出 `reasoning_content`（思考过程）
 - 无 tool call 时：思考过程在前，回复文本在后
 - 有 tool call 时：思考过程在前，tool call 在后（思考决定调用哪个工具）
 - 默认折叠，用户可点击展开查看完整推理
+- 展开内容区最大高度 140px，超过后在块内滚动
 - 文字颜色：亮色 `#92400E`，暗色 `#FBBF24`；背景：亮色 `#FFF8F0`，暗色 `#422006`
 - 思考内容**不持久化**到 Session JSON（节省存储，仅回复文本+tool calls 持久化）
 

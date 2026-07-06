@@ -235,7 +235,7 @@ if (lastReadStamp != null && lastReadStamp != currentStamp)
 - Shell: `/bin/bash -c <command>`
 - 工作目录: `workDir` 参数或 `project.basePath`
 - 输出截断及返回值格式详见 [tools.md §四 工具返回截断策略](../agent/tools.md#四工具返回截断策略)
-- 超时后强制 `destroyForcibly()`
+- 超时用于挂起检测阈值（`max(60s, timeout × 1.5)`），不再用于强制杀进程
 
 ### 返回值格式
 
@@ -388,12 +388,14 @@ val regex = try {
 
 ### 当前状态
 
-**占位实现**，始终返回空诊断：
+`readLints` 通过 IntelliJ `DaemonCodeAnalyzerImpl.getHighlights()` 读取 PSI/Document 对应文件的
+warning/error 级别诊断，按 severity 排序后最多返回 50 条。若文件不在 VFS、PSI 或 Document
+不可用，则返回 0 诊断并说明原因：
 
 ```
 文件: {path}
 0 个错误, 0 个警告, 0 个提示
-(基于 IDE inspection 提供诊断信息)
+(文件未在 VFS 索引中 / PSI 文件不可用 / 文档不可用)
 ```
 
 ## 九、Agent — 派生子 Agent

@@ -261,7 +261,7 @@ ChatPage extends JPanel
 │
 └── 组件树:
     ChatPage (BorderLayout)
-      ├── NORTH: 标题行
+      ├── NORTH: 标题行（标题 + 新建会话）+ transient banner + PlanCard
       ├── CENTER: JScrollPane
       │         └── messageContainer (BoxLayout.Y_AXIS)
       └── SOUTH: ChatInputArea

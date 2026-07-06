@@ -34,15 +34,21 @@ class ChatViewModelSlashCommandTest {
     }
 
     @Test
-    fun `clear and new session preserve approved mcp servers`() {
+    fun `clear and new session preserve approval trust`() {
         val viewModel = ChatViewModel(projectAt(createTempDirectory().toString()))
+        viewModel.session.approvedTools.add("Read")
         viewModel.session.approvedMcpServers.add("github")
+        viewModel.session.firstToolUseDone.add("Read")
 
         viewModel.clearSession()
+        assertEquals(setOf("Read"), viewModel.session.approvedTools)
         assertEquals(setOf("github"), viewModel.session.approvedMcpServers)
+        assertEquals(setOf("Read"), viewModel.session.firstToolUseDone)
 
         viewModel.newSession()
+        assertEquals(setOf("Read"), viewModel.session.approvedTools)
         assertEquals(setOf("github"), viewModel.session.approvedMcpServers)
+        assertEquals(setOf("Read"), viewModel.session.firstToolUseDone)
     }
 
     @Test
@@ -53,6 +59,17 @@ class ChatViewModelSlashCommandTest {
         viewModel.clearSession()
 
         assertEquals(false, viewModel.session.cancelled)
+    }
+
+    @Test
+    fun `new slash command creates a new session`() {
+        val viewModel = ChatViewModel(projectAt(createTempDirectory().toString()))
+        val oldSessionId = viewModel.session.id
+
+        viewModel.sendMessage("/new")
+
+        assertEquals(false, viewModel.messages.any { it.content == "/new" })
+        kotlin.test.assertNotEquals(oldSessionId, viewModel.session.id)
     }
 
     private fun writeSkill(

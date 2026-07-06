@@ -165,7 +165,7 @@ class SessionStore(private val project: Project) {
             )
             updateIndex(dto)
         } finally {
-            lock?.release()
+            lock?.let(::releaseLock)
         }
     }
 
@@ -175,16 +175,18 @@ class SessionStore(private val project: Project) {
 
         return try {
             val dto = gson.fromJson(file.readText(), SessionDTO::class.java)
-            val session = AgentSession(dto.id, dto.title)
-            session.parentId = dto.parentId
+            val session = AgentSession(dto.id, dto.title, dto.parentId, dto.createdAt)
+            session.updatedAt = dto.updatedAt
             session.compactSummary = dto.compactSummary
             session.compactCount = dto.compactCount
             // IDE 重启后恢复状态：进行中的状态回退到 IDLE/PAUSED
             session.state = try {
                 val raw = AgentSession.State.valueOf(dto.state ?: "IDLE")
                 when (raw) {
-                    AgentSession.State.PROCESSING, AgentSession.State.AWAITING_APPROVAL, AgentSession.State.EXECUTING -> AgentSession.State.IDLE
-                    AgentSession.State.PAUSED -> AgentSession.State.PAUSED
+                    AgentSession.State.PROCESSING,
+                    AgentSession.State.AWAITING_APPROVAL,
+                    AgentSession.State.EXECUTING,
+                    AgentSession.State.PAUSED -> AgentSession.State.IDLE
                     else -> AgentSession.State.IDLE
                 }
             } catch (_: Exception) { AgentSession.State.IDLE }
@@ -293,7 +295,7 @@ class SessionStore(private val project: Project) {
                 updateIndexTitle(sessionId, title)
             }
         } finally {
-            lock?.release()
+            lock?.let(::releaseLock)
         }
     }
 
@@ -307,7 +309,7 @@ class SessionStore(private val project: Project) {
                 indexFile.writeText(gson.toJson(list))
             }
         } finally {
-            lock?.release()
+            lock?.let(::releaseLock)
         }
     }
 
@@ -317,7 +319,7 @@ class SessionStore(private val project: Project) {
             File(dir, "$id.json").delete()
             removeFromIndex(id)
         } finally {
-            lock?.release()
+            lock?.let(::releaseLock)
         }
     }
 
@@ -328,7 +330,7 @@ class SessionStore(private val project: Project) {
             try {
                 File(dir, "$id.json").delete()
             } finally {
-                lock?.release()
+                lock?.let(::releaseLock)
             }
         }
         val list = readIndex().filter { it.id !in idSet }
@@ -349,7 +351,7 @@ class SessionStore(private val project: Project) {
                 writeIndexWithLock(list)
             }
         } finally {
-            lock?.release()
+            lock?.let(::releaseLock)
         }
     }
 
@@ -366,7 +368,7 @@ class SessionStore(private val project: Project) {
                 writeIndexWithLock(list)
             }
         } finally {
-            lock?.release()
+            lock?.let(::releaseLock)
         }
     }
 
@@ -463,6 +465,8 @@ class SessionStore(private val project: Project) {
                 val channel = raf.channel
                 val lock = channel.tryLock()
                 if (lock != null) return lock
+                channel.close()
+                raf.close()
             } catch (_: Exception) {
                 // 获取锁失败，继续重试
             }
@@ -491,6 +495,7 @@ class SessionStore(private val project: Project) {
         try {
             val list = readIndex().toMutableList()
             val existing = list.indexOfFirst { it.id == dto.id }
+            val existingParentTotalTokens = list.getOrNull(existing)?.parentTotalTokens
             val entry = SessionIndexDTO(
                 id = dto.id, title = dto.title,
                 createdAt = dto.createdAt, updatedAt = dto.updatedAt,
@@ -499,12 +504,12 @@ class SessionStore(private val project: Project) {
                 toolCallCount = dto.messages.sumOf { it.toolCalls?.size ?: 0 },
                 hasActivePlan = dto.plan != null && dto.plan.status != "COMPLETED" && dto.plan.status != "CANCELLED",
                 parentId = dto.parentId,
-                parentTotalTokens = dto.parentTotalTokens
+                parentTotalTokens = dto.parentTotalTokens ?: existingParentTotalTokens
             )
             if (existing >= 0) list[existing] = entry else list.add(entry)
             writeIndexFile(list)
         } finally {
-            lock?.release()
+            lock?.let(::releaseLock)
         }
     }
 
@@ -522,7 +527,7 @@ class SessionStore(private val project: Project) {
         try {
             writeIndexFile(list)
         } finally {
-            lock?.release()
+            lock?.let(::releaseLock)
         }
     }
 

@@ -39,9 +39,9 @@ class ToolCallCard(
     )
 
     enum class ToolCallState(val label: String, val color: Color, val icon: Icon? = null) {
-        PENDING("等待执行", AppColors.textSecondary, AllIcons.Process.Plan_0),
+        PENDING("等待执行", AppColors.textSecondary, AllIcons.Process.Step_1),
         AWAITING_APPROVAL("等待授权", AppColors.warning, AllIcons.General.Warning),
-        EXECUTING("执行中...", AppColors.primary, AllIcons.Process.Plan_4),
+        EXECUTING("执行中...", AppColors.primary, AllIcons.Process.Step_2),
         DONE("完成", AppColors.success, AllIcons.RunConfigurations.TestPassed),
         ERROR("错误", AppColors.error, AllIcons.RunConfigurations.TestFailed),
         TIMEOUT("超时", AppColors.warning, AllIcons.General.Warning),
@@ -67,6 +67,20 @@ class ToolCallCard(
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
         border = BorderFactory.createEmptyBorder(4, 8, 4, 8)
     }
+    private val paramsLabel = JLabel(params).apply {
+        font = Font(Font.MONOSPACED, Font.PLAIN, 12)
+        foreground = AppColors.textSecondary
+        background = AppColors.toolPlaceholderBg
+        isOpaque = true
+        border = BorderFactory.createEmptyBorder(4, 8, 4, 8)
+        isVisible = params.isNotBlank()
+    }
+    private val approvalMessageLabel = JLabel().apply {
+        foreground = AppColors.textSecondary
+        font = font.deriveFont(12f)
+        border = BorderFactory.createEmptyBorder(2, 0, 6, 0)
+        isVisible = false
+    }
     private val approvalPanel = JPanel(FlowLayout(FlowLayout.LEFT, 8, 0)).apply {
         isOpaque = false
         isVisible = false
@@ -90,6 +104,14 @@ class ToolCallCard(
         border = BorderFactory.createEmptyBorder(4, 8, 4, 8)
     }
     private val footerLabel = JLabel()
+
+    // 子任务 Token 消耗标签
+    private val childTokenLabel = JLabel().apply {
+        font = font.deriveFont(10f)
+        foreground = AppColors.textSecondary
+        border = BorderFactory.createEmptyBorder(2, 8, 2, 8)
+        isVisible = false
+    }
 
     // 当前状态是否允许折叠
     private val canCollapse: Boolean
@@ -145,11 +167,8 @@ class ToolCallCard(
         }
         add(headerPanel, BorderLayout.NORTH)
 
-        val fgHex = AppColors.textSecondary.toHtmlColor()
-        val bgHex = AppColors.toolPlaceholderBg.toHtmlColor()
-        val paramsLabel =
-            JLabel("<html><span style='font-family:monospace;font-size:12px;color:$fgHex;background:$bgHex;padding:4px 8px'>$params</span></html>")
         bodyPanel.add(paramsLabel)
+        bodyPanel.add(approvalMessageLabel)
         bodyPanel.add(approvalPanel)
         bodyPanel.add(progressBar)
         resultScrollPane.setViewportView(resultComponent)
@@ -178,8 +197,8 @@ class ToolCallCard(
 
     private fun applyCollapseState() {
         arrowLabel.text = if (isCollapsed) "▶" else "▾"
-        bodyPanel.isVisible = !isCollapsed
-        footerLabel.isVisible = !isCollapsed
+        bodyPanel.isVisible = !isCollapsed && hasVisibleBodyContent()
+        footerLabel.isVisible = !isCollapsed && footerLabel.text.isNotBlank()
         // 折叠后需重新计算布局
         revalidate()
         repaint()
@@ -211,11 +230,18 @@ class ToolCallCard(
             }
         }
         rebuildApprovalPanel()
-        if (result != null) {
+        if (newState == ToolCallState.AWAITING_APPROVAL && !result.isNullOrBlank()) {
+            approvalMessageLabel.text = escapeHtml(result.take(2000))
+            approvalMessageLabel.isVisible = true
+            resultComponent.isVisible = false
+            resultScrollPane.isVisible = false
+        } else if (result != null) {
+            approvalMessageLabel.isVisible = false
             setResultContent(result.take(2000))
             resultComponent.isVisible = true
             resultScrollPane.isVisible = true
         } else {
+            approvalMessageLabel.isVisible = false
             resultComponent.isVisible = false
             resultScrollPane.isVisible = false
         }
@@ -265,6 +291,8 @@ class ToolCallCard(
         val cost = (inputTokens * 0.27 + outputTokens * 1.10) / 1_000_000
         childTokenLabel.text = "子任务 Token: $inputTokens in / $outputTokens out (约￥${"%.4f".format(cost)})"
         childTokenLabel.isVisible = true
+        bodyPanel.revalidate()
+        bodyPanel.repaint()
     }
 
     private fun rebuildApprovalPanel() {
@@ -297,6 +325,14 @@ class ToolCallCard(
         approvalPanel.repaint()
     }
 
+    private fun hasVisibleBodyContent(): Boolean =
+        paramsLabel.isVisible ||
+                approvalMessageLabel.isVisible ||
+                approvalPanel.isVisible ||
+                progressBar.isVisible ||
+                resultScrollPane.isVisible ||
+                childTokenLabel.isVisible
+
     private fun disableApprovalButtons() {
         approvalPanel.components.filterIsInstance<JButton>().forEach { it.isEnabled = false }
     }
@@ -321,9 +357,9 @@ class ToolCallCard(
             }
         }
         val html =
-            "<html><body style='font-family:monospace;font-size:12px;white-space:nowrap;margin:0;padding:0'>${
+            "<html>${
                 sb.toString().replace("\n", "<br>")
-            }</body></html>"
+            }</html>"
         // 创建支持 HTML 渲染的 JLabel 替换 resultComponent（原为 JTextArea），
         // 同时更新字段引用，确保 setResult()/setState() 后续操作与当前展示组件一致
         val diffLabel = JLabel(html).apply {
@@ -340,6 +376,14 @@ class ToolCallCard(
     private fun escapeHtml(s: String): String = s
         .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         .replace("\"", "&quot;")
+
+    override fun getMaximumSize(): Dimension =
+        Dimension(Int.MAX_VALUE, preferredSize.height)
+
+    override fun removeNotify() {
+        rotationTimer.stop()
+        super.removeNotify()
+    }
 
     /**
      * 旋转图标包装器，用于 EXECUTING 状态的旋转动画。
@@ -366,11 +410,4 @@ class ToolCallCard(
         override fun getIconHeight(): Int = delegate.iconHeight
     }
 
-    // 子任务 Token 消耗标签
-    private val childTokenLabel = JLabel().apply {
-        font = font.deriveFont(10f)
-        foreground = AppColors.textSecondary
-        border = BorderFactory.createEmptyBorder(2, 8, 2, 8)
-        isVisible = false
-    }
 }

@@ -351,7 +351,7 @@ Chat 页面内流转（统一模式，无需切换）:
   │     │                                                │
   │     ├─ 工具调用（随对话自然触发）                        │
   │     │   ├─ ToolCallCard (PENDING)                    │
-  │     │   ├─ 审批弹窗 (AWAITING_APPROVAL)               │
+  │     │   ├─ ToolCallCard 内审批操作 (AWAITING_APPROVAL) │
   │     │   ├─ ToolCallCard (EXECUTING)                  │
   │     │   ├─ ToolCallCard (DONE/ERROR)                 │
   │     │   └─ 循环直到 stop_reason=end_turn              │

@@ -3,6 +3,7 @@ package com.aiassistant.ui
 import com.aiassistant.AppSettingsService
 import com.aiassistant.session.SessionStore
 import com.aiassistant.ui.page.*
+import com.intellij.openapi.Disposable
 import com.intellij.openapi.project.Project
 import java.awt.BorderLayout
 import java.awt.CardLayout
@@ -14,7 +15,7 @@ import javax.swing.JDialog
 import javax.swing.JPanel
 import javax.swing.SwingUtilities
 
-class ChatToolWindow(private val project: Project) : JPanel(BorderLayout()) {
+class ChatToolWindow(private val project: Project) : JPanel(BorderLayout()), Disposable {
 
     enum class Page(val id: String) {
         WELCOME("welcome"), CHAT("chat"), SESSIONS("sessions"),
@@ -60,7 +61,11 @@ class ChatToolWindow(private val project: Project) : JPanel(BorderLayout()) {
                 onRestore = { id -> replaceChatPage(id) }
             )
         }
-        registerPage(Page.TOKEN_USAGE) { TokenUsagePage(project) }
+        registerPage(Page.TOKEN_USAGE) {
+            TokenUsagePage(project).apply {
+                onSessionSelected = { id -> replaceChatPage(id) }
+            }
+        }
         registerPage(Page.MCP) { McpPage(project) }
         registerPage(Page.SKILLS) { SkillsPage(project) }
         registerPage(Page.SETTINGS) { SettingsPage() }
@@ -153,5 +158,10 @@ class ChatToolWindow(private val project: Project) : JPanel(BorderLayout()) {
     private fun isFloatingMode(): Boolean {
         val window = SwingUtilities.getWindowAncestor(this)
         return window is JDialog
+    }
+
+    override fun dispose() {
+        chatPage.dispose()
+        pages.components.filterIsInstance<Disposable>().forEach { it.dispose() }
     }
 }

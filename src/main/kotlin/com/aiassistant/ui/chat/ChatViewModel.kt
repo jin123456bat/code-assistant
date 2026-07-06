@@ -167,6 +167,7 @@ class ChatViewModel(
     private var planAutoRunning = false
     private var lastAgentText: String? = null
     private var lastSlashCommand: String? = null
+    private var lastImages: List<ImageRef> = emptyList()
     private var lastCompletion: ((AgentLoop.Result) -> Unit)? = null
 
     private fun startFlushTimer() {
@@ -473,7 +474,7 @@ class ChatViewModel(
      * @param text 用户输入的文本内容。附件（attachments）和图片（images）不在此参数传入，
      *             而是从当前 [inputState] 中获取，由 ChatInputArea 的 tagsPanel 管理状态。
      */
-    fun sendMessage(text: String) {
+    fun sendMessage(text: String, images: List<ImageRef> = inputState.images) {
         resetCancellationForNextTurn()
         val userMsg = ChatMessage(
             id = java.util.UUID.randomUUID().toString(),
@@ -489,6 +490,9 @@ class ChatViewModel(
 
         if (text.trimStart() == "/clear") {
             clearSession(); return
+        }
+        if (text.trimStart() == "/new") {
+            newSession(); return
         }
         if (text.trimStart() == "/reload-skill") {
             skillManager.reloadSkills()
@@ -512,7 +516,11 @@ class ChatViewModel(
             sessionManager.generateTitle(session.id)
         }
 
-        runAgentText(buildAgentText(text), slashCommand = resolveSlashCommand(text))
+        runAgentText(
+            buildAgentText(text),
+            slashCommand = resolveSlashCommand(text),
+            images = images
+        )
     }
 
     internal fun resolveSlashCommandForTest(text: String): String? = resolveSlashCommand(text)
@@ -571,15 +579,17 @@ class ChatViewModel(
     private fun runAgentText(
         agentText: String,
         slashCommand: String? = null,
+        images: List<ImageRef> = emptyList(),
         onComplete: (AgentLoop.Result) -> Unit = ::handleResult
     ) {
         lastAgentText = agentText
         lastSlashCommand = slashCommand
+        lastImages = images
         lastCompletion = onComplete
         markTurnInFlight()
         ApplicationManager.getApplication()
             .executeOnPooledThread {
-                val result = loop.run(agentText, slashCommand = slashCommand)
+                val result = loop.run(agentText, slashCommand = slashCommand, images = images)
                 SwingUtilities.invokeLater {
                     turnInFlight = false
                     onComplete(result)
@@ -590,7 +600,7 @@ class ChatViewModel(
 
     fun retryLastTurn(): Boolean {
         val agentText = lastAgentText ?: return false
-        runAgentText(agentText, lastSlashCommand, lastCompletion ?: ::handleResult)
+        runAgentText(agentText, lastSlashCommand, lastImages, lastCompletion ?: ::handleResult)
         return true
     }
 
@@ -753,6 +763,7 @@ class ChatViewModel(
         store.save(session)
         val approvedTools = session.approvedTools.toMutableSet()
         val approvedMcpServers = session.approvedMcpServers.toMutableSet()
+        val firstToolUseDone = session.firstToolUseDone.toMutableSet()
         turnInFlight = false
         lastAgentText = null
         lastSlashCommand = null
@@ -761,6 +772,7 @@ class ChatViewModel(
         // 保留旧 session 的 approvedTools，不清除审批信任（对齐 docs/ui/components.md §4 clearSession()）
         session.approvedTools.addAll(approvedTools)
         session.approvedMcpServers.addAll(approvedMcpServers)
+        session.firstToolUseDone.addAll(firstToolUseDone)
         // 显式归零 totalTokens（对齐 docs/ui/chat.md §十二 clearSession()）
         session.totalTokens = TokenUsage()
         loop = AgentLoop(project, session)
@@ -853,6 +865,21 @@ class ChatViewModel(
         flushTimer = null
         streamingBuf.clear()
         onStateChanged?.invoke()
+    }
+
+    fun dispose() {
+        cancel()
+        onMessageAdded = null
+        onStreamingToken = null
+        onReasoningContent = null
+        onToolCallStarted = null
+        onToolCallStateChanged = null
+        onApprovalRequested = null
+        onStateChanged = null
+        onTurnCompleted = null
+        onSubAgentEvent = null
+        onTitleChanged = null
+        sessionManager.onTitleGenerated = null
     }
 }
 

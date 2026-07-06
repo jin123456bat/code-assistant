@@ -78,8 +78,9 @@
 ./gradlew test             # 运行全部 JUnit 测试
 ```
 
-> **热加载提示：** 若需要热加载（改代码后重新编译即生效），请在 `build.gradle.kts` 中配置
-`autoReloadPlugins=true`。
+> **热加载提示：** `./gradlew runIde` 启动 sandbox 后，改代码需再运行 `./gradlew buildPlugin`
+> （或 `./gradlew buildPlugin --continuous`），然后切回 sandbox IDE 触发插件重载。不要用 Debug 方式启动
+> sandbox。
 
 **环境：** JVM 21、Kotlin 2.0.21、IntelliJ Platform 2024.3（IntelliJ IDEA Community）、Gradle IntelliJ
 Platform Plugin 2.2.1

@@ -9,14 +9,14 @@
 | `Read`            | `filePath`, `startLine?`, `endLine?`, `timeout`                                              | Read      | PSI/VFS             | 单次 ≤ 500 行，超出需分页                         |
 | `Write`           | `filePath`, `content`, `timeout`                                                             | Write     | WriteCommandAction  | 内容 ≤ 3000 行                              |
 | `Edit`            | `filePath`, `oldString`, `newString`, `timeout`                                              | Edit      | WriteCommandAction  | newString ≤ 3000 行                       |
-| `Bash`            | `command`, `workDir?`, `timeout`, `dangerous`                                                | Bash      | GeneralCommandLine  | 输出 ≤ 200 行，timeout 必填                    |
+| `Bash`            | `command`, `workDir?`, `timeout`, `dangerous`                                                | Bash      | GeneralCommandLine  | 输出 ≤ 200 行，timeout 用于挂起检测阈值              |
 | `Glob`            | `dirPath`, `maxDepth?`, `offset?`, `timeout`                                                 | Glob      | VFS + FilenameIndex | ≤ 50 条目，超出需翻页                            |
 | `Grep`            | `query`, `filePattern?`, `timeout`                                                           | Grep      | 文件遍历 + 正则           | ≤ 50 条匹配                                 |
 | `readLints`       | `filePath`, `timeout`                                                                        | —（扩展工具）   | IDE Inspections     | ≤ 50 条诊断                                 |
 | `Agent`           | `prompt`（必填，任务描述）, `timeout`（必填，int，子 Agent 超时秒数，0=不限）, `run_in_background`（必填，bool，true=异步） | Agent     | AgentLoop 复用        | 结果摘要 ≤ 2000 tokens                       |
 | `Skill`           | `skill`, `args?`                                                                             | Skill     | SkillManager        | LLM 自主判断触发时机                             |
 | `WebSearch`       | `query`, `allowedDomains?`, `blockedDomains?`, `offset?`                                     | —（扩展工具）   | HTTP API            | 搜索网页，返回标题+URL 列表，支持 offset 翻页            |
-| `WebFetch`        | `url`, `prompt`                                                                              | —（扩展工具）   | HTTP API            | 抓取 URL 内容并提取信息                           |
+| `WebFetch`        | `url`, `prompt`                                                                              | —（扩展工具）   | HTTP API            | 返回原始 HTML，不做截断和格式转换                      |
 | `AskUserQuestion` | `questions[]`（1-4 个，含 options/multiSelect）                                                   | —（扩展工具）   | IDE Dialog          | 向用户发起多选/单选问题以澄清需求                        |
 | `Symbol`          | `operation`, `filePath`, `line`, `character`, `query?`                                       | —（扩展工具）   | PSI + StubIndex     | 代码导航（8 种操作）：跳转定义/实现、查引用、类型提示、文件/全局符号、调用链 |
 
@@ -48,15 +48,15 @@
 
 ### WebFetch
 
-抓取指定 URL 的网页内容，转为 Markdown 后按 prompt 提取信息。
+抓取指定 URL 的网页原始 HTML 内容，不做去标签、格式转换和截断处理，由 LLM 自行解析和提取信息。
 
-| 特性       | 说明                                                |
-|----------|---------------------------------------------------|
-| **参数**   | `url`（必填）、`prompt`（必填，描述要提取的内容）                   |
-| **返回**   | 基于 prompt 从页面内容中提取的信息摘要                           |
-| **重定向**  | 跨主机重定向返回给 LLM 而非自动跟随，由 LLM 决定是否用新 URL 重新调用        |
-| **限制**   | HTTP 自动升级为 HTTPS；不支持需认证/登录的页面；不支持 PDF/二进制文件；不支持缓存 |
-| **适用场景** | 阅读官方文档页面、查看 GitHub README、获取技术博客内容                |
+| 特性       | 说明                                                       |
+|----------|----------------------------------------------------------|
+| **参数**   | `url`（必填）、`prompt`（必填，描述要提取的内容）                          |
+| **返回**   | 页面原始 HTML，不做截断和格式转换，由 LLM 自行解析提取                         |
+| **重定向**  | 跨主机重定向返回给 LLM 而非自动跟随，由 LLM 决定是否用新 URL 重新调用               |
+| **限制**   | HTTP 自动升级为 HTTPS；不支持需认证/登录的页面；不支持 PDF/二进制文件；不做内容截断；不支持缓存 |
+| **适用场景** | 阅读官方文档页面、查看 GitHub README、获取技术博客内容                       |
 
 ### AskUserQuestion
 
@@ -165,8 +165,20 @@
 | Symbol                                                            | Background Thread                      | PSI 只读操作，基于 StubIndex 索引               |
 | createPlan / listPlans / removePlan / reorderPlans / markPlanDone | PlanExecutor（Agent 线程）                 | 计划管理工具                                 |
 
-**超时机制：** 每个工具都包含必填的 `timeout` 参数（秒），由 LLM 在 tool call 时传入。0=不限。Bash 超时时强制
-`destroyForcibly()` 终止进程。其他 I/O 工具的 timeout 由 ToolExecutor 统一读取，目前作为安全兜底。
+### Bash 超时与挂起检测
+
+Bash 的 `timeout` 参数**不再用于强制杀进程**。命令始终等待自然结束，不因超时而中断。timeout 的新用途是计算
+**挂起检测阈值**：`max(60s, timeout × 1.5)`。
+
+**挂起检测流程：**
+
+1. 两个 daemon 线程逐行读取 stdout/stderr，每读到一行更新心跳时间
+2. 主线程每 2s 轮询 `process.waitFor(2s)`
+3. 进程自然退出 → 返回完整输出 + 退出码
+4. 进程仍在但超过阈值无输出 → 判定**挂起**（不是慢，是真的卡死了）
+5. 挂起时 `destroyForcibly()` 杀进程，返回已收集输出 + "⚠ 命令可能已挂起" 警告
+
+**用户 Stop 依然有效：** `cancel()` → 遍历 `runningProcesses` 逐个 `destroyForcibly()`。
 
 ## 四、工具返回截断策略
 
@@ -183,20 +195,22 @@
 | `Edit`/`Write`    | 写入 ≤ 3000 行                      | 超过拒绝并返回错误 `内容过长 (N 行, 上限 3000 行)`                                       |
 | `Agent`           | 返回 ≤ 2000 tokens 摘要              | 完整结果保存到子 session，LLM 看到摘要 + `详情见 sub-session #N`                        |
 | `WebSearch`       | ≤ 10 条/页                         | 尾部注 `... (共 N 条，已返回 10 条。用 offset=N 翻页获取更多)`                            |
-| `WebFetch`        | 无硬性上限（prompt 提取）                 | 大页面自动截断，不额外标注                                                           |
+| `WebFetch`        | 无硬性上限（原始 HTML 完整返回）              | 不截断，不转换格式                                                               |
 | `AskUserQuestion` | 无上限（用户输入）                        | 不适用                                                                     |
 | `Symbol`          | 引用/调用 ≤ 50，符号 ≤ 100，全局搜索 ≤ 20    | 尾部注 `还有 N 处未显示`。缩小范围请用更精确的查询参数                                          |
 | MCP 工具（动态注册）      | 200 行                            | 尾部注 `... (共 N 行，已截断到 200 行)`。MCP 工具由 MCP Server 动态注册，不支持翻页（重新调用有副作用）    |
 
 ## 五、Shell 安全
 
-- **timeout 参数必填**（秒），由 LLM 根据命令类型自行判断（编译类 300s，简单命令 30s）。0=不限，但 System
-  Prompt 要求 LLM 必须传非 0 值
-- **实时流式输出**：`ProcessHandler` listener → batch 100ms → `invokeLater` 更新 UI（防 EDT 洪水）
+- **timeout 参数必填**（秒），由 LLM 根据命令类型自行判断（编译类 300s，简单命令 30s）。**仅用于挂起检测阈值计算
+  **（`max(60s, timeout × 1.5)`），不用于杀进程。命令始终等到自然结束
+- **挂起检测**：进程中超过阈值无输出 → 判定挂起 → 杀进程并返回已收集输出 + 警告。可区分"慢但活着"和"真正
+  hang 住"
+- **实时逐行读取**：两个 daemon 线程逐行读 stdout/stderr，每行更新心跳时间
 - **工作目录限定项目根**
 - **`dangerous` 参数**：bool 类型，必填。由 LLM 判断当前命令是否为危险命令（如 `rm -rf /`、
   `git push --force`、`sudo`、`chmod 777`）。`dangerous=true`
-  时始终弹窗二次确认，无视白名单。详见 [§六 审批机制](#六审批机制)
+  时始终在 ToolCallCard 内二次确认，无视白名单。详见 [§六 审批机制](#六审批机制)
 
 ## 六、审批机制
 
@@ -206,7 +220,7 @@
 |---------------------------|-----------------------------------------------------|-------------------|
 | 首次工具使用                    | 每个会话每种工具首次调用                                        | 首次审批（可"允许此会话"）    |
 | Shell 危险命令                | `rm -rf /`, `git push --force`, `sudo`, `chmod 777` | 危险命令确认（不可跳过）      |
-| Bash 危险命令（dangerous=true） | Bash 工具 `dangerous=true`（由 LLM 判断）                  | 始终弹窗确认，不可跳过，无视白名单 |
+| Bash 危险命令（dangerous=true） | Bash 工具 `dangerous=true`（由 LLM 判断）                  | 始终内嵌确认，不可跳过，无视白名单 |
 | 公共 API 变更                 | Edit/Write 修改了方法签名且文件被 ≥3 个其他文件引用                   | 关键操作确认            |
 | 大范围修改                     | 同一 turn 修改 ≥5 个文件                                   | 关键操作确认            |
 | 文件删除                      | Bash 含 `rm ` 且目标在项目内                                | 关键操作确认            |
@@ -244,14 +258,14 @@ AgentSession:
 
 **生命周期：**
 
-| 事件              | 白名单行为                                                                                                  |
-|-----------------|--------------------------------------------------------------------------------------------------------|
-| 用户点击 [允许此会话]    | `firstToolUseDone.add(toolName)` + `approvedTools.add(toolName)`，持久化到 Session JSON                     |
-| 后续同工具调用         | 先通过首次使用检查，再检查 `approvedTools.contains(toolName)` → 跳过审批                                                |
-| 用户点击 [允许一次]     | `firstToolUseDone.add(toolName)`，仅本次放行，不加入白名单                                                          |
-| `/clear` `/new` | **不受影响**——白名单是会话级配置，`/clear`（`/new` 是其别名）仅清空对话上下文，不重置审批信任                                              |
-| IDE 重启          | 从 Session JSON 恢复 `approvedTools` 和 `firstToolUseDone`；旧 JSON 会把 `approvedTools` 补入 `firstToolUseDone` |
-| 危险命令            | **无视白名单**，始终需二次确认                                                                                      |
+| 事件              | 白名单行为                                                                                                     |
+|-----------------|-----------------------------------------------------------------------------------------------------------|
+| 用户点击 [允许此会话]    | `firstToolUseDone.add(toolName)` + `approvedTools.add(toolName)`，持久化到 Session JSON                        |
+| 后续同工具调用         | 先通过首次使用检查，再检查 `approvedTools.contains(toolName)` → 跳过审批                                                   |
+| 用户点击 [允许一次]     | `firstToolUseDone.add(toolName)`，仅本次放行，不加入白名单                                                             |
+| `/clear` `/new` | **不受影响**——`/clear` 复用当前 session 并清空上下文，`/new` 新建 session 并复制审批信任，不重置 `approvedTools` / `firstToolUseDone` |
+| IDE 重启          | 从 Session JSON 分别恢复 `approvedTools` 和 `firstToolUseDone`；旧 JSON 缺失 `firstToolUseDone` 时使用空集合              |
+| 危险命令            | **无视白名单**，始终需二次确认                                                                                         |
 
 **持久化位置：** Session JSON 的 `approvedTools` 字段（`List<String>`），与其他会话数据一同通过
 `SessionStore.save()` 原子写入；首次使用记录写入 `firstToolUseDone` 字段。
@@ -329,14 +343,14 @@ ToolInfo (ToolRegistry 内部类):
 | `Read`            | `单次最多返回 500 行。如果文件行数超过此限制，返回内容会被截断，请使用 startLine 参数分页读取剩余内容。`                                                                                                                                             |
 | `Grep`            | `最多返回 50 条匹配。如果匹配数超过此限制，结果会被截断，请使用更精确的搜索词缩小范围。filePattern 可选参数用于按文件名过滤（如 *.kt、*.java）。`                                                                                                                   |
 | `Glob`            | `最多返回 50 个条目（文件+目录）。如果超出此限制，结果会被截断并在返回值中标注。请用 dirPath/maxDepth 缩小范围，或用 offset 参数翻页获取更多条目。`                                                                                                                |
-| `Bash`            | `最多返回 200 行输出（stdout+stderr）。超出时中段截断：保留头部 30 行 + 尾部 30 行，中间标注省略行数。Bash 不支持翻页（重新执行有副作用）。timeout 参数由 LLM 根据命令类型自行判断传入（秒），0=不限。`                                                                             |
+| `Bash`            | `最多返回 200 行输出（stdout+stderr）。超出时中段截断：保留头部 30 行 + 尾部 30 行，中间标注省略行数。Bash 不支持翻页（重新执行有副作用）。timeout（秒）用于挂起检测：命令始终等自然结束不杀进程，超过 max(60s, timeout*1.5) 无输出则判定挂起并返回已收集输出+警告。`                                      |
 | `readLints`       | `最多返回 50 条诊断，按 severity 排序（ERROR > WARNING > INFO）。如果超出此限制，低严重度诊断可能不显示。`                                                                                                                                  |
 | `Edit`            | `newString 最多 3000 行。超过此限制的操作会被拒绝。`                                                                                                                                                                       |
 | `Write`           | `内容最多 3000 行。超过此限制的操作会被拒绝。`                                                                                                                                                                               |
 | `Skill`           | `执行指定 Skill。LLM 根据用户需求自主判断触发时机，将 SKILL.md 内容作为消息注入 conversation。`                                                                                                                                         |
 | `Agent`           | `启动子 Agent 执行子任务。prompt 描述任务，timeout 子 Agent 超时秒数（必填，0=不限），run_in_background 是否异步（必填）。结果摘要最多 2000 tokens。完整执行过程保存为独立 Session。`                                                                            |
 | `WebSearch`       | `搜索网页，返回标题和 URL 列表。≤ 10 条/页，超出时用 offset 参数翻页。不支持缓存。`                                                                                                                                                      |
-| `WebFetch`        | `抓取 URL 内容并按提示提取信息。HTTP 自动升级为 HTTPS。不支持需认证的页面。不支持缓存。`                                                                                                                                                     |
+| `WebFetch`        | `获取指定URL的网页原始HTML内容，不做截断和格式转换，由LLM自行解析提取。HTTP 自动升级为 HTTPS。不支持需认证的页面。不支持缓存。`                                                                                                                               |
 | `AskUserQuestion` | `向用户发起问题以澄清需求。一次 1-4 个问题，每题 2-4 个选项。支持多选。`                                                                                                                                                                |
 | `Symbol`          | `基于 IDE PSI 的语义导航（8 种操作）。goToDefinition 跳转定义、goToImplementation 查实现、findReferences 查引用（≤50）、hover 类型提示、documentSymbol 文件结构（≤100）、workspaceSymbol 全局搜索（≤20，需 query）、incomingCalls/outgoingCalls 调用链（≤50）。` |
 | `createPlan`      | `创建执行计划，最多 20 项。计划项初始 PAUSED，随后自动按序执行（PAUSED→EXECUTING→COMPLETED），详见 plan.md。LLM 可用 listPlans/removePlan/reorderPlans/markPlanDone 管理。`                                                                   |

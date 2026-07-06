@@ -25,6 +25,8 @@ object ToolApprovalPolicy {
 
     /** 公共 API 变更引用文件阈值（Edit/Write 修改了方法签名且 ≥3 个文件引用）（对齐 docs/agent/tools.md §六 公共 API 变更） */
     private const val API_CHANGE_REFERENCE_THRESHOLD = 3
+    private val methodSignatureRegex =
+        Regex("""(?m)^\s*(?:public|protected|private|internal|final|open|override|static|suspend|abstract|\s)*\s*(?:fun\s+\w+\s*\([^)]*\)\s*(?::\s*[\w<>, ?.\[\]]+)?|(?:[\w<>, ?.\[\]]+\s+)+\w+\s*\([^)]*\))""")
 
     /**
      * 审批上下文：包含本次工具调用的所有信息，供审批策略判断。
@@ -63,7 +65,7 @@ object ToolApprovalPolicy {
      * 判断工具是否需要用户审批确认。
      *
      * 审批优先级（按文档 tools.md §六 审批判定流程）：
-     * 1. 危险命令检测（Shell 危险命令 + Bash dangerous=true） → 始终弹窗确认，无视白名单
+     * 1. 危险命令检测（Shell 危险命令 + Bash dangerous=true） → 始终内嵌确认，无视白名单
      * 2. 首次工具使用（每个会话每种工具首次调用） → 首次审批
      * 3. 公共 API 变更（Edit/Write 修改方法签名且 ≥3 个文件引用） → 关键操作确认
      * 4. 大范围修改（同一 turn ≥5 个文件） → 关键操作确认
@@ -118,8 +120,16 @@ object ToolApprovalPolicy {
         }
 
         // ── 4. 大范围修改检测（同一 turn ≥5 个文件） ──
-        if ((toolName == "Write" || toolName == "Edit") && session.filesModifiedThisTurn.size >= LARGE_SCALE_THRESHOLD) {
-            return true to ApprovalReason.LARGE_SCALE_MODIFICATION
+        if (toolName == "Write" || toolName == "Edit") {
+            val currentFile = ToolInput.string(input, "filePath")
+            val modifiedCount = if (currentFile.isNullOrBlank()) {
+                session.filesModifiedThisTurn.size
+            } else {
+                session.filesModifiedThisTurn.plus(currentFile).size
+            }
+            if (modifiedCount >= LARGE_SCALE_THRESHOLD) {
+                return true to ApprovalReason.LARGE_SCALE_MODIFICATION
+            }
         }
 
         // ── 5. 文件删除检测（Bash 含 rm 且目标在项目内） ──
@@ -139,8 +149,8 @@ object ToolApprovalPolicy {
             return false to null
         }
 
-        // 不需要审批
-        return false to null
+        // 已过首次确认但未加入白名单：仍需本次审批，[允许一次] 只放行当前 tool_use。
+        return true to null
     }
 
     /**
@@ -152,6 +162,12 @@ object ToolApprovalPolicy {
         val basePath = project.basePath ?: return false
         val file = File(basePath, filePath)
         if (!file.exists()) return false
+        if (!inputChangesMethodSignature(
+                ctx.toolName,
+                ctx.toolUse._input(),
+                file.readText()
+            )
+        ) return false
 
         return try {
             val virtualFile =
@@ -188,6 +204,36 @@ object ToolApprovalPolicy {
             false
         }
     }
+
+    fun inputChangesMethodSignature(
+        toolName: String,
+        input: Any?,
+        existingContent: String? = null
+    ): Boolean {
+        return when (toolName) {
+            "Edit" -> {
+                val oldSignatures = methodSignatures(ToolInput.string(input, "oldString").orEmpty())
+                val newSignatures = methodSignatures(ToolInput.string(input, "newString").orEmpty())
+                oldSignatures.isNotEmpty() && newSignatures.isNotEmpty() && oldSignatures != newSignatures
+            }
+
+            "Write" -> {
+                val existingSignatures = methodSignatures(existingContent.orEmpty())
+                val newSignatures = methodSignatures(ToolInput.string(input, "content").orEmpty())
+                existingSignatures.isNotEmpty() && newSignatures.isNotEmpty() && existingSignatures != newSignatures
+            }
+
+            else -> false
+        }
+    }
+
+    private fun methodSignatures(text: String): List<String> =
+        methodSignatureRegex.findAll(text)
+            .map {
+                it.value.substringBefore("{").substringBefore("=").trim()
+                    .replace(Regex("""\s+"""), " ")
+            }
+            .toList()
 
     /**
      * 检查 Bash 命令的 `rm` 目标是否在项目目录内。

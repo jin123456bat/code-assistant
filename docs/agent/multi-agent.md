@@ -37,7 +37,7 @@
 
 原因：
 
-- 父 Agent 调用 `Agent` 工具 spawn 子 Agent 时已经过审批（首次使用时弹窗确认），信任已建立
+- 父 Agent 调用 `Agent` 工具 spawn 子 Agent 时已经过审批（首次使用时在 ToolCallCard 内确认），信任已建立
 - 子 Agent 的工具范围受白名单/黑名单限制，不会越权操作
 - 对齐 Claude Code：子 Agent 继承父会话的权限模式，父 Agent 处于高权限模式时子 Agent 强制继承
 
@@ -90,7 +90,7 @@
 
 | 对比维度             | 父 Agent（详见 [审批机制](../agent/tools.md#六审批机制)） | 子 Agent                            |
 |------------------|---------------------------------------------|------------------------------------|
-| Agent 工具首次使用     | 弹窗确认                                        | 不可用（禁止嵌套）                          |
+| Agent 工具首次使用     | ToolCallCard 内确认                            | 不可用（禁止嵌套）                          |
 | 文件读写             | 首次需审批                                       | 一律放行                               |
 | Shell 执行         | 首次需审批，危险命令二次确认                              | 一律放行（工具范围已限制）                      |
 | MCP 工具           | 首次需审批                                       | 一律放行（可整体禁用）                        |
@@ -136,8 +136,8 @@ Agent 的 `AgentLoop` 或 `ToolExecutor` 中做额外判断。审批跳过发生
   `MultiAgentManager → ToolExecutor → AgentLoop → ChatViewModel → ChatPage` 传递到
   `MultiAgentBlock` UI 组件。`ChatViewModel` 负责 EDT 线程调度（`SwingUtilities.invokeLater`）。
   子 Agent 的 `ToolCallCard` 在 `MultiAgentBlock` 卡片内部独立渲染，不混入父的 `messageContainer`。
-- **Chat 页面展示**：仅显示 `🤖 Agent: 重构 UserService → 已完成 (sub-session #42)，摘要: ...`。子 Agent
-  的 ToolCallCard 出现在自己的 Session 视图中，不嵌入父的 ChatPage。
+- **Chat 页面展示**：父 ChatPage 内显示 `MultiAgentBlock`。子 Agent 行可展开查看流式输出、嵌套
+  `ToolCallCard`、耗时和 `sub-session #N`；完整执行过程仍以独立 Session 持久化。
 
 ## 五、子 Agent UI
 

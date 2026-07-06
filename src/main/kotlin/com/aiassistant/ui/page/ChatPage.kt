@@ -7,14 +7,14 @@ import com.aiassistant.ui.Banner
 import com.aiassistant.ui.EditorSelectionListener
 import com.aiassistant.ui.MessageBus
 import com.aiassistant.ui.chat.*
+import com.intellij.openapi.Disposable
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.wm.ToolWindowManager
 import java.awt.AlphaComposite
 import java.awt.BorderLayout
+import java.awt.FlowLayout
 import java.awt.Graphics
 import java.awt.Graphics2D
 import java.awt.RenderingHints
-import java.awt.Toolkit
 import java.awt.event.ActionListener
 import javax.swing.*
 
@@ -22,11 +22,12 @@ class ChatPage(
     project: Project,
     restoreSessionId: String? = null,
     private val enableIdeServices: Boolean = true
-) : JPanel(BorderLayout()) {
+) : JPanel(BorderLayout()), Disposable {
 
     private val viewModel = ChatViewModel(project, restoreSessionId)
     private lateinit var planCard: PlanCard
     private val northPanel = JPanel(BorderLayout())
+    private lateinit var titleLabel: JLabel
     private val messageContainer = JPanel().apply {
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
         isOpaque = true
@@ -65,9 +66,22 @@ class ChatPage(
     private var streamingBubble: JComponent? = null
     private val streamingBuf = StringBuilder()
     private var reasoningBubble: JPanel? = null
+    private var reasoningSpacer: java.awt.Component? = null
     private val reasoningBuf = StringBuilder()
     private var reasoningStartTime = 0L
+    private var editorSelectionListener: EditorSelectionListener? = null
+    private var disposed = false
     private val messageBusListener = object : MessageBus.MessageBusListener {
+        override fun onSessionChanged(sessionId: String, type: String) {
+            if (sessionId != viewModel.sessionId) return
+            SwingUtilities.invokeLater {
+                clearTransientUi()
+                titleLabel.text = viewModel.session.title
+                messageContainer.revalidate()
+                messageContainer.repaint()
+            }
+        }
+
         override fun onSystemError(title: String, message: String) {
             SwingUtilities.invokeLater { showErrorBanner("$title: $message") }
         }
@@ -85,21 +99,10 @@ class ChatPage(
             onDeleteStep = { stepId -> viewModel.removePlanStep(stepId) }
         ).apply { isVisible = false }
 
-        // 标题行：会话标题 + 关闭按钮，对齐 docs/ui/pages.md §十二 ChatPage 组件树
+        // 标题行：会话标题 + 新建会话按钮
         // 初始显示当前会话标题（默认为"新会话"），标题生成后通过 onTitleChanged 回调更新
-        val titleLabel = JLabel(viewModel.session.title).apply {
+        titleLabel = JLabel(viewModel.session.title).apply {
             font = font.deriveFont(12f).deriveFont(java.awt.Font.BOLD)
-        }
-        val closeButton = JButton("✕").apply {
-            toolTipText = "关闭面板"
-            font = font.deriveFont(13f)
-            isContentAreaFilled = false
-            border = BorderFactory.createEmptyBorder(2, 6, 2, 6)
-            addActionListener {
-                val toolWindow =
-                    ToolWindowManager.getInstance(project).getToolWindow("Code Assistant")
-                toolWindow?.hide(null)
-            }
         }
         val newSessionButton = JButton("[+]").apply {
             toolTipText = "新建会话"
@@ -109,7 +112,7 @@ class ChatPage(
             addActionListener {
                 viewModel.newSession()
                 clearTransientUi()
-                addTimestampMarker()
+                titleLabel.text = viewModel.session.title
                 messageContainer.revalidate()
                 messageContainer.repaint()
             }
@@ -119,11 +122,8 @@ class ChatPage(
                 BorderFactory.createMatteBorder(0, 0, 1, 0, AppColors.border),
                 BorderFactory.createEmptyBorder(4, 8, 4, 8)
             )
-            add(titleLabel, BorderLayout.WEST)
-            add(JPanel().apply {
-                add(newSessionButton)
-                add(closeButton)
-            }, BorderLayout.EAST)
+            add(titleLabel, BorderLayout.CENTER)
+            add(newSessionButton, BorderLayout.EAST)
         }
         // 对齐 docs/ui/components.md §6 ChatPage 组件树：
         // NORTH=标题行+PlanCard, CENTER=JScrollPane→messageContainer
@@ -150,11 +150,16 @@ class ChatPage(
                 streamingBuf.clear(); streamingBubble = null
                 reasoningBuf.clear(); reasoningBubble = null
             },
+            onSendWithImages = { text, images ->
+                viewModel.sendMessage(text, images)
+                viewModel.updateInputState(images = emptyList())
+                streamingBuf.clear(); streamingBubble = null
+                reasoningBuf.clear(); reasoningBubble = null
+            },
             onStop = { viewModel.cancel() },
             onNewSession = {
                 viewModel.newSession()
                 clearTransientUi()
-                addTimestampMarker()
                 messageContainer.revalidate()
                 messageContainer.repaint()
             },
@@ -172,7 +177,7 @@ class ChatPage(
             if (enableIdeServices) setProject(project)
         }
         if (enableIdeServices) {
-            EditorSelectionListener(
+            editorSelectionListener = EditorSelectionListener(
                 project,
                 onSelectionChanged = { filePath, startLine, endLine, content ->
                     inputArea.setSelectionReference(
@@ -188,7 +193,7 @@ class ChatPage(
         registerMessageBusListener()
 
         viewModel.onMessageAdded = { msg ->
-            streamingBubble?.let { messageContainer.remove(it); streamingBubble = null }
+            removeStreamingBubble()
             if (msg.type == ChatMessage.Type.ERROR) {
                 // 错误顶部给出持续可见的 Banner，同时保留消息流气泡里的复制/重试操作。
                 inputArea.showError()
@@ -196,15 +201,17 @@ class ChatPage(
             }
             animateBubbleAppear(renderMessage(msg))
             messageContainer.add(Box.createVerticalStrut(8))
+            updateBubbleMaxWidths()
             messageContainer.revalidate(); scrollToBottom()
         }
         viewModel.onToolCallStarted = { toolUseId, toolName, params ->
-            streamingBubble?.let { messageContainer.remove(it); streamingBubble = null }
+            removeStreamingBubble()
             val paramsText = params.entries.joinToString(", ") { "${it.key}=${it.value}" }
             val card = ToolCallCard(toolName, paramsText, ToolCallCard.ToolCallState.PENDING)
             toolCards[toolUseId] = card
             animateBubbleAppear(card)
             messageContainer.add(Box.createVerticalStrut(8))
+            updateBubbleMaxWidths()
             messageContainer.revalidate(); scrollToBottom()
         }
         viewModel.onToolCallStateChanged = { toolUseId, state, result, durationMs ->
@@ -244,12 +251,18 @@ class ChatPage(
             messageContainer.repaint()
             scrollToBottom()
         }
-        viewModel.onStreamingToken = { token ->
+        viewModel.onStreamingToken = streaming@{ token ->
+            if (!viewModel.isRunning) {
+                removeStreamingBubble()
+                streamingBuf.clear()
+                return@streaming
+            }
             streamingBuf.append(token)
             // ponytail: 从实际父容器移除，避免 animateBubbleAppear 包装后找不到
-            streamingBubble?.let { (it.parent as? JComponent)?.apply { remove(it); revalidate(); repaint() } }
+            removeStreamingBubble()
             streamingBubble = ChatBubbleRenderer.renderStreaming(streamingBuf.toString())
             messageContainer.add(streamingBubble!!)
+            updateBubbleMaxWidths()
             messageContainer.revalidate(); scrollToBottom()
         }
         viewModel.onReasoningContent = { reasoning ->
@@ -259,11 +272,14 @@ class ChatPage(
             }
             reasoningBuf.append(reasoning)
             reasoningBubble?.let { messageContainer.remove(it) }
+            reasoningSpacer?.let { messageContainer.remove(it) }
             val durationMs = System.currentTimeMillis() - reasoningStartTime
             reasoningBubble = ChatBubbleRenderer.renderThinking(reasoningBuf.toString(), durationMs)
+            reasoningSpacer = Box.createVerticalStrut(8)
             // 思考过程块位于消息流末尾，没有 tool call 时在流式回复前，有 tool call 时在 tool call 前
             messageContainer.add(reasoningBubble)
-            messageContainer.add(Box.createVerticalStrut(8))
+            messageContainer.add(reasoningSpacer)
+            updateBubbleMaxWidths()
             messageContainer.revalidate(); scrollToBottom()
         }
         viewModel.onStateChanged = {
@@ -387,20 +403,6 @@ class ChatPage(
         multiAgentBlock.isVisible = false
     }
 
-    private fun addTimestampMarker() {
-        val now = java.time.LocalDateTime.now()
-            .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
-        messageContainer.add(
-            renderMessage(
-                ChatMessage(
-                    type = ChatMessage.Type.SYSTEM,
-                    content = "── $now ──"
-                )
-            )
-        )
-        messageContainer.add(Box.createVerticalStrut(8)); messageContainer.revalidate()
-    }
-
     private fun renderMessage(msg: ChatMessage): JComponent =
         ChatBubbleRenderer.render(
             msg,
@@ -432,12 +434,28 @@ class ChatPage(
         for (component in messageContainer.components) {
             if (component !is JPanel) continue
             val bubbleType = component.getClientProperty("bubbleType") as? String ?: continue
-            val maxWidth = when (bubbleType) {
-                "user" -> userMaxWidth
-                "agent", "error" -> agentMaxWidth
+            val maxWidth = when {
+                component.getClientProperty("fullWidth") == true -> panelWidth
+                bubbleType == "user" -> userMaxWidth
+                bubbleType == "agent" || bubbleType == "error" -> agentMaxWidth
                 else -> continue
             }
-            component.maximumSize = java.awt.Dimension(maxWidth, Int.MAX_VALUE)
+            // 如果 component 包含一个子面板且该子面板没有子组件，直接约束 component
+            // 否则取第一个子组件为约束目标（跳过 FlowLayout 外层包装）
+            val target = if (component.layout is FlowLayout && component.componentCount > 0) {
+                component.getComponent(0) as? JComponent ?: component
+            } else if (component is AnimatedBubbleWrapper && component.componentCount > 0) {
+                // AnimatedBubbleWrapper 内层也是 FlowLayout 外层，需要再向内找
+                val inner = component.getComponent(0) as? JComponent
+                if (inner?.layout is FlowLayout && inner.componentCount > 0)
+                    inner.getComponent(0) as? JComponent ?: component
+                else
+                    inner ?: component
+            } else component
+            if (component.getClientProperty("fullWidth") == true) {
+                target.preferredSize = java.awt.Dimension(maxWidth, target.preferredSize.height)
+            }
+            target.maximumSize = java.awt.Dimension(maxWidth, target.preferredSize.height)
         }
         messageContainer.revalidate()
     }
@@ -451,7 +469,7 @@ class ChatPage(
         clearTransientUi()
         autoScroll = true
         viewModel.restoreSession(sessionId)
-        addTimestampMarker()
+        titleLabel.text = viewModel.session.title
         viewModel.messages.forEach { msg ->
             messageContainer.add(renderMessage(msg))
             messageContainer.add(Box.createVerticalStrut(8))
@@ -483,6 +501,15 @@ class ChatPage(
         messageBusRegistered = false
     }
 
+    override fun dispose() {
+        if (disposed) return
+        disposed = true
+        unregisterMessageBusListener()
+        editorSelectionListener?.dispose()
+        editorSelectionListener = null
+        viewModel.dispose()
+    }
+
     private fun clearTransientUi() {
         dismissErrorBanner()
         messageContainer.removeAll()
@@ -492,7 +519,16 @@ class ChatPage(
         streamingBubble = null
         reasoningBuf.clear()
         reasoningBubble = null
+        reasoningSpacer = null
         reasoningStartTime = 0L
+    }
+
+    private fun removeStreamingBubble() {
+        val bubble = streamingBubble ?: return
+        (bubble.parent as? JComponent)?.remove(bubble) ?: messageContainer.remove(bubble)
+        streamingBubble = null
+        messageContainer.revalidate()
+        messageContainer.repaint()
     }
 
     private fun scrollToBottom() {
@@ -579,6 +615,8 @@ class ChatPage(
         init {
             isOpaque = false
             add(child, BorderLayout.CENTER)
+            // 继承 child 的 alignmentX，保持消息在 BoxLayout 容器中的左/右对齐
+            alignmentX = child.alignmentX
             this.minimumSize = child.minimumSize
             this.preferredSize = child.preferredSize
             this.maximumSize = child.maximumSize

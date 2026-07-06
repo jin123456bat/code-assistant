@@ -48,7 +48,7 @@ try {
     when {
         // 429 Rate Limit — 自动重试（PAUSED 状态等待后恢复）
         e is RateLimitException -> {
-            if (retryCount < 2) {
+            if (retryCount < 3) {
                 retryCount++
                 val waitSec = parseWaitSeconds(e.message) ?: 30L
                 session.pause()
@@ -101,11 +101,18 @@ try {
             }
         }
 
-        // IO 流中断 — 保留已接收文本，直接返回错误
+        // IO 异常 — 退避重试（2s → 5s → 10s，最多 3 次）
         e is IOException -> {
-            output.append("\n[连接中断]")
-            session.markError("连接中断: ${e.message}")
-            return Result.Error("连接中断: ... 已接收文本: ${output.take(500)}")
+            val backoffDelays = longArrayOf(2_000L, 5_000L, 10_000L)
+            if (ioRetryCount < 3) {
+                Thread.sleep(backoffDelays[ioRetryCount])
+                ioRetryCount++
+                continue  // 重试当前 turn
+            } else {
+                output.append("\n[连接中断]")
+                session.markError("连接中断: ${e.message}")
+                return Result.Error("连接中断: ... 已接收文本: ${output.take(500)}")
+            }
         }
 
         // 其他异常
@@ -121,12 +128,12 @@ try {
 
 | HTTP 状态码 | 异常类型                                    | 处理策略                              | 重试次数               | 用户感知                                   |
 |----------|-----------------------------------------|-----------------------------------|--------------------|----------------------------------------|
-| 429      | `RateLimitException`                    | 解析 Retry-After → PAUSED → 等待 → 重试 | 最多 2 次             | 进入 PAUSED 自动静默重试，2 次后 PAUSED + 建议降并发   |
+| 429      | `RateLimitException`                    | 解析 Retry-After → PAUSED → 等待 → 重试 | 最多 3 次             | 进入 PAUSED 自动静默重试，3 次后 PAUSED + 建议降并发   |
 | 5xx      | `InternalServerException`               | 退避重试：1s → 3s → 9s                 | 最多 3 次             | 自动静默重试，3 次后 ERROR                      |
 | 超时       | `SocketTimeoutException`                | 退避重试：2s → 5s → 10s                | 最多 3 次             | 3 次均失败 → ERROR，已渲染内容 + `[连接中断]`        |
 | 400      | `BadRequestException`（context too long） | 不重试，强制 compact 后重发                | 0（compact 后重试 1 次） | compact 成功则自动重发；仍失败 → 提示 /clear 或 /new |
 | 400（其他）  | `BadRequestException`                   | 不重试，直接返回错误                        | 0                  | 错误消息显示在气泡中                             |
-| IO 异常    | `IOException`                           | 保留已接收文本 + `[连接中断]` 标注 → 直接返回错误    | 0                  | 已渲染内容保留，含 `[连接中断]` 标注                  |
+| IO 异常    | `IOException`                           | 退避重试：2s → 5s → 10s                | 最多 3 次             | 3 次均失败 → ERROR，已渲染内容保留 + `[连接中断]` 标注   |
 
 ### 2.3 Rate Limit 等待时间解析
 

@@ -14,9 +14,7 @@ import com.intellij.codeInsight.inline.completion.InlineCompletionRequest
 import com.intellij.codeInsight.inline.completion.InlineCompletionSuggestion
 import com.intellij.codeInsight.inline.completion.elements.InlineCompletionElement
 import com.intellij.codeInsight.inline.completion.elements.InlineCompletionGrayTextElement
-import com.intellij.openapi.project.Project
-import com.intellij.openapi.project.ProjectManager
-import com.intellij.openapi.project.ProjectManagerListener
+import com.intellij.openapi.components.service
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 
@@ -38,17 +36,6 @@ class AiCompletionProvider : InlineCompletionProvider {
     private val settings = AppSettingsService.getInstance()
     private val fimClient = DeepSeekFimClient(settings)
     private val cache = CompletionCache()
-
-    init {
-        // 注册 project 关闭监听，自动持久化统计数据到 .claude/completion-stats.json
-        @Suppress("DEPRECATION")
-        ProjectManager.getInstance().addProjectManagerListener(object : ProjectManagerListener {
-            override fun projectClosing(project: Project) {
-                val projectPath = project.basePath ?: return
-                CompletionStats.persist(projectPath)
-            }
-        })
-    }
 
     /** 缓存当前补全请求的语言标识，供 afterInsertion 回调使用 */
     @Volatile
@@ -89,6 +76,7 @@ class AiCompletionProvider : InlineCompletionProvider {
         if (project == null || !settings.isCompletionEnabled()) {
             return emptySuggestion()
         }
+        project.service<CompletionStatsProjectService>()
 
         // === 补全拒绝检测 ===
         // 如果上一次返回了补全候选但 afterInsertion 未被调用，

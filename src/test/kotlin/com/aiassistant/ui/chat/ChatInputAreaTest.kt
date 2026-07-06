@@ -1,10 +1,13 @@
 package com.aiassistant.ui.chat
 
+import com.aiassistant.agent.ImageRef
 import java.awt.Container
+import java.awt.image.BufferedImage
 import javax.swing.JButton
 import javax.swing.JLabel
 import kotlin.test.Test
 import kotlin.test.assertContains
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -30,6 +33,16 @@ class ChatInputAreaTest {
     }
 
     @Test
+    fun `does not send placeholder text`() {
+        var sendCount = 0
+        val inputArea = ChatInputArea(onSend = { sendCount++ })
+
+        findSendButton(inputArea).doClick()
+
+        assertEquals(0, sendCount)
+    }
+
+    @Test
     fun `sends selected file tag as file reference`() {
         var sent = ""
         val inputArea = ChatInputArea(onSend = { sent = it })
@@ -43,6 +56,27 @@ class ChatInputAreaTest {
 
         assertContains(sent, "@README.md")
         assertTrue(labelsIn(inputArea).none { it.text?.contains("README.md") == true })
+    }
+
+    @Test
+    fun `sends pasted images with message`() {
+        var sentImages = emptyList<ImageRef>()
+        val inputArea = ChatInputArea(
+            onSend = {},
+            onSendWithImages = { _, images -> sentImages = images }
+        )
+
+        @Suppress("UNCHECKED_CAST")
+        val imageRefs = ChatInputArea::class.java
+            .getDeclaredField("imageRefs")
+            .apply { isAccessible = true }
+            .get(inputArea) as MutableList<ImageRef>
+        imageRefs.add(testImageRef())
+
+        findSendButton(inputArea).doClick()
+
+        assertEquals(1, sentImages.size)
+        assertEquals("paste.png", sentImages.single().fileName)
     }
 
     @Test
@@ -76,4 +110,16 @@ class ChatInputAreaTest {
                 else -> emptyList()
             }
         }
+
+    private fun testImageRef(): ImageRef =
+        ImageRef(
+            id = "img-1",
+            fileName = "paste.png",
+            base64Data = "AA==",
+            mimeType = "image/png",
+            thumbnail = BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB),
+            width = 1,
+            height = 1,
+            sizeBytes = 1
+        )
 }

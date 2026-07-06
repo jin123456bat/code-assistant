@@ -26,7 +26,7 @@ class SettingsConfigurable : Configurable {
     private val agentMaxLoopsSpinner = JSpinner(SpinnerNumberModel(20, 0, 9999, 1)).apply {
         preferredSize = Dimension(100, preferredSize.height)
     }
-    private val agentMaxConcurrencySpinner = JSpinner(SpinnerNumberModel(3, 1, 10, 1)).apply {
+    private val agentMaxConcurrencySpinner = JSpinner(SpinnerNumberModel(3, 0, 10, 1)).apply {
         preferredSize = Dimension(100, preferredSize.height)
     }
     private val promptArea = JTextArea(8, 50).apply { lineWrap = true; wrapStyleWord = true }
@@ -71,7 +71,7 @@ class SettingsConfigurable : Configurable {
 
         // 多 Agent 并发上限
         val maxConcurrencyPanel = JPanel().apply { layout = BoxLayout(this, BoxLayout.X_AXIS) }
-        maxConcurrencyPanel.add(JBLabel("多 Agent 并发上限:"))
+        maxConcurrencyPanel.add(JBLabel("多 Agent 并发上限 (0=不限):"))
         maxConcurrencyPanel.add(Box.createHorizontalStrut(8))
         maxConcurrencyPanel.add(agentMaxConcurrencySpinner)
         maxConcurrencyPanel.add(Box.createHorizontalGlue())

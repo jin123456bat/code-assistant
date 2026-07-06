@@ -38,7 +38,7 @@ class ToolApprovalPolicyTest {
     }
 
     @Test
-    fun `mcp first use is tracked by server not individual tool`() {
+    fun `mcp first use is tracked by server but does not approve server`() {
         val session = AgentSession().apply {
             firstToolUseDone.add("mcp:github")
         }
@@ -52,8 +52,55 @@ class ToolApprovalPolicyTest {
             )
         )
 
-        assertFalse(needsApproval)
+        assertTrue(needsApproval)
         assertEquals(null, reason)
+    }
+
+    @Test
+    fun `fifth modified file in a turn triggers large scale approval`() {
+        val session = AgentSession().apply {
+            firstToolUseDone.add("Write")
+            approvedTools.add("Write")
+            filesModifiedThisTurn.addAll(listOf("A.kt", "B.kt", "C.kt", "D.kt"))
+        }
+
+        val (needsApproval, reason) = ToolApprovalPolicy.needsUserApproval(
+            ToolApprovalPolicy.ApprovalContext(
+                session = session,
+                toolName = "Write",
+                toolUse = tool("Write", mapOf("filePath" to "E.kt")),
+                project = project()
+            )
+        )
+
+        assertTrue(needsApproval)
+        assertEquals(ToolApprovalPolicy.ApprovalReason.LARGE_SCALE_MODIFICATION, reason)
+    }
+
+    @Test
+    fun `method body edit is not a method signature change`() {
+        assertFalse(
+            ToolApprovalPolicy.inputChangesMethodSignature(
+                "Edit",
+                mapOf(
+                    "oldString" to "fun total(): Int { return 1 }",
+                    "newString" to "fun total(): Int { return 2 }"
+                )
+            )
+        )
+    }
+
+    @Test
+    fun `method parameter edit is a method signature change`() {
+        assertTrue(
+            ToolApprovalPolicy.inputChangesMethodSignature(
+                "Edit",
+                mapOf(
+                    "oldString" to "fun total(): Int { return 1 }",
+                    "newString" to "fun total(count: Int): Int { return count }"
+                )
+            )
+        )
     }
 
     @Test
@@ -76,10 +123,13 @@ class ToolApprovalPolicyTest {
     }
 
     private fun tool(name: String): BetaToolUseBlock =
+        tool(name, emptyMap())
+
+    private fun tool(name: String, input: Map<String, Any?>): BetaToolUseBlock =
         BetaToolUseBlock.builder()
             .id("tool-${System.nanoTime()}")
             .name(name)
-            .input(JsonValue.from(emptyMap<String, Any>()))
+            .input(JsonValue.from(input))
             .build()
 
     private fun project(): Project =

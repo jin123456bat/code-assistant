@@ -7,10 +7,12 @@ import com.aiassistant.agent.TokenDelta
 import com.aiassistant.session.SessionStore
 import com.intellij.openapi.project.Project
 import java.awt.Container
+import java.awt.event.MouseEvent
 import java.lang.reflect.Proxy
 import javax.swing.JTable
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class TokenUsagePageTest {
@@ -32,6 +34,40 @@ class TokenUsagePageTest {
         val page = TokenUsagePage(project)
 
         assertTrue(tablesIn(page).isNotEmpty())
+    }
+
+    @Test
+    fun `clicking a usage row invokes session selection callback`() {
+        val root = createTempDirectory()
+        val project = projectAt(root.toString())
+        val session = AgentSession(id = "s1", title = "Usage")
+        session.addMessage(
+            Message(
+                role = Role.ASSISTANT,
+                content = "ok",
+                tokenUsage = TokenDelta(inputTokens = 1000, outputTokens = 2000)
+            )
+        )
+        SessionStore(project).save(session)
+        val page = TokenUsagePage(project)
+        var selectedSessionId: String? = null
+        page.onSessionSelected = { selectedSessionId = it }
+        val table = tablesIn(page).first()
+
+        table.dispatchEvent(
+            MouseEvent(
+                table,
+                MouseEvent.MOUSE_CLICKED,
+                System.currentTimeMillis(),
+                0,
+                1,
+                1,
+                1,
+                false
+            )
+        )
+
+        assertEquals("s1", selectedSessionId)
     }
 
     private fun tablesIn(container: Container): List<JTable> =

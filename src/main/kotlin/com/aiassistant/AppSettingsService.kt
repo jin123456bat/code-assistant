@@ -35,10 +35,7 @@ class AppSettingsService {
         private const val COMMIT_ENABLED_KEY = "$SERVICE_NAME.COMMIT.ENABLED"
         private const val FIXED_MODEL = "deepseek-v4-pro"
         val AVAILABLE_MODELS = listOf(
-            "deepseek-v4-pro" to "DeepSeek V4 Pro",
-            "deepseek-chat" to "DeepSeek Chat",
-            "deepseek-coder" to "DeepSeek Coder",
-            "deepseek-reasoner" to "DeepSeek Reasoner (R1)"
+            FIXED_MODEL to "DeepSeek V4 Pro"
         )
 
         val DEFAULT_COMMIT_PROMPT_ZH = """请基于以下 git diff 生成一条 Conventional Commits 规范的 commit message。
@@ -63,6 +60,8 @@ class AppSettingsService {
             """生成一个简洁的 merge commit message，描述合并的内容。""".trimIndent()
 
         fun getInstance(): AppSettingsService = service()
+
+        fun normalizeAgentMaxConcurrency(concurrency: Int): Int = concurrency.coerceIn(0, 10)
     }
 
     fun getApiKey(): String? {
@@ -81,12 +80,12 @@ class AppSettingsService {
     fun getModel(): String {
         val raw = com.intellij.ide.util.PropertiesComponent.getInstance()
             .getValue(MODEL_KEY, FIXED_MODEL)
-        return raw?.takeIf { it in AVAILABLE_MODELS.map { m -> m.first } } ?: FIXED_MODEL
+        return raw?.takeIf { it == FIXED_MODEL } ?: FIXED_MODEL
     }
 
     fun setModel(model: String) =
         com.intellij.ide.util.PropertiesComponent.getInstance()
-            .setValue(MODEL_KEY, model)
+            .setValue(MODEL_KEY, model.takeIf { it == FIXED_MODEL } ?: FIXED_MODEL)
 
     fun getModelDisplayName(): String =
         AVAILABLE_MODELS.firstOrNull { it.first == getModel() }?.second ?: getModel()
@@ -129,12 +128,15 @@ class AppSettingsService {
     fun getAgentMaxConcurrency(): Int {
         val raw = com.intellij.ide.util.PropertiesComponent.getInstance()
             .getValue(AGENT_MAX_CONCURRENCY_KEY)
-        return raw?.toIntOrNull()?.coerceIn(1, 10) ?: 3
+        return raw?.toIntOrNull()?.let { normalizeAgentMaxConcurrency(it) } ?: 3
     }
 
     fun setAgentMaxConcurrency(concurrency: Int) =
         com.intellij.ide.util.PropertiesComponent.getInstance()
-            .setValue(AGENT_MAX_CONCURRENCY_KEY, concurrency.coerceIn(1, 10).toString())
+            .setValue(
+                AGENT_MAX_CONCURRENCY_KEY,
+                normalizeAgentMaxConcurrency(concurrency).toString()
+            )
 
     /**
      * GenerateCommitAction 启用开关，默认 true。

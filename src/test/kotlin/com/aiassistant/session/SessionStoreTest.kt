@@ -10,12 +10,14 @@ import com.aiassistant.agent.ToolCallState
 import com.intellij.openapi.project.Project
 import java.lang.reflect.Proxy
 import java.nio.file.Path
+import java.time.Instant
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class SessionStoreTest {
 
@@ -98,6 +100,55 @@ class SessionStoreTest {
     }
 
     @Test
+    fun `loading session restores created and updated timestamps`() {
+        val root = createTempDirectory()
+        val project = projectAt(root.toString())
+        writeSessionJson(
+            root,
+            "session-with-times",
+            """
+            {
+              "id": "session-with-times",
+              "title": "Times",
+              "createdAt": "2026-01-01T00:00:00Z",
+              "updatedAt": "2026-01-02T03:04:05Z",
+              "state": "IDLE",
+              "messages": []
+            }
+            """.trimIndent()
+        )
+
+        val restored = assertNotNull(SessionStore(project).load("session-with-times"))
+
+        assertEquals(Instant.parse("2026-01-01T00:00:00Z"), restored.createdAt)
+        assertEquals(Instant.parse("2026-01-02T03:04:05Z"), restored.updatedAt)
+    }
+
+    @Test
+    fun `loading paused session resets state to idle`() {
+        val root = createTempDirectory()
+        val project = projectAt(root.toString())
+        writeSessionJson(
+            root,
+            "paused-session",
+            """
+            {
+              "id": "paused-session",
+              "title": "Paused",
+              "createdAt": "2026-01-01T00:00:00Z",
+              "updatedAt": "2026-01-01T00:00:00Z",
+              "state": "PAUSED",
+              "messages": []
+            }
+            """.trimIndent()
+        )
+
+        val restored = assertNotNull(SessionStore(project).load("paused-session"))
+
+        assertEquals(AgentSession.State.IDLE, restored.state)
+    }
+
+    @Test
     fun `persists approved mcp servers`() {
         val project = projectAt(createTempDirectory().toString())
         val session = AgentSession(id = "session-with-mcp-approval")
@@ -111,7 +162,7 @@ class SessionStoreTest {
     }
 
     @Test
-    fun `loading legacy approved tools marks first use done`() {
+    fun `loading legacy approved tools keeps approvedTools and firstToolUseDone separate`() {
         val root = createTempDirectory()
         val project = projectAt(root.toString())
         writeSessionJson(
@@ -132,7 +183,13 @@ class SessionStoreTest {
 
         val restored = assertNotNull(SessionStore(project).load("legacy-approved-tools"))
 
-        assertContains(restored.firstToolUseDone, "Read")
+        // approvedTools 应正确恢复
+        assertContains(restored.approvedTools, "Read")
+        // firstToolUseDone 不应被 approvedTools 污染（两个集合独立维护）
+        assertTrue(
+            restored.firstToolUseDone.isEmpty(),
+            "firstToolUseDone 应为空，不应合并 approvedTools"
+        )
     }
 
     private fun projectAt(basePath: String): Project =

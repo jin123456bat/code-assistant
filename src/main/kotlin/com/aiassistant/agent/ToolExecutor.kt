@@ -444,6 +444,8 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
     }
 
     // ── Bash ──
+    // timeoutSec 由 LLM 指定命令的预期耗时，用于挂起检测阈值：max(60s, timeoutSec*1.5)
+    // 命令始终等自然结束；仅在长时间无输出时判定挂起，返回已收集输出供 LLM 决策。
     private fun runShell(toolUse: BetaToolUseBlock, timeoutSec: Int): String {
         val input = toolUse._input()
         val command = ToolInput.string(input, "command") ?: return "错误: 缺少 command 参数"
@@ -464,47 +466,80 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
 
         val start = System.currentTimeMillis()
 
-        val stdoutFuture = java.util.concurrent.CompletableFuture.supplyAsync {
-            process.inputStream.bufferedReader().use { it.readText() }
-        }
-        val stderrFuture = java.util.concurrent.CompletableFuture.supplyAsync {
-            process.errorStream.bufferedReader().use { it.readText() }
-        }
+        // 共享心跳 — reader 线程读到一行就更新，主线程轮询检测（AtomicLong 保证跨线程可见性）
+        val lastHeartbeat = java.util.concurrent.atomic.AtomicLong(start)
+        val stdout = mutableListOf<String>()
+        val stderr = mutableListOf<String>()
+        val lock = Any()
 
-        val (stdout, stderr) = if (timeoutSec > 0) {
+        val stdoutRunner = Thread({
             try {
-                val out =
-                    stdoutFuture.get(timeoutSec.toLong(), java.util.concurrent.TimeUnit.SECONDS)
-                val err = stderrFuture.get(1, java.util.concurrent.TimeUnit.SECONDS)
-                process.waitFor(1, java.util.concurrent.TimeUnit.SECONDS)
-                if (process.isAlive) {
-                    process.destroyForcibly(); session.runningProcesses.remove(process)
-                    return "超时: 命令执行超过 ${timeoutSec}s，已强制终止\n\$ $command"
+                process.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
+                    var line: String?
+                    while (reader.readLine().also { line = it } != null) {
+                        synchronized(lock) { stdout.add(line!!); lastHeartbeat.set(System.currentTimeMillis()) }
+                    }
                 }
-                Pair(out, err)
-            } catch (e: java.util.concurrent.TimeoutException) {
-                process.destroyForcibly(); session.runningProcesses.remove(process)
-                return "超时: 命令执行超过 ${timeoutSec}s，已强制终止\n\$ $command"
+            } catch (_: Exception) {
             }
-        } else {
-            val out = stdoutFuture.get()
-            val err = stderrFuture.get()
-            val effectiveTimeout = if (timeoutSec == 0) 300 else timeoutSec
-            process.waitFor(effectiveTimeout, TimeUnit.SECONDS)
-            Pair(out, err)
+        }, "bash-stdout")
+
+        val stderrRunner = Thread({
+            try {
+                process.errorStream.bufferedReader(Charsets.UTF_8).use { reader ->
+                    var line: String?
+                    while (reader.readLine().also { line = it } != null) {
+                        synchronized(lock) { stderr.add(line!!); lastHeartbeat.set(System.currentTimeMillis()) }
+                    }
+                }
+            } catch (_: Exception) {
+            }
+        }, "bash-stderr")
+
+        stdoutRunner.isDaemon = true; stderrRunner.isDaemon = true
+        stdoutRunner.start(); stderrRunner.start()
+
+        // 挂起检测阈值：LLM 超时的 1.5 倍与 60s 取大值
+        val hangThresholdMs = maxOf(60_000L, (timeoutSec * 1500L))
+
+        var hung = false
+        while (!hung) {
+            if (process.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)) break  // 进程正常退出
+            if (!process.isAlive) break                                         // 进程已死
+            val idle = System.currentTimeMillis() - lastHeartbeat.get()
+            if (idle > hangThresholdMs) {
+                hung = true
+            }
         }
 
-        val exitCode = process.exitValue()
-        val elapsed = (System.currentTimeMillis() - start) / 1000
-        val rawOutput = stdout + stderr
+        // 若判定挂起：杀进程，等 reader 线程收尾已读到的输出
+        if (hung) {
+            process.destroyForcibly()
+            stdoutRunner.join(2000); stderrRunner.join(2000)
+        } else {
+            // 正常退出：等 reader 线程把 EOF 后的最后几行读完
+            stdoutRunner.join(5000); stderrRunner.join(5000)
+        }
 
-        // 截断策略：上限 200 行 / 4000 字符，中段截断：保留头部 30 行 + 尾部 30 行，中间标注省略行数
+        session.runningProcesses.remove(process)
+
+        val elapsed = (System.currentTimeMillis() - start) / 1000
+        val rawOutput = synchronized(lock) {
+            (stdout + stderr).joinToString("\n")
+        }
+
         val truncatedOutput = truncateBashOutput(rawOutput)
 
-        return if (exitCode == 0) {
-            "\$ $command\n${truncatedOutput}\n退出码: $exitCode | 耗时: ${elapsed}s | ${rawOutput.lines().size} 行输出"
+        return if (hung) {
+            val lines = rawOutput.lines().size
+            "⚠ 命令可能已挂起（${hangThresholdMs / 1000}s 无输出）。已收集 ${lines} 行输出，以下为当前结果:\n\$ $command\n${truncatedOutput}\n[进程已终止] 耗时: ${elapsed}s | ${lines} 行输出"
         } else {
-            "\$ $command\n${truncatedOutput}\n退出码: $exitCode | 耗时: ${elapsed}s"
+            val exitCode = process.exitValue()
+            if (exitCode == 0) {
+                "\$ $command\n${truncatedOutput}\n退出码: $exitCode | 耗时: ${elapsed}s | ${rawOutput.lines().size} 行输出"
+            } else {
+                "\$ $command\n${truncatedOutput}\n退出码: $exitCode | 耗时: ${elapsed}s"
+            }
         }
     }
 
@@ -781,7 +816,8 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
         val runInBackground = ToolInput.bool(input, "run_in_background") ?: false
         // 接线子 Agent 事件回调，使 UI 可以实时展示子 Agent 进度
         multiAgent.onSubAgentEvent = onSubAgentEvent
-        return multiAgent.spawnAgent(prompt, session, timeoutSec, runInBackground, input)
+        val params = ToolInput.map(input)
+        return multiAgent.spawnAgent(prompt, session, timeoutSec, runInBackground, params)
     }
 
     // ── WebSearch ──
@@ -914,42 +950,14 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
 
             val rawHtml = response.body?.string() ?: return "错误: 无法获取 \"$url\" 的响应内容。"
 
-            // 简单 HTML 转纯文本：移除 script/style 标签，提取 body 内容，去除 HTML 标签
-            val textContent = stripHtml(rawHtml)
-
-            if (textContent.isBlank()) {
+            if (rawHtml.isBlank()) {
                 return "错误: 无法从 \"$url\" 提取内容。页面可能为 PDF、二进制文件或需要 JavaScript 渲染。"
             }
 
-            // 截断到合理大小（WebFetch 返回页面内容 + prompt 提取结果）
-            val maxChars = 8000
-            val truncated = if (textContent.length > maxChars) {
-                textContent.take(maxChars) + "\n... (内容已截断到 $maxChars 字符)"
-            } else {
-                textContent
-            }
-
-            "页面内容（基于 prompt: $prompt）:\n$truncated"
+            "页面原始 HTML（基于 prompt: $prompt）:\n$rawHtml"
         } catch (e: Exception) {
             "WebFetch 执行失败: ${e.message}"
         }
-    }
-
-    /** 简单 HTML 标签去除，提取纯文本内容 */
-    private fun stripHtml(html: String): String {
-        var result = html
-            .replace(Regex("<script[^>]*>[\\s\\S]*?</script>", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("<style[^>]*>[\\s\\S]*?</style>", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("<[^>]+>"), " ")
-            .replace(Regex("&nbsp;"), " ")
-            .replace(Regex("&amp;"), "&")
-            .replace(Regex("&lt;"), "<")
-            .replace(Regex("&gt;"), ">")
-            .replace(Regex("&quot;"), "\"")
-            .replace(Regex("&apos;"), "'")
-            .replace(Regex("\\s+"), " ")
-            .trim()
-        return result
     }
 
     // ── AskUserQuestion ──

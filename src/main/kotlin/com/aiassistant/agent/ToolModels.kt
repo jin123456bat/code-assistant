@@ -60,7 +60,7 @@ class Bash {
     @JsonPropertyDescription("超时秒数，必填。快速命令设 10-30s，构建/测试设 120-300s，长时间任务设 600s，0=不限")
     var timeout: Int = 0
 
-    @JsonPropertyDescription("是否为危险命令（如 rm -rf /、git push --force、sudo、chmod 777），bool 类型，必填。dangerous=true 时始终弹窗二次确认，无视白名单")
+    @JsonPropertyDescription("是否为危险命令（如 rm -rf /、git push --force、sudo、chmod 777），bool 类型，必填。dangerous=true 时始终在 ToolCallCard 内二次确认，无视白名单")
     var dangerous: Boolean = false
 }
 
@@ -144,7 +144,7 @@ class WebSearch {
     var timeout: Int = 0
 }
 
-@JsonClassDescription("获取指定URL的网页内容并提取关键信息，最多返回 8000 字符。HTTP 自动升级为 HTTPS。不支持需认证的页面。不支持缓存。")
+@JsonClassDescription("获取指定URL的网页原始HTML内容。HTTP 自动升级为 HTTPS。不支持需认证的页面。不支持缓存。内容不做截断和格式转换，由 LLM 自行解析提取。")
 class WebFetch {
     @JsonPropertyDescription("要抓取的 URL")
     var url: String = ""

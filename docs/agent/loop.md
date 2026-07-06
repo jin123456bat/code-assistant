@@ -21,7 +21,7 @@ while (turn < effectiveMaxTurns && !cancelled):
   │
   ├─ for each toolUse:
   │    ├─ 审批检查（首次弹确认）
-  │    │    CountDownLatch ← 等待用户操作（无超时，Agent Loop 在后台线程池而非 EDT，阻塞不影响 UI 响应；审批弹窗是模态的，用户必然处理）
+  │    │    CountDownLatch ← 等待用户操作（无超时，Agent Loop 在后台线程池而非 EDT，阻塞不影响 UI 响应；审批操作显示在 ToolCallCard 内）
   │    │
   │    ├─ 执行（18 个工具）:
   │    │    Read      → VFS (bg)
@@ -88,15 +88,15 @@ IDLE ──sendMessage()──→ PROCESSING ──LLM 返回输出──→ IDL
 
 ### 状态说明
 
-| 状态                  | 含义                                                                                     |
-|---------------------|----------------------------------------------------------------------------------------|
-| `IDLE`              | 可接受输入，无进行中的 Agent 操作                                                                   |
-| `PROCESSING`        | LLM 流式输出中，或 tool 结果已提交等待 LLM 响应                                                        |
-| `AWAITING_APPROVAL` | 弹出审批 dialog，等待用户操作（无超时）。确认 → EXECUTING，拒绝 → PROCESSING。详见 [工具系统](./tools.md) 审批流程      |
-| `EXECUTING`         | 工具正在执行（非阻塞，UI 显示进度）                                                                    |
-| `CANCELLED`         | 用户中断，清理中                                                                               |
-| `ERROR`             | API 调用失败或 tool 执行异常，等待用户操作                                                             |
-| `PAUSED`            | Agent 因速率限制（429）或网络瞬断等待自动恢复，计时后自动继续。IDE 重启后计时器丢失，重置为 IDLE，见 [会话恢复规则](./session.md#一存储) |
+| 状态                  | 含义                                                                                           |
+|---------------------|----------------------------------------------------------------------------------------------|
+| `IDLE`              | 可接受输入，无进行中的 Agent 操作                                                                         |
+| `PROCESSING`        | LLM 流式输出中，或 tool 结果已提交等待 LLM 响应                                                              |
+| `AWAITING_APPROVAL` | 在 ToolCallCard 内显示审批操作，等待用户操作（无超时）。确认 → EXECUTING，拒绝 → PROCESSING。详见 [工具系统](./tools.md) 审批流程 |
+| `EXECUTING`         | 工具正在执行（非阻塞，UI 显示进度）                                                                          |
+| `CANCELLED`         | 用户中断，清理中                                                                                     |
+| `ERROR`             | API 调用失败或 tool 执行异常，等待用户操作                                                                   |
+| `PAUSED`            | Agent 因速率限制（429）或网络瞬断等待自动恢复，计时后自动继续。IDE 重启后计时器丢失，重置为 IDLE，见 [会话恢复规则](./session.md#一存储)       |
 
 ### 瞬态持久化规则
 

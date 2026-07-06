@@ -116,6 +116,8 @@ class SessionManager(private val project: Project) {
             }
 
             val existing = periods[dateKey]
+            if (includeChildren && index.parentId != null) continue
+
             // 从消息级别累加实际的 input/output token 用量
             val inputTokens = session.messages.sumOf { it.tokenUsage?.inputTokens ?: 0L }
             val outputTokens = session.messages.sumOf { it.tokenUsage?.outputTokens ?: 0L }

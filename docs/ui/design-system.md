@@ -167,8 +167,8 @@ dialog:     0px 8px 24px rgba(0,0,0,0.15)    — 弹窗（审批、确认）
 |-----------|------------------------------------|-----------------|-------------------------------------|
 | Toast 滑入  | 300ms                              | ease-out        | Toast 触发                            |
 | Toast 滑出  | 200ms                              | ease-in         | 3s 后自动                              |
-| 审批弹窗出现    | 200ms                              | ease-out        | tool_use 到达 + requiresApproval=true |
-| 审批弹窗消失    | 150ms                              | ease-in         | 用户操作（批准/拒绝）                         |
+| 审批操作出现    | 200ms                              | ease-out        | tool_use 到达 + requiresApproval=true |
+| 审批操作消失    | 150ms                              | ease-in         | 用户操作（批准/拒绝）                         |
 | 消息气泡出现    | 150ms                              | ease-out        | 消息添加到列表                             |
 | 流式闪烁光标    | 500ms 可见 / 500ms 隐藏交替（完整周期 1000ms） | blink           | 流式生成中                               |
 | 工具卡片展开/折叠 | 200ms                              | ease-out        | 点击头部                                |
@@ -206,4 +206,3 @@ dialog:     0px 8px 24px rgba(0,0,0,0.15)    — 弹窗（审批、确认）
 | 屏幕阅读器 | 所有按钮 `setAccessibleDescription()`。气泡 `setAccessibleDescription()` 包含消息摘要                                        |
 | 色盲友好  | 状态不仅依赖颜色——每个状态有独立图标（✅/❌/⏳/⛔）+ 文字标签                                                                              |
 | 对比度   | 正文 `#111827` 对 `#FFFFFF` → 对比度 16.9:1 ✅。辅助文字 `#6B7280` 对 `#F9FAFB` → 5.2:1 ✅                                    |
-

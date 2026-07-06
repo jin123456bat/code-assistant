@@ -31,6 +31,17 @@ class ToolExecutorApprovalTest {
         assertEquals("Read", requested?.toolName)
         assertTrue(requested?.message?.contains("首次调用 Read 工具") == true)
         assertContains(result, "hello approval")
+
+        val (needsApproval, reason) = ToolApprovalPolicy.needsUserApproval(
+            ToolApprovalPolicy.ApprovalContext(
+                session = session,
+                toolName = "Read",
+                toolUse = tool("Read", mapOf("filePath" to "README.md")),
+                project = projectAt(root.toString())
+            )
+        )
+        assertEquals(true, needsApproval)
+        assertEquals(null, reason)
     }
 
     @Test
@@ -58,7 +69,7 @@ class ToolExecutorApprovalTest {
                 )
             )
             assertEquals(false, "github" in session.approvedMcpServers)
-            assertEquals(false, needsApproval)
+            assertEquals(true, needsApproval)
             assertEquals(null, reason)
         } finally {
             ToolRegistry.unregister("github/search")
