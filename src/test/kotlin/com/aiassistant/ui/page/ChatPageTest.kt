@@ -7,8 +7,10 @@ import java.awt.BorderLayout
 import java.awt.Container
 import java.lang.reflect.Proxy
 import javax.swing.JButton
+import javax.swing.JComponent
 import javax.swing.JLabel
 import javax.swing.JPanel
+import javax.swing.Scrollable
 import javax.swing.SwingUtilities
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
@@ -191,7 +193,7 @@ class ChatPageTest {
     }
 
     @Test
-    fun `reasoning block is full viewport width when added`() {
+    fun `reasoning block uses safe available width when added`() {
         val page = ChatPage(
             project = projectAt(createTempDirectory().toString()),
             enableIdeServices = false
@@ -211,7 +213,7 @@ class ChatPageTest {
         }
 
         val reasoningBubble = reasoningBubbleField.get(page) as JPanel
-        kotlin.test.assertEquals(600, reasoningBubble.preferredSize.width)
+        kotlin.test.assertEquals(584, reasoningBubble.preferredSize.width)
     }
 
     @Test
@@ -250,6 +252,101 @@ class ChatPageTest {
 
             assertTrue(user.getComponent(0).preferredSize.width <= userWidthBefore + 2)
             assertTrue(agent.getComponent(0).preferredSize.width <= agentWidthBefore + 2)
+            assertTrue(labelsIn(user).none { it.text?.contains("body width=") == true })
+        }
+    }
+
+    @Test
+    fun `message container tracks viewport width`() {
+        val page = ChatPage(
+            project = projectAt(createTempDirectory().toString()),
+            enableIdeServices = false
+        )
+        val messageContainerField = ChatPage::class.java.getDeclaredField("messageContainer")
+        messageContainerField.isAccessible = true
+        val messageContainer = messageContainerField.get(page) as Scrollable
+
+        assertTrue(messageContainer.getScrollableTracksViewportWidth())
+    }
+
+    @Test
+    fun `width updates shrink oversized message and thinking blocks after sidebar resize`() {
+        val page = ChatPage(
+            project = projectAt(createTempDirectory().toString()),
+            enableIdeServices = false
+        )
+        val messageContainerField = ChatPage::class.java.getDeclaredField("messageContainer")
+        messageContainerField.isAccessible = true
+        val messageContainer = messageContainerField.get(page) as JPanel
+        val scrollPaneField = ChatPage::class.java.getDeclaredField("scrollPane")
+        scrollPaneField.isAccessible = true
+        val scrollPane = scrollPaneField.get(page) as javax.swing.JScrollPane
+        scrollPane.viewport.setSize(320, 400)
+
+        SwingUtilities.invokeAndWait {
+            val user = com.aiassistant.ui.chat.ChatBubbleRenderer.render(
+                com.aiassistant.ui.chat.ChatMessage(
+                    type = com.aiassistant.ui.chat.ChatMessage.Type.USER_TEXT,
+                    content = "你好，这是一条很长的用户消息，用来模拟右侧栏收窄后的宽度约束"
+                ),
+                panelWidth = 900
+            )
+            val agent = com.aiassistant.ui.chat.ChatBubbleRenderer.render(
+                com.aiassistant.ui.chat.ChatMessage(
+                    type = com.aiassistant.ui.chat.ChatMessage.Type.AGENT_TEXT,
+                    content = "你好，这是一条很长的 AI 消息，用来确认文本在窄面板里会重新换行而不是被裁剪"
+                ),
+                panelWidth = 900
+            )
+            val thinking = com.aiassistant.ui.chat.ChatBubbleRenderer.renderThinking(
+                "这是思考过程内容，用来确认 fullWidth 组件在侧边栏拖动后不会顶到右侧边界。",
+                1200
+            )
+            messageContainer.add(user)
+            messageContainer.add(agent)
+            messageContainer.add(thinking)
+
+            page.updateBubbleMaxWidths()
+
+            val usableWidth = 304
+            assertTrue((user.getComponent(0) as JComponent).maximumSize.width <= usableWidth)
+            assertTrue((agent.getComponent(0) as JComponent).maximumSize.width <= usableWidth)
+            assertTrue(thinking.maximumSize.width <= usableWidth)
+        }
+    }
+
+    @Test
+    fun `width updates refresh agent row height after wrapping`() {
+        val page = ChatPage(
+            project = projectAt(createTempDirectory().toString()),
+            enableIdeServices = false
+        )
+        val messageContainerField = ChatPage::class.java.getDeclaredField("messageContainer")
+        messageContainerField.isAccessible = true
+        val messageContainer = messageContainerField.get(page) as JPanel
+        val scrollPaneField = ChatPage::class.java.getDeclaredField("scrollPane")
+        scrollPaneField.isAccessible = true
+        val scrollPane = scrollPaneField.get(page) as javax.swing.JScrollPane
+        scrollPane.viewport.setSize(320, 400)
+
+        SwingUtilities.invokeAndWait {
+            val agent = com.aiassistant.ui.chat.ChatBubbleRenderer.render(
+                com.aiassistant.ui.chat.ChatMessage(
+                    type = com.aiassistant.ui.chat.ChatMessage.Type.AGENT_TEXT,
+                    content = """
+                        你好！这是一条比较长的 AI 消息，用来复现侧边栏变窄后文本需要重新换行的场景。
+                        - 第一条列表内容也必须按新的宽度换行，并且仍然贴着气泡左侧开始显示。
+                        - 第二条列表内容继续拉长，确保外层行高会随着内部文本变高而刷新。
+                    """.trimIndent()
+                ),
+                panelWidth = 900
+            )
+            messageContainer.add(agent)
+
+            page.updateBubbleMaxWidths()
+
+            kotlin.test.assertEquals(agent.preferredSize.height, agent.maximumSize.height)
+            assertTrue(labelsIn(agent).any { it.text?.contains("body width=") == true })
         }
     }
 

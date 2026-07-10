@@ -39,7 +39,7 @@ object ChatBubbleRenderer {
         panelWidth: Int = 0
     ): JComponent {
         return when (msg.type) {
-            ChatMessage.Type.USER_TEXT -> renderUserBubble(msg)
+            ChatMessage.Type.USER_TEXT -> renderUserBubble(msg, panelWidth)
             ChatMessage.Type.AGENT_TEXT -> renderAgentBubble(msg, panelWidth)
             ChatMessage.Type.ERROR -> renderErrorBubble(msg, onRetry)
             ChatMessage.Type.SYSTEM -> renderSystemMsg(msg)
@@ -47,7 +47,7 @@ object ChatBubbleRenderer {
         }
     }
 
-    private fun renderUserBubble(msg: ChatMessage): JPanel {
+    private fun renderUserBubble(msg: ChatMessage, panelWidth: Int = 0): JPanel {
         // 外层 FlowLayout.RIGHT 强制右对齐，不依赖 BoxLayout alignmentX
         val outer = JPanel(FlowLayout(FlowLayout.RIGHT, 0, 0)).apply {
             isOpaque = false
@@ -62,10 +62,9 @@ object ChatBubbleRenderer {
             isOpaque = false
         }
         bubble.layout = FlowLayout(FlowLayout.LEFT, 0, 0)
-        val text = JLabel(
-            "<html>${
-                escapeHtml(msg.content).replace("\n", "<br>")
-            }</html>"
+        val text = wrappingLabel(
+            escapeHtml(msg.content).replace("\n", "<br>"),
+            0
         ).apply {
             isOpaque = false; font = font.deriveFont(14f)
             border = BorderFactory.createEmptyBorder(12, 12, 12, 12)
@@ -122,17 +121,15 @@ object ChatBubbleRenderer {
                             "<code>${it.groupValues[1]}</code>"
                         }
                     body.add(
-                        JLabel(
-                            "<html>${
-                                rendered.replace("\n", "<br>")
-                            }</html>"
+                        leftAlignedRow(
+                        wrappingLabel(
+                            rendered.replace("\n", "<br>"),
+                            0
                         ).apply {
                             font = font.deriveFont(12f)
                             border = BorderFactory.createEmptyBorder(1, 0, 1, 0)
-                            horizontalAlignment = SwingConstants.LEFT
-                            alignmentX = java.awt.Component.LEFT_ALIGNMENT
-                            maximumSize = Dimension(preferredSize.width, preferredSize.height)
-                        })
+                        }
+                    ))
                     i++
                 }
 
@@ -209,20 +206,23 @@ object ChatBubbleRenderer {
                 }
 
                 is MarkdownBlock.Header -> {
-                    body.add(JLabel("<html><b style='font-size:14px'>${escapeHtml(block.text)}</b></html>").apply {
-                        horizontalAlignment = SwingConstants.LEFT
-                        alignmentX = java.awt.Component.LEFT_ALIGNMENT
-                        maximumSize = Dimension(preferredSize.width, preferredSize.height)
-                    })
+                    body.add(
+                        leftAlignedRow(
+                            wrappingLabel(
+                                "<b style='font-size:14px'>${escapeHtml(block.text)}</b>",
+                                0
+                            )
+                        )
+                    )
                     i++
                 }
 
                 is MarkdownBlock.ListItem -> {
-                    body.add(JLabel("<html>&nbsp;&nbsp;• ${escapeHtml(block.text)}</html>").apply {
-                        horizontalAlignment = SwingConstants.LEFT
-                        alignmentX = java.awt.Component.LEFT_ALIGNMENT
-                        maximumSize = Dimension(preferredSize.width, preferredSize.height)
-                    })
+                    body.add(
+                        leftAlignedRow(
+                            wrappingLabel("&nbsp;&nbsp;• ${escapeHtml(block.text)}", 0)
+                        )
+                    )
                     i++
                 }
 
@@ -265,6 +265,52 @@ object ChatBubbleRenderer {
         outer.add(wrapper)
         return capRowHeight(outer)
     }
+
+    fun updateWrappingLabels(container: Component, width: Int) {
+        if (container is JLabel) {
+            val html = container.getClientProperty("wrapHtml") as? String
+            if (html != null) {
+                container.text = htmlWithWidth(html, width)
+                container.maximumSize =
+                    Dimension(container.preferredSize.width, container.preferredSize.height)
+            }
+        }
+        if (container is java.awt.Container) {
+            container.components.forEach { updateWrappingLabels(it, width) }
+        }
+        refreshCappedHeight(container)
+    }
+
+    fun refreshCappedHeights(container: Component) {
+        if (container is java.awt.Container) {
+            container.components.forEach { refreshCappedHeights(it) }
+        }
+        refreshCappedHeight(container)
+    }
+
+    private fun wrappingLabel(html: String, width: Int): JLabel =
+        JLabel(htmlWithWidth(html, width)).apply {
+            putClientProperty("wrapHtml", html)
+            horizontalAlignment = SwingConstants.LEFT
+            verticalAlignment = SwingConstants.TOP
+            alignmentX = Component.LEFT_ALIGNMENT
+        }
+
+    private fun leftAlignedRow(component: JComponent): JPanel =
+        JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
+            isOpaque = false
+            alignmentX = Component.LEFT_ALIGNMENT
+            putClientProperty("capHeight", true)
+            add(component)
+            maximumSize = Dimension(Int.MAX_VALUE, preferredSize.height)
+        }
+
+    private fun htmlWithWidth(html: String, width: Int): String =
+        if (width > 0) {
+            "<html><body width='${width.coerceAtLeast(80)}'>$html</body></html>"
+        } else {
+            "<html>$html</html>"
+        }
 
     private fun renderErrorBubble(msg: ChatMessage, onRetry: (() -> Unit)?): JPanel {
         val wrapper = JPanel(BorderLayout()).apply {
@@ -434,6 +480,7 @@ object ChatBubbleRenderer {
         val body = JTextArea(reasoning).apply {
             font = Font(Font.SANS_SERIF, Font.ITALIC, 11); foreground = AppColors.thinkingBodyFg
             background = AppColors.thinkingBg; isEditable = false; lineWrap = true
+            wrapStyleWord = true
             // 对齐 ui-prototype: body 展开时 border-top=1px solid amber-100
             border = BorderFactory.createCompoundBorder(
                 BorderFactory.createMatteBorder(1, 0, 0, 0, AppColors.thinkingBorder),
@@ -456,15 +503,32 @@ object ChatBubbleRenderer {
                 body.isVisible = expand
                 bodyScroll.isVisible = expand
                 arrowLabel.text = if (expand) "▾" else "▶"
-                capRowHeight(outer)
+                val currentWidth = listOf(outer.width, block.width, outer.preferredSize.width)
+                    .firstOrNull { it > 0 } ?: 0
+                block.preferredSize = null
+                outer.preferredSize = null
+                if (currentWidth > 0) {
+                    updateThinkingBodySize(body, bodyScroll, currentWidth)
+                    block.preferredSize = Dimension(currentWidth, block.preferredSize.height)
+                }
+                outer.maximumSize = Dimension(Int.MAX_VALUE, outer.preferredSize.height)
                 block.revalidate()
+                outer.revalidate()
+                (outer.parent as? JComponent)?.revalidate()
                 block.repaint()
+                outer.repaint()
             }
         }
         addMouseListenerRecursively(header, toggleThinking)
         block.add(header, BorderLayout.NORTH); block.add(bodyScroll, BorderLayout.CENTER)
         outer.add(block, BorderLayout.CENTER)
         return capRowHeight(outer)
+    }
+
+    private fun updateThinkingBodySize(body: JTextArea, bodyScroll: JScrollPane, width: Int) {
+        val textWidth = (width - 20).coerceAtLeast(80)
+        body.setSize(textWidth, Int.MAX_VALUE)
+        bodyScroll.preferredSize = Dimension(0, body.preferredSize.height.coerceIn(1, 140))
     }
 
     private fun addMouseListenerRecursively(
@@ -478,8 +542,16 @@ object ChatBubbleRenderer {
     }
 
     private fun <T : JComponent> capRowHeight(row: T): T {
+        row.putClientProperty("capHeight", true)
         row.maximumSize = Dimension(Int.MAX_VALUE, row.preferredSize.height)
         return row
+    }
+
+    private fun refreshCappedHeight(component: Component) {
+        if (component is JComponent && component.getClientProperty("capHeight") == true) {
+            component.maximumSize =
+                Dimension(component.maximumSize.width, component.preferredSize.height)
+        }
     }
 
     /**

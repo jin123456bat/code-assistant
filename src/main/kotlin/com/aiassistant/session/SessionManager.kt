@@ -11,6 +11,7 @@ import com.intellij.openapi.project.Project
 import java.math.BigDecimal
 import java.net.SocketTimeoutException
 import java.time.LocalDate
+import java.util.concurrent.Future
 
 // ponytail: session CRUD + search wrapper over SessionStore
 
@@ -27,8 +28,13 @@ class SessionManager(private val project: Project) {
     /** Anthropic SDK 客户端，用于标题生成。对齐 docs/agent.md 技术栈声明：Anthropic 兼容接口 */
     private var titleClient: AnthropicClient? = null
     private var titleClientApiKey: String? = null
+    private var titleTask: Future<*>? = null
+
+    @Volatile
+    private var closed = false
 
     private fun getTitleClient(): AnthropicClient {
+        check(!closed) { "SessionManager is closed" }
         val apiKey = AppSettingsService.getInstance().getApiKey()
             ?: throw IllegalStateException("API Key not configured")
         val existing = titleClient
@@ -224,11 +230,13 @@ class SessionManager(private val project: Project) {
      * @param sessionId 需要生成标题的会话 ID
      */
     fun generateTitle(sessionId: String) {
+        if (closed) return
         val session = store.load(sessionId) ?: return
         val firstUserMessage = session.messages.firstOrNull { it.role == Role.USER }?.content
         if (firstUserMessage.isNullOrBlank()) return
 
-        ApplicationManager.getApplication().executeOnPooledThread {
+        titleTask?.cancel(true)
+        titleTask = ApplicationManager.getApplication().executeOnPooledThread {
             generateTitleWithRetry(sessionId, firstUserMessage)
         }
     }
@@ -253,7 +261,7 @@ class SessionManager(private val project: Project) {
 
         var shouldRetry = true
 
-        while (shouldRetry) {
+        while (shouldRetry && !closed) {
             shouldRetry = false
             try {
                 val client = getTitleClient()
@@ -270,8 +278,13 @@ class SessionManager(private val project: Project) {
                 }
             } catch (e: com.anthropic.errors.RateLimitException) {
                 // 429 限流：等 1 分钟后重试，无限重试
-                Thread.sleep(60_000)
-                if (store.load(sessionId) != null) {
+                try {
+                    Thread.sleep(60_000)
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    return
+                }
+                if (!closed && store.load(sessionId) != null) {
                     shouldRetry = true
                 }
             } catch (e: SocketTimeoutException) {
@@ -290,6 +303,7 @@ class SessionManager(private val project: Project) {
      * 对齐 docs/agent/session.md §三：持久化到 SessionIndex.title 和 Session JSON 的 title 字段。
      */
     private fun applyTitle(sessionId: String, title: String) {
+        if (closed) return
         // 通过 SessionStore.updateTitle 更新底层文件（Session JSON + index.json）
         store.updateTitle(sessionId, title)
 
@@ -302,5 +316,18 @@ class SessionManager(private val project: Project) {
 
         // 通知 UI 层标题已更新，对齐 docs/ui/pages.md §十二 ChatPage 标题行
         onTitleGenerated?.invoke(sessionId, title)
+    }
+
+    fun close() {
+        closed = true
+        onTitleGenerated = null
+        titleTask?.cancel(true)
+        titleTask = null
+        try {
+            titleClient?.close()
+        } catch (_: Exception) {
+        }
+        titleClient = null
+        titleClientApiKey = null
     }
 }

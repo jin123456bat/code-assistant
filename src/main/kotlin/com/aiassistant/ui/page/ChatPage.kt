@@ -17,6 +17,7 @@ import java.awt.Graphics2D
 import java.awt.RenderingHints
 import java.awt.event.ActionListener
 import javax.swing.*
+import javax.swing.Scrollable
 
 class ChatPage(
     project: Project,
@@ -28,7 +29,22 @@ class ChatPage(
     private lateinit var planCard: PlanCard
     private val northPanel = JPanel(BorderLayout())
     private lateinit var titleLabel: JLabel
-    private val messageContainer = JPanel().apply {
+    private val messageContainer = object : JPanel(), Scrollable {
+        override fun getScrollableTracksViewportWidth(): Boolean = true
+        override fun getScrollableTracksViewportHeight(): Boolean = false
+        override fun getPreferredScrollableViewportSize(): java.awt.Dimension = preferredSize
+        override fun getScrollableUnitIncrement(
+            visibleRect: java.awt.Rectangle,
+            orientation: Int,
+            direction: Int
+        ): Int = 24
+
+        override fun getScrollableBlockIncrement(
+            visibleRect: java.awt.Rectangle,
+            orientation: Int,
+            direction: Int
+        ): Int = visibleRect.height.coerceAtLeast(24)
+    }.apply {
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
         isOpaque = true
         background = AppColors.pageBg
@@ -70,6 +86,7 @@ class ChatPage(
     private val reasoningBuf = StringBuilder()
     private var reasoningStartTime = 0L
     private var editorSelectionListener: EditorSelectionListener? = null
+    private lateinit var inputArea: ChatInputArea
     private var disposed = false
     private val messageBusListener = object : MessageBus.MessageBusListener {
         override fun onSessionChanged(sessionId: String, type: String) {
@@ -144,7 +161,7 @@ class ChatPage(
         }
         add(layeredPane, BorderLayout.CENTER)
 
-        val inputArea = ChatInputArea(
+        inputArea = ChatInputArea(
             onSend = { text ->
                 viewModel.sendMessage(text)
                 streamingBuf.clear(); streamingBubble = null
@@ -419,6 +436,7 @@ class ChatPage(
     fun updateBubbleMaxWidths(floating: Boolean = false) {
         val panelWidth = scrollPane.viewport.width
         if (panelWidth <= 0) return
+        val usableWidth = (panelWidth - 16).coerceAtLeast(1)
 
         val (userRatio, agentRatio) = if (floating) {
             0.95 to 0.95
@@ -428,14 +446,14 @@ class ChatPage(
             panelWidth in 250..350 -> 0.90 to 0.95
             else -> 0.95 to 0.95
         }
-        val userMaxWidth = (panelWidth * userRatio).toInt()
-        val agentMaxWidth = (panelWidth * agentRatio).toInt()
+        val userMaxWidth = (usableWidth * userRatio).toInt()
+        val agentMaxWidth = (usableWidth * agentRatio).toInt()
 
         for (component in messageContainer.components) {
             if (component !is JPanel) continue
             val bubbleType = component.getClientProperty("bubbleType") as? String ?: continue
             val maxWidth = when {
-                component.getClientProperty("fullWidth") == true -> panelWidth
+                component.getClientProperty("fullWidth") == true -> usableWidth
                 bubbleType == "user" -> userMaxWidth
                 bubbleType == "agent" || bubbleType == "error" -> agentMaxWidth
                 else -> continue
@@ -452,10 +470,16 @@ class ChatPage(
                 else
                     inner ?: component
             } else component
-            if (component.getClientProperty("fullWidth") == true) {
-                target.preferredSize = java.awt.Dimension(maxWidth, target.preferredSize.height)
+            val needsShrink = target.preferredSize.width > maxWidth
+            if (component.getClientProperty("fullWidth") != true && needsShrink) {
+                ChatBubbleRenderer.updateWrappingLabels(target, maxWidth - 32)
+            }
+            val preferredHeight = target.preferredSize.height
+            if (component.getClientProperty("fullWidth") == true || target.preferredSize.width > maxWidth) {
+                target.preferredSize = java.awt.Dimension(maxWidth, preferredHeight)
             }
             target.maximumSize = java.awt.Dimension(maxWidth, target.preferredSize.height)
+            ChatBubbleRenderer.refreshCappedHeights(component)
         }
         messageContainer.revalidate()
     }
@@ -507,6 +531,7 @@ class ChatPage(
         unregisterMessageBusListener()
         editorSelectionListener?.dispose()
         editorSelectionListener = null
+        if (::inputArea.isInitialized) inputArea.dispose()
         viewModel.dispose()
     }
 
@@ -625,6 +650,9 @@ class ChatPage(
             if (bubbleType != null) {
                 putClientProperty("bubbleType", bubbleType)
             }
+            if (child.getClientProperty("fullWidth") == true) {
+                putClientProperty("fullWidth", true)
+            }
             timer = Timer(frameMs, null)
             timer.addActionListener(ActionListener {
                 elapsed += frameMs
@@ -645,6 +673,7 @@ class ChatPage(
                         val index = parent.getComponentZOrder(this@AnimatedBubbleWrapper)
                         parent.remove(this@AnimatedBubbleWrapper)
                         parent.add(child, index)
+                        updateBubbleMaxWidths()
                         parent.revalidate()
                         parent.repaint()
                     }

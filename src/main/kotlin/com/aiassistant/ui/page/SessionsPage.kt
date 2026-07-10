@@ -4,6 +4,7 @@ import com.aiassistant.session.SessionIndex
 import com.aiassistant.session.SessionStore
 import com.aiassistant.ui.AppColors
 import com.aiassistant.ui.toHtmlColor
+import com.intellij.openapi.Disposable
 import com.intellij.openapi.project.Project
 import java.awt.BorderLayout
 import java.awt.Cursor
@@ -17,7 +18,7 @@ import javax.swing.*
 class SessionsPage(
     project: Project,
     private val onRestore: (String) -> Unit
-) : JPanel(BorderLayout()) {
+) : JPanel(BorderLayout()), Disposable {
 
     private val store = SessionStore(project)
     private val listContainer = JPanel().apply { layout = BoxLayout(this, BoxLayout.Y_AXIS) }
@@ -34,6 +35,7 @@ class SessionsPage(
     private var allSessions: List<SessionIndex> = emptyList()
     private var displayedCount = 0
     private lateinit var loadMoreBtn: JButton
+    private val searchTimer = Timer(300) { refreshList() }.apply { isRepeats = false }
 
     init {
         val topBar = JPanel(BorderLayout())
@@ -90,19 +92,17 @@ class SessionsPage(
         add(bottomBar, BorderLayout.SOUTH)
 
         // 搜索 debounce
-        val timer = Timer(300) { refreshList() }
-        timer.isRepeats = false
         searchField.document.addDocumentListener(object : javax.swing.event.DocumentListener {
             override fun insertUpdate(e: javax.swing.event.DocumentEvent?) {
-                timer.restart()
+                searchTimer.restart()
             }
 
             override fun removeUpdate(e: javax.swing.event.DocumentEvent?) {
-                timer.restart()
+                searchTimer.restart()
             }
 
             override fun changedUpdate(e: javax.swing.event.DocumentEvent?) {
-                timer.restart()
+                searchTimer.restart()
             }
         })
 
@@ -225,5 +225,9 @@ class SessionsPage(
         }
         card.add(delBtn, BorderLayout.EAST)
         return card
+    }
+
+    override fun dispose() {
+        searchTimer.stop()
     }
 }

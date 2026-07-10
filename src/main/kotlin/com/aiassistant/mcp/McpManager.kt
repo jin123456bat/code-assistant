@@ -106,12 +106,13 @@ class McpManager(private val project: Project) {
     private val gson = Gson()
     private val configStore = McpConfigStore(project)
     private val servers = mutableMapOf<String, McpServer>()
-    private val httpClient: OkHttpClient by lazy {
+    private val httpClientDelegate = lazy {
         OkHttpClient.Builder()
             .connectTimeout(5, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .build()
     }
+    private val httpClient: OkHttpClient by httpClientDelegate
 
     /** 定时任务调度器 */
     private val scheduler: ScheduledExecutorService =
@@ -917,7 +918,14 @@ class McpManager(private val project: Project) {
 
     fun dispose() {
         scheduler.shutdownNow()
-        servers.keys.forEach { disconnect(it) }
+        servers.keys.forEach {
+            disconnect(it)
+            servers[it]?.registeredToolNames?.forEach(ToolRegistry::unregister)
+        }
+        if (httpClientDelegate.isInitialized()) {
+            httpClient.dispatcher.executorService.shutdown()
+            httpClient.connectionPool.evictAll()
+        }
         unregisterInstance(project)
     }
 

@@ -93,7 +93,7 @@ class SettingsConfigurable : Configurable {
 
     override fun isModified(): Boolean {
         val s = AppSettingsService.getInstance()
-        return apiKeyField.password?.concatToString() != s.getApiKey()
+        return apiKeyField.password?.concatToString() != (s.getCachedApiKey() ?: "")
                 || getSelectedModelId() != s.getModel()
                 || completionEnabledCheckBox.isSelected != s.isCompletionEnabled()
                 || (maxTokensSpinner.value as Int) != s.getCompletionMaxTokens()
@@ -131,7 +131,8 @@ class SettingsConfigurable : Configurable {
 
     override fun reset() {
         val s = AppSettingsService.getInstance()
-        apiKeyField.text = s.getApiKey() ?: ""
+        apiKeyField.text = s.getCachedApiKey() ?: ""
+        s.loadApiKeyAsync { apiKey -> apiKeyField.text = apiKey ?: "" }
         modelComboBox.selectedItem = s.getModelDisplayName()
         completionEnabledCheckBox.isSelected = s.isCompletionEnabled()
         maxTokensSpinner.value = s.getCompletionMaxTokens()

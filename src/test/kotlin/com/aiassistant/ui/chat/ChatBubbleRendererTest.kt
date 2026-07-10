@@ -7,6 +7,7 @@ import java.awt.Container
 import javax.swing.JButton
 import javax.swing.JLabel
 import javax.swing.JScrollPane
+import javax.swing.JTextArea
 import javax.swing.JTextPane
 import javax.swing.border.Border
 import javax.swing.border.CompoundBorder
@@ -308,7 +309,7 @@ class ChatBubbleRendererTest {
     }
 
     @Test
-    fun `agent text labels keep their preferred width instead of centering in stretched rows`() {
+    fun `agent text labels stay left aligned while allowing width updates`() {
         val component = ChatBubbleRenderer.render(
             ChatMessage(type = ChatMessage.Type.AGENT_TEXT, content = "hello\n- world")
         )
@@ -317,8 +318,34 @@ class ChatBubbleRendererTest {
             .filter { it.text?.contains("hello") == true || it.text?.contains("world") == true }
             .forEach { label ->
                 assertEquals(javax.swing.SwingConstants.LEFT, label.horizontalAlignment)
-                assertEquals(label.preferredSize.width, label.maximumSize.width)
+                assertTrue(label.maximumSize.width >= label.preferredSize.width)
             }
+    }
+
+    @Test
+    fun `short user bubble keeps content width`() {
+        val component = ChatBubbleRenderer.render(
+            ChatMessage(type = ChatMessage.Type.USER_TEXT, content = "你好"),
+            panelWidth = 900
+        )
+
+        assertTrue(component.getComponent(0).preferredSize.width < 180)
+    }
+
+    @Test
+    fun `wrapping labels can be retargeted to a narrower width`() {
+        val component = ChatBubbleRenderer.render(
+            ChatMessage(type = ChatMessage.Type.AGENT_TEXT, content = "hello world hello world"),
+            panelWidth = 800
+        )
+
+        ChatBubbleRenderer.updateWrappingLabels(component, 120)
+
+        assertTrue(
+            labelsIn(component)
+                .filter { it.text?.contains("hello") == true }
+                .all { it.text.contains("body width='120'") }
+        )
     }
 
     @Test
@@ -383,6 +410,59 @@ class ChatBubbleRendererTest {
     }
 
     @Test
+    fun `thinking expands after width constraint is applied`() {
+        val component = ChatBubbleRenderer.renderThinking("line\n".repeat(20), 300)
+        component.preferredSize = java.awt.Dimension(400, component.preferredSize.height)
+        component.maximumSize = java.awt.Dimension(400, component.preferredSize.height)
+        val collapsedHeight = component.maximumSize.height
+        val thinkingLabel = labelsIn(component).first { it.text == "💭 思考过程" }
+
+        thinkingLabel.dispatchEvent(
+            java.awt.event.MouseEvent(
+                thinkingLabel,
+                java.awt.event.MouseEvent.MOUSE_CLICKED,
+                System.currentTimeMillis(),
+                0,
+                1,
+                1,
+                1,
+                false
+            )
+        )
+
+        assertTrue(scrollPanesIn(component).single { it.isVisible }.preferredSize.height > 0)
+        assertTrue(component.maximumSize.height > collapsedHeight)
+    }
+
+    @Test
+    fun `thinking expanded body wraps to current width`() {
+        val component = ChatBubbleRenderer.renderThinking(
+            "The user keeps saying hello repeatedly and this sentence should wrap inside the thinking panel.",
+            300
+        )
+        component.preferredSize = java.awt.Dimension(320, component.preferredSize.height)
+        component.maximumSize = java.awt.Dimension(320, component.preferredSize.height)
+        val thinkingLabel = labelsIn(component).first { it.text == "💭 思考过程" }
+
+        thinkingLabel.dispatchEvent(
+            java.awt.event.MouseEvent(
+                thinkingLabel,
+                java.awt.event.MouseEvent.MOUSE_CLICKED,
+                System.currentTimeMillis(),
+                0,
+                1,
+                1,
+                1,
+                false
+            )
+        )
+
+        val body = textAreasIn(component).single()
+        assertTrue(body.lineWrap)
+        assertTrue(body.preferredSize.width <= 300)
+    }
+
+    @Test
     fun `inline code renders as html code element`() {
         val component = ChatBubbleRenderer.render(
             ChatMessage(type = ChatMessage.Type.AGENT_TEXT, content = "Use `foo()` now")
@@ -436,6 +516,15 @@ class ChatBubbleRendererTest {
             when (child) {
                 is JTextPane -> listOf(child)
                 is Container -> textPanesIn(child)
+                else -> emptyList()
+            }
+        }
+
+    private fun textAreasIn(container: Container): List<JTextArea> =
+        container.components.flatMap { child ->
+            when (child) {
+                is JTextArea -> listOf(child)
+                is Container -> textAreasIn(child)
                 else -> emptyList()
             }
         }

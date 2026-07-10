@@ -15,6 +15,7 @@ import com.intellij.codeInsight.inline.completion.InlineCompletionSuggestion
 import com.intellij.codeInsight.inline.completion.elements.InlineCompletionElement
 import com.intellij.codeInsight.inline.completion.elements.InlineCompletionGrayTextElement
 import com.intellij.openapi.components.service
+import com.intellij.openapi.application.ApplicationManager
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 
@@ -34,7 +35,8 @@ import kotlinx.coroutines.flow.flow
 class AiCompletionProvider : InlineCompletionProvider {
 
     private val settings = AppSettingsService.getInstance()
-    private val fimClient = DeepSeekFimClient(settings)
+    private val fimClient: DeepSeekFimClient
+        get() = ApplicationManager.getApplication().service<CompletionFimService>().client
     private val cache = CompletionCache()
 
     /** 缓存当前补全请求的语言标识，供 afterInsertion 回调使用 */

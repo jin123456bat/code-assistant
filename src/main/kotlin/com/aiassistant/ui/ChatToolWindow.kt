@@ -3,6 +3,7 @@ package com.aiassistant.ui
 import com.aiassistant.AppSettingsService
 import com.aiassistant.session.SessionStore
 import com.aiassistant.ui.page.*
+import com.aiassistant.util.OkioWatchdogCleaner
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.project.Project
 import java.awt.BorderLayout
@@ -24,7 +25,11 @@ class ChatToolWindow(private val project: Project) : JPanel(BorderLayout()), Dis
 
     private val settings = AppSettingsService.getInstance()
     private val pages = JPanel(CardLayout())
-    private val welcomePage = WelcomePage(project) { navigateTo(Page.CHAT) }
+    private var hasApiKey = settings.getCachedApiKey() != null
+    private val welcomePage = WelcomePage(project) {
+        hasApiKey = true
+        navigateTo(Page.CHAT)
+    }
     private var chatPage = ChatPage(project)
     private val loadedPages = mutableSetOf(Page.WELCOME, Page.CHAT)
 
@@ -35,6 +40,9 @@ class ChatToolWindow(private val project: Project) : JPanel(BorderLayout()), Dis
     private val pageFactories = mutableMapOf<String, () -> JPanel>()
 
     private val tabBar = TabBar { navigateTo(it) }
+
+    @Volatile
+    private var disposed = false
 
     /**
      * 动态注册页面，对齐 docs/ui/pages.md §十二。
@@ -94,24 +102,20 @@ class ChatToolWindow(private val project: Project) : JPanel(BorderLayout()), Dis
             }
         })
 
-        // Auto-restore: open last active session if API key is set
-        // 对齐 docs/ui/pages.md §二：CardLayout 不销毁隐藏页面，ChatPage 复用同一实例
-        if (settings.getApiKey() != null) {
-            val store = SessionStore(project)
-            val last = store.listAll().maxByOrNull { it.updatedAt }
-            if (last != null) {
-                chatPage.restoreSession(last.id)
-                navigateTo(Page.CHAT)
-            } else {
-                navigateTo(Page.CHAT)
-            }
+        if (hasApiKey) {
+            restoreLastSessionAndNavigate()
         } else {
             navigateTo(Page.WELCOME)
+            settings.loadApiKeyAsync { apiKey ->
+                if (apiKey != null && !disposed && !project.isDisposed) {
+                    hasApiKey = true
+                    restoreLastSessionAndNavigate()
+                }
+            }
         }
     }
 
     fun navigateTo(page: Page) {
-        val hasApiKey = settings.getApiKey() != null
         tabBar.setApiKeyConfigured(hasApiKey)
         val target = when {
             !hasApiKey -> Page.WELCOME
@@ -126,6 +130,15 @@ class ChatToolWindow(private val project: Project) : JPanel(BorderLayout()), Dis
         if (target != previous) {
             onPageChanged?.invoke(target)
         }
+    }
+
+    private fun restoreLastSessionAndNavigate() {
+        val store = SessionStore(project)
+        val last = store.listAll().maxByOrNull { it.updatedAt }
+        if (last != null) {
+            chatPage.restoreSession(last.id)
+        }
+        navigateTo(Page.CHAT)
     }
 
     /** 当前可见页面，对齐 docs/ui/pages.md §十二 */
@@ -161,7 +174,9 @@ class ChatToolWindow(private val project: Project) : JPanel(BorderLayout()), Dis
     }
 
     override fun dispose() {
+        disposed = true
         chatPage.dispose()
         pages.components.filterIsInstance<Disposable>().forEach { it.dispose() }
+        OkioWatchdogCleaner.shutdownForPluginUnload()
     }
 }

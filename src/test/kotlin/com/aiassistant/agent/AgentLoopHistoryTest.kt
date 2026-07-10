@@ -1,6 +1,7 @@
 package com.aiassistant.agent
 
 import com.intellij.openapi.project.Project
+import java.io.File
 import java.lang.reflect.Proxy
 import kotlin.io.path.createDirectories
 import kotlin.io.path.createTempDirectory
@@ -8,6 +9,7 @@ import kotlin.io.path.writeText
 import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 
 class AgentLoopHistoryTest {
@@ -111,6 +113,13 @@ class AgentLoopHistoryTest {
 
         assertIs<AgentLoop.Result.Error>(result)
         assertContains(result.message, "请先配置 DeepSeek API Key")
+    }
+
+    @Test
+    fun `agent loop does not create java util timer threads`() {
+        val source = File("src/main/kotlin/com/aiassistant/agent/AgentLoop.kt").readText()
+
+        assertFalse(source.contains("java.util.Timer"))
     }
 
     private fun projectAt(basePath: String): Project =

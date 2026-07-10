@@ -23,7 +23,7 @@ class FimApiException(val statusCode: Int, message: String) : IOException(messag
  */
 class DeepSeekFimClient(
     private val settings: AppSettingsService = AppSettingsService.getInstance()
-) {
+) : AutoCloseable {
     companion object {
         private const val FIM_ENDPOINT = "https://api.deepseek.com/beta/completions"
         // 补全延迟目标 <500ms，连接超时 2s、读取超时 3s 已足够覆盖 2 次重试（200ms+400ms）
@@ -38,7 +38,7 @@ class DeepSeekFimClient(
     /**
      * OkHttpClient 单例：连接池 5 个空闲连接保持 5 分钟，连接/读取超时，支持 HTTP/2。
      */
-    private val httpClient: OkHttpClient by lazy {
+    private val httpClientDelegate = lazy {
         OkHttpClient.Builder()
             .connectionPool(ConnectionPool(
                 maxIdleConnections = 5,
@@ -53,6 +53,7 @@ class DeepSeekFimClient(
             .retryOnConnectionFailure(false)  // 关闭 SDK 内置重试，由 executeWithRetry 自行控制指数退避
             .build()
     }
+    private val httpClient: OkHttpClient by httpClientDelegate
 
     @Volatile
     private var activeCall: okhttp3.Call? = null
@@ -159,16 +160,29 @@ class DeepSeekFimClient(
         val call = httpClient.newCall(httpRequest)
         activeCall = call
         try {
-            val response = call.execute()
-            if (!response.isSuccessful) {
-                val errorBody = response.body?.string() ?: ""
-                throw FimApiException(response.code, "FIM API error ${response.code}: $errorBody")
+            call.execute().use { response ->
+                if (!response.isSuccessful) {
+                    val errorBody = response.body?.string() ?: ""
+                    throw FimApiException(
+                        response.code,
+                        "FIM API error ${response.code}: $errorBody"
+                    )
+                }
+                val responseBody = response.body?.string() ?: ""
+                val responseType = object : com.google.gson.reflect.TypeToken<FimResponse>() {}.type
+                return gson.fromJson(responseBody, responseType)
             }
-            val responseBody = response.body?.string() ?: ""
-            val responseType = object : com.google.gson.reflect.TypeToken<FimResponse>() {}.type
-            return gson.fromJson(responseBody, responseType)
         } finally {
             activeCall = null
+        }
+    }
+
+    override fun close() {
+        activeCall?.cancel()
+        activeCall = null
+        if (httpClientDelegate.isInitialized()) {
+            httpClient.dispatcher.executorService.shutdown()
+            httpClient.connectionPool.evictAll()
         }
     }
 }

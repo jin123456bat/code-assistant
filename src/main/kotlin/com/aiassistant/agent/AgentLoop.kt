@@ -104,9 +104,7 @@ class AgentLoop(
     /** compact 后标记 builder 需要从 session.messages 重新构建，避免消息重复 */
     private var needsRebuild: Boolean = false
 
-    /** 流式 token 批量合并：首个 token 立即发送，后续 token 缓存 30ms 后批量发送，减少 UI 刷新频率 */
-    private val tokenBuffer = StringBuilder()
-    private var tokenTimer: java.util.Timer? = null
+    /** 流式 token 批量合并在 ChatViewModel 处理，AgentLoop 只转发 token。 */
     private var firstTokenSentThisTurn = false
 
     /**
@@ -152,9 +150,19 @@ class AgentLoop(
         }
     }
 
-    fun close() {
-        session.cancel()
+    fun close(cancelSession: Boolean = true) {
+        if (cancelSession) session.cancel()
         try { client?.close() } catch (_: Exception) {}
+        client = null
+        clientApiKey = null
+        onToken = null
+        onReasoningContent = null
+        onToolCall = null
+        onToolCallStateChanged = null
+        onApprovalRequested = null
+        onTurnCompleted = null
+        onSubAgentEvent = null
+        toolExecutor.dispose()
     }
 
     enum class AgentMode { CHAT, AGENT, PLAN }
@@ -253,7 +261,6 @@ class AgentLoop(
 
                 // 重置流式 token 批量合并状态
                 firstTokenSentThisTurn = false
-                tokenBuffer.clear()
 
                 // 轮次预警：当 turn >= effectiveMaxTurns * turnWarningRatio 时附加系统提示
                 // effectiveMaxTurns == Int.MAX_VALUE（不限轮次）时跳过预警
@@ -293,20 +300,7 @@ class AgentLoop(
                                         firstTokenSentThisTurn = true
                                         onToken?.invoke(text.text())
                                     } else {
-                                        // 后续 token 缓存并 30ms 后批量发送
-                                        tokenBuffer.append(text.text())
-                                        tokenTimer?.cancel()
-                                        tokenTimer = java.util.Timer().apply {
-                                            schedule(object : java.util.TimerTask() {
-                                                override fun run() {
-                                                    val batched = tokenBuffer.toString()
-                                                    tokenBuffer.clear()
-                                                    if (batched.isNotEmpty()) {
-                                                        onToken?.invoke(batched)
-                                                    }
-                                                }
-                                            }, 30)
-                                        }
+                                        onToken?.invoke(text.text())
                                     }
                                 }
                             } else if (event.isContentBlockStart()) {

@@ -59,7 +59,8 @@ tasks {
     runIde {
         jvmArgs(
             "-Dsun.net.inetaddr.ttl=30",
-            "-Dsun.net.inetaddr.negative.ttl=0"
+            "-Dsun.net.inetaddr.negative.ttl=0",
+            "-Dide.plugins.snapshot.on.unload.fail=true"
         )
     }
     // 跳过搜索选项构建以加速

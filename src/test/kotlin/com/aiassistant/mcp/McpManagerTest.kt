@@ -77,6 +77,21 @@ class McpManagerTest {
     }
 
     @Test
+    fun `dispose unregisters mcp tools`() {
+        val manager = McpManager(projectAt(createTempDirectory().toString()))
+        manager.addServer(McpManager.McpServerConfig(id = "docs", command = "npx"))
+        val server = manager.getServer("docs")!!
+        val schema = JsonParser.parseString("""{"type":"object","properties":{}}""").asJsonObject
+
+        manager.registerMcpToolForTest(server, "search", "Search docs", schema)
+        assertNotNull(ToolRegistry.getToolInfo("docs/search"))
+
+        manager.dispose()
+
+        kotlin.test.assertNull(ToolRegistry.getToolInfo("docs/search"))
+    }
+
+    @Test
     fun `connects http mcp server and registers tools`() {
         val httpServer = HttpServer.create(InetSocketAddress(0), 0)
         httpServer.createContext("/") { exchange ->

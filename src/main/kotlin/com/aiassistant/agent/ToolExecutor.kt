@@ -48,13 +48,14 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
     var onSubAgentEvent: ((MultiAgentManager.SubAgentEvent) -> Unit)? = null
 
     /** WebSearch/WebFetch 复用 OkHttpClient */
-    private val webHttpClient: OkHttpClient by lazy {
+    private val webHttpClientDelegate = lazy {
         OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .followRedirects(true)
             .build()
     }
+    private val webHttpClient: OkHttpClient by webHttpClientDelegate
 
     /**
      * 执行单个工具调用。
@@ -159,6 +160,16 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
                 null
             )
             "错误: ${e.javaClass.simpleName}: ${e.message}"
+        }
+    }
+
+    fun dispose() {
+        onToolStateChanged = null
+        onApprovalRequested = null
+        onSubAgentEvent = null
+        if (webHttpClientDelegate.isInitialized()) {
+            webHttpClient.dispatcher.executorService.shutdown()
+            webHttpClient.connectionPool.evictAll()
         }
     }
 

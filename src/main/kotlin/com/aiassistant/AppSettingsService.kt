@@ -1,28 +1,23 @@
 package com.aiassistant
 
+import com.aiassistant.util.OkioWatchdogCleaner
 import com.intellij.credentialStore.CredentialAttributes
 import com.intellij.credentialStore.Credentials
 import com.intellij.ide.passwordSafe.PasswordSafe
+import com.intellij.openapi.Disposable
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
+import javax.swing.SwingUtilities
 
 @Service(Service.Level.APP)
-class AppSettingsService {
+class AppSettingsService : Disposable {
 
     private val credentialAttributes = CredentialAttributes("$SERVICE_NAME.API_KEY")
     @Volatile
     private var cachedApiKey: String? = null
     @Volatile
     private var apiKeyLoaded = false
-
-    init {
-        com.intellij.openapi.application.ApplicationManager.getApplication().executeOnPooledThread {
-            if (!apiKeyLoaded) {
-                cachedApiKey = PasswordSafe.instance.get(credentialAttributes)
-                    ?.getPasswordAsString(); apiKeyLoaded = true
-            }
-        }
-    }
 
     companion object {
         private const val SERVICE_NAME = "AI_Coding_Assistant"
@@ -65,9 +60,28 @@ class AppSettingsService {
     }
 
     fun getApiKey(): String? {
+        return loadApiKey()
+    }
+
+    fun getCachedApiKey(): String? =
+        if (apiKeyLoaded) cachedApiKey?.takeIf { it.isNotBlank() } else null
+
+    fun loadApiKeyAsync(onLoaded: (String?) -> Unit) {
+        if (apiKeyLoaded) {
+            onLoaded(getCachedApiKey())
+            return
+        }
+        ApplicationManager.getApplication().executeOnPooledThread {
+            val apiKey = loadApiKey()
+            SwingUtilities.invokeLater { onLoaded(apiKey) }
+        }
+    }
+
+    @Synchronized
+    private fun loadApiKey(): String? {
         if (!apiKeyLoaded) {
-            cachedApiKey = PasswordSafe.instance.get(credentialAttributes)
-                ?.getPasswordAsString(); apiKeyLoaded = true
+            cachedApiKey = PasswordSafe.instance.get(credentialAttributes)?.getPasswordAsString()
+            apiKeyLoaded = true
         }
         return cachedApiKey?.takeIf { it.isNotBlank() }
     }
@@ -151,4 +165,8 @@ class AppSettingsService {
     fun setCommitEnabled(enabled: Boolean) =
         com.intellij.ide.util.PropertiesComponent.getInstance()
             .setValue(COMMIT_ENABLED_KEY, enabled.toString())
+
+    override fun dispose() {
+        OkioWatchdogCleaner.shutdownForPluginUnload()
+    }
 }

@@ -90,6 +90,22 @@ class ChatInputAreaTest {
         assertTrue(labelsIn(inputArea).none { it.text?.contains("UserService.kt:40-60") == true })
     }
 
+    @Test
+    fun `dispose stops error recovery timer`() {
+        val inputArea = ChatInputArea(onSend = {})
+
+        inputArea.showError()
+        val timer = ChatInputArea::class.java
+            .getDeclaredField("errorRecoveryTimer")
+            .apply { isAccessible = true }
+            .get(inputArea) as javax.swing.Timer
+
+        assertTrue(timer.isRunning)
+        inputArea.dispose()
+
+        assertFalse(timer.isRunning)
+    }
+
     private fun findSendButton(inputArea: ChatInputArea): JButton =
         buttonsIn(inputArea).single { it.accessibleContext.accessibleDescription == "发送消息" }
 

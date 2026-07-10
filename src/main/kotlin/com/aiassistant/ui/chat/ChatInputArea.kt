@@ -4,6 +4,7 @@ import com.aiassistant.agent.FileRef
 import com.aiassistant.agent.ImageRef
 import com.aiassistant.ui.AppColors
 import com.aiassistant.skills.SkillManager
+import com.intellij.openapi.Disposable
 import java.awt.*
 import java.awt.datatransfer.DataFlavor
 import java.awt.event.*
@@ -26,7 +27,7 @@ class ChatInputArea(
     private val onInputChanged: ((text: String) -> Unit)? = null,
     /** 获取上一条用户消息文本的回调，用于 ↑ 在空输入框时填充历史消息（对齐 docs/ui/pages.md §十） */
     private val onFillPreviousMessage: (() -> String?)? = null
-) : JPanel(BorderLayout()) {
+) : JPanel(BorderLayout()), Disposable {
 
     private val textArea = JTextArea(3, 0).apply {
         lineWrap = true; wrapStyleWord = true; font = font.deriveFont(12f)
@@ -192,16 +193,6 @@ class ChatInputArea(
 
     fun setProject(project: com.intellij.openapi.project.Project) {
         projectRef = project
-        // ponytail: 后台预加载文件列表，避免 EDT 访问 PSI index
-        com.intellij.openapi.application.ApplicationManager.getApplication().executeOnPooledThread {
-            cachedFiles = try {
-                com.intellij.openapi.application.ReadAction.compute<List<ProjectFileEntry>, Throwable> {
-                    getProjectFiles("")
-                }
-            } catch (_: Exception) {
-                emptyList()
-            }
-        }
     }
 
     /**
@@ -921,4 +912,13 @@ class ChatInputArea(
         updateInputBorder()
     }
 
+    override fun dispose() {
+        loadingAnimator?.stop()
+        loadingAnimator = null
+        errorRecoveryTimer?.stop()
+        errorRecoveryTimer = null
+        hidePopup()
+        projectRef = null
+        cachedFiles = null
+    }
 }

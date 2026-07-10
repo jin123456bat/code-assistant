@@ -753,8 +753,7 @@ class ChatViewModel(
         lastAgentText = null
         lastSlashCommand = null
         lastCompletion = null
-        loop = AgentLoop(project, session)
-        bindLoopCallbacks()
+        replaceLoop(cancelOldSession = false)
         _messages.clear()
         MessageBus.publishSessionChanged(session.id, "CLEARED")
     }
@@ -775,8 +774,7 @@ class ChatViewModel(
         session.firstToolUseDone.addAll(firstToolUseDone)
         // 显式归零 totalTokens（对齐 docs/ui/chat.md §十二 clearSession()）
         session.totalTokens = TokenUsage()
-        loop = AgentLoop(project, session)
-        bindLoopCallbacks()
+        replaceLoop()
         _messages.clear()
         MessageBus.publishSessionChanged(session.id, "CREATED")
     }
@@ -792,11 +790,16 @@ class ChatViewModel(
         lastSlashCommand = null
         lastCompletion = null
         session = if (sessionId != null) store.load(sessionId) ?: AgentSession() else AgentSession()
-        loop = AgentLoop(project, session)
-        bindLoopCallbacks()
+        replaceLoop()
         _messages.clear()
         restoreMessages()
         MessageBus.publishSessionChanged(session.id, "RESTORED")
+    }
+
+    private fun replaceLoop(cancelOldSession: Boolean = true) {
+        loop.close(cancelSession = cancelOldSession)
+        loop = AgentLoop(project, session)
+        bindLoopCallbacks()
     }
 
     private fun resetCancellationForNextTurn() {
@@ -869,6 +872,7 @@ class ChatViewModel(
 
     fun dispose() {
         cancel()
+        loop.close()
         onMessageAdded = null
         onStreamingToken = null
         onReasoningContent = null
@@ -880,6 +884,7 @@ class ChatViewModel(
         onSubAgentEvent = null
         onTitleChanged = null
         sessionManager.onTitleGenerated = null
+        sessionManager.close()
     }
 }
 

@@ -58,12 +58,6 @@ object GlobalExceptionHandler : Thread.UncaughtExceptionHandler {
     @Synchronized
     fun register() {
         if (registered) return
-
-        // 1. EDT 线程 — 设置默认未捕获异常处理器
-        previousEdtHandler = Thread.getDefaultUncaughtExceptionHandler()
-        Thread.setDefaultUncaughtExceptionHandler(this)
-        AppLogger.info("GlobalExceptionHandler 已注册：EDT default handler 已设置")
-
         registered = true
         AppLogger.info("GlobalExceptionHandler.register() 完成")
     }
@@ -75,11 +69,6 @@ object GlobalExceptionHandler : Thread.UncaughtExceptionHandler {
     @Synchronized
     fun unregister() {
         if (!registered) return
-
-        // 1. 恢复 EDT handler
-        Thread.setDefaultUncaughtExceptionHandler(previousEdtHandler)
-        AppLogger.info("GlobalExceptionHandler 已注销：EDT default handler 已恢复")
-
         previousEdtHandler = null
         registered = false
     }
@@ -99,7 +88,6 @@ object GlobalExceptionHandler : Thread.UncaughtExceptionHandler {
      */
     fun decoratePooledThread(session: AgentSession? = null) {
         val currentThread = Thread.currentThread()
-        currentThread.uncaughtExceptionHandler = this
         // 将 session id 标记到线程名，方便异常日志追踪来源。
         if (session != null) {
             currentThread.name = "${currentThread.name}#agent-${session.id.take(8)}"
