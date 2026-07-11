@@ -25,7 +25,7 @@
 
 **Interfaces:**
 - Consumes: `SkillsPage(Project)` 和 `.code-assistant/skills/<name>/SKILL.md`。
-- Produces: 组装完成后满足 `maximumSize.height >= preferredSize.height` 的 Skill 卡片。
+- Produces: 组装完成后满足 `maximumSize.height == preferredSize.height` 的 Skill 卡片。
 
 - [x] **Step 1: 写入失败回归测试**
 
@@ -35,12 +35,13 @@ package com.aiassistant.ui.page
 import com.intellij.openapi.project.Project
 import java.awt.Container
 import java.lang.reflect.Proxy
+import javax.swing.JLabel
 import javax.swing.JPanel
 import kotlin.io.path.createDirectories
 import kotlin.io.path.createTempDirectory
 import kotlin.io.path.writeText
 import kotlin.test.Test
-import kotlin.test.assertTrue
+import kotlin.test.assertEquals
 
 class SkillsPageTest {
 
@@ -66,13 +67,14 @@ class SkillsPageTest {
         val page = SkillsPage(projectAt(root.toString()))
         val skillCard = panelsIn(page).first { panel ->
             panel.components.any { child ->
-                child is javax.swing.JLabel && child.text.contains("<b>review</b>")
+                child is JLabel && child.text.contains("<b>review</b>")
             }
         }
 
-        assertTrue(
-            skillCard.maximumSize.height >= skillCard.preferredSize.height,
-            "Skill card maximum height ${skillCard.maximumSize.height} must contain preferred height ${skillCard.preferredSize.height}"
+        assertEquals(
+            skillCard.preferredSize.height,
+            skillCard.maximumSize.height,
+            "Skill card maximum height must match its final preferred height"
         )
     }
 
