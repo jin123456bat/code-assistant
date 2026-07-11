@@ -155,7 +155,6 @@ class SkillsPage(project: Project) : JPanel(BorderLayout()) {
                 BorderFactory.createMatteBorder(0, 0, 1, 0, AppColors.border),
                 BorderFactory.createEmptyBorder(8, 12, 8, 12)
             )
-            maximumSize = Dimension(Int.MAX_VALUE, preferredSize.height)
         }
 
         val greenHex = AppColors.success.toHtmlColor()
@@ -230,6 +229,7 @@ class SkillsPage(project: Project) : JPanel(BorderLayout()) {
             addActionListener { showSkillDetail(skill) }
         }
         card.add(detailBtn, BorderLayout.EAST)
+        card.maximumSize = Dimension(Int.MAX_VALUE, card.preferredSize.height)
         return card
     }
 
