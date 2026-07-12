@@ -76,7 +76,7 @@ object ToolApprovalPolicy {
      */
     fun needsUserApproval(ctx: ApprovalContext): Pair<Boolean, ApprovalReason?> {
         val session = ctx.session
-        val toolName = ctx.toolName
+        val toolName = ToolRegistry.canonicalName(ctx.toolName)
         val input = ctx.toolUse._input()
         val mcpServerId = extractMcpServerId(toolName)
         val firstUseKey = mcpServerId?.let { "mcp:$it" } ?: toolName
@@ -114,7 +114,7 @@ object ToolApprovalPolicy {
         // Edit/Write 修改方法签名 + ≥3 个其他文件引用
         if (toolName == "Write" || toolName == "Edit") {
             val filePath = ToolInput.string(input, "filePath") ?: ""
-            if (isPublicApiChange(ctx, filePath)) {
+            if (isPublicApiChange(ctx.copy(toolName = toolName), filePath)) {
                 return true to ApprovalReason.PUBLIC_API_CHANGE
             }
         }
@@ -262,11 +262,12 @@ object ToolApprovalPolicy {
      * 将工具名加入当前会话的审批白名单（对齐 docs/agent/tools.md §六 "允许此会话" 按钮行为）。
      */
     fun approveForSession(session: AgentSession, toolName: String) {
-        val mcpServerId = extractMcpServerId(toolName)
+        val canonicalToolName = ToolRegistry.canonicalName(toolName)
+        val mcpServerId = extractMcpServerId(canonicalToolName)
         if (mcpServerId != null) {
             session.approvedMcpServers.add(mcpServerId)
         } else {
-            session.approvedTools.add(toolName)
+            session.approvedTools.add(canonicalToolName)
         }
     }
 
@@ -274,7 +275,10 @@ object ToolApprovalPolicy {
      * 标记该工具的首次使用已完成（对齐 docs/agent/tools.md §六 首次工具使用）。
      */
     fun markFirstToolUse(session: AgentSession, toolName: String) {
-        session.firstToolUseDone.add(extractMcpServerId(toolName)?.let { "mcp:$it" } ?: toolName)
+        val canonicalToolName = ToolRegistry.canonicalName(toolName)
+        session.firstToolUseDone.add(
+            extractMcpServerId(canonicalToolName)?.let { "mcp:$it" } ?: canonicalToolName
+        )
     }
 
     /**
@@ -304,9 +308,10 @@ object ToolApprovalPolicy {
         toolName.substringBefore('/').takeIf { it.length < toolName.length && it.isNotBlank() }
 
     fun describe(toolName: String, input: Any?, reason: ApprovalReason? = null): String {
+        val canonicalToolName = ToolRegistry.canonicalName(toolName)
         val lines = mutableListOf<String>()
-        lines.add("工具: $toolName")
-        when (toolName) {
+        lines.add("工具: $canonicalToolName")
+        when (canonicalToolName) {
             "Bash" -> {
                 ToolInput.string(input, "command")?.let { lines.add("命令: $it") }
                 ToolInput.string(input, "workDir")?.let { lines.add("目录: $it") }
@@ -343,7 +348,7 @@ object ToolApprovalPolicy {
 
             ApprovalReason.FIRST_USE -> {
                 lines.add("")
-                lines.add("这是本会话中首次调用 ${toolName} 工具。")
+                lines.add("这是本会话中首次调用 ${canonicalToolName} 工具。")
             }
 
             ApprovalReason.PUBLIC_API_CHANGE -> {

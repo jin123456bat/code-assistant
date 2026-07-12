@@ -1,6 +1,7 @@
 package com.aiassistant.agent
 
 import com.anthropic.models.beta.messages.BetaTool
+import com.anthropic.models.beta.messages.MessageCreateParams
 import com.anthropic.core.JsonValue
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -10,6 +11,50 @@ import kotlin.test.assertTrue
 import kotlin.test.assertFalse
 
 class ToolRegistryTest {
+
+    @Test
+    fun `Anthropic SDK 生成的内置工具名与注册名一致`() {
+        ToolRegistry.listRegistered()
+            .filter { it.info.betaTool == null }
+            .forEach { registeredTool ->
+                val params = MessageCreateParams.builder()
+                    .model("test-model")
+                    .maxTokens(1)
+                    .addUserMessage("test")
+                    .addTool(registeredTool.toolClass)
+                    .build()
+                val sdkToolName = params.tools().orElseThrow()
+                    .single()
+                    .betaTool().orElseThrow()
+                    .name()
+
+                assertEquals(
+                    registeredTool.name,
+                    sdkToolName,
+                    "${registeredTool.toolClass.simpleName} 的 SDK 工具名必须与 ToolRegistry 一致"
+                )
+            }
+    }
+
+    @Test
+    fun `旧版 SDK 工具名可规范化为注册名`() {
+        assertEquals("Bash", ToolRegistry.canonicalName("bash"))
+        assertEquals("readLints", ToolRegistry.canonicalName("read_lints"))
+        assertEquals("WebSearch", ToolRegistry.canonicalName("web_search"))
+        assertEquals("AskUserQuestion", ToolRegistry.canonicalName("ask_user_question"))
+        assertEquals("createPlan", ToolRegistry.canonicalName("create_plan"))
+        assertEquals("Read", ToolRegistry.canonicalName("Read"))
+        assertEquals("github/search", ToolRegistry.canonicalName("github/search"))
+        assertEquals("unknown_tool", ToolRegistry.canonicalName("unknown_tool"))
+    }
+
+    @Test
+    fun `全局工具注册表不暴露项目级 dispose`() {
+        assertTrue(
+            ToolRegistry::class.java.methods.none { it.name == "dispose" },
+            "项目窗口不能清空进程级 ToolRegistry"
+        )
+    }
 
     @Test
     fun `内置工具注册后可通过名称查找`() {

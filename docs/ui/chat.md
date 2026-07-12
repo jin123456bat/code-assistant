@@ -86,9 +86,9 @@ BoxLayout.Y_AXIS 的 BubblePanel 中。普通代码块使用 `JTextPane + Styled
 
 - 与 Agent 气泡样式相同
 - 末尾闪烁光标 ▍ (`#3B82F6`, 500ms blink)
-- 每个 token 到达后追加到字符串缓冲，完整 Block 闭合后通过 `parseMarkdown()` 解析为
-  JLabel/JTextPane/JTextArea
-  组件
+- token 批次直接追加到稳定的 AgentBubbleHandle；相同类型的 Markdown Block 原地更新
+- 已完成的 Block 组件保持身份，只有尾部 Block 类型因语法闭合而变化时才替换尾部
+- 宽度变化只更新换行和尺寸，不重新创建正文组件
 - 未闭合代码块 → 按普通段落显示，避免流式输出中提前渲染成完整代码块
 
 ### 错误气泡
@@ -122,6 +122,7 @@ DeepSeek V4 在流式响应中会先输出 `reasoning_content`（思考过程）
 - 无 tool call 时：思考过程在前，回复文本在后
 - 有 tool call 时：思考过程在前，tool call 在后（思考决定调用哪个工具）
 - 默认折叠，用户可点击展开查看完整推理
+- 流式 reasoning 原地追加到同一个折叠块，保留展开状态，不删除并重建组件
 - 展开内容区最大高度 140px，超过后在块内滚动
 - 文字颜色：亮色 `#92400E`，暗色 `#FBBF24`；背景：亮色 `#FFF8F0`，暗色 `#422006`
 - 思考内容**不持久化**到 Session JSON（节省存储，仅回复文本+tool calls 持久化）

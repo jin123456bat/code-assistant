@@ -118,9 +118,13 @@ object Toast {
         }.apply { isRepeats = false; start() }
     }
 
-    private fun dismiss() {
+    fun dismiss() {
         hideTimer?.stop(); hideTimer = null
         slideInTimer?.stop(); slideInTimer = null
         currentWindow?.dispose(); currentWindow = null
+    }
+
+    fun dispose() {
+        dismiss()
     }
 }

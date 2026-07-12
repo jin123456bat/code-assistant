@@ -35,4 +35,11 @@ class ChatToolWindowTest {
 
         kotlin.test.assertTrue(source.contains("content.setDisposer(panel)"))
     }
+
+    @Test
+    fun `project tool window disposal does not clear global tool registry`() {
+        val source = java.io.File("src/main/kotlin/com/aiassistant/ui/ChatToolWindow.kt").readText()
+
+        assertFalse(source.contains("ToolRegistry.dispose()"))
+    }
 }

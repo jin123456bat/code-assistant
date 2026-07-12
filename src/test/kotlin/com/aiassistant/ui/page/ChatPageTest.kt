@@ -2,6 +2,7 @@ package com.aiassistant.ui.page
 
 import com.intellij.openapi.project.Project
 import com.aiassistant.ui.MessageBus
+import com.aiassistant.ui.chat.ChatBubbleRenderer
 import com.aiassistant.ui.chat.ChatViewModel
 import java.awt.BorderLayout
 import java.awt.Container
@@ -152,7 +153,7 @@ class ChatPageTest {
     }
 
     @Test
-    fun `reasoning updates replace the previous spacer`() {
+    fun `single reasoning row has no trailing spacer`() {
         val page = ChatPage(
             project = projectAt(createTempDirectory().toString()),
             enableIdeServices = false
@@ -169,7 +170,74 @@ class ChatPageTest {
             viewModel.onReasoningContent?.invoke(" second")
         }
 
-        kotlin.test.assertEquals(2, messageContainer.componentCount)
+        kotlin.test.assertEquals(1, messageContainer.componentCount)
+    }
+
+    @Test
+    fun `user reasoning and agent rows have one eight pixel gap between each row`() {
+        val page = ChatPage(
+            project = projectAt(createTempDirectory().toString()),
+            enableIdeServices = false
+        )
+        val viewModel = ChatPage::class.java.getDeclaredField("viewModel").run {
+            isAccessible = true
+            get(page) as ChatViewModel
+        }
+        val messageContainer = ChatPage::class.java.getDeclaredField("messageContainer").run {
+            isAccessible = true
+            get(page) as JPanel
+        }
+        ChatViewModel::class.java.getDeclaredField("turnInFlight").apply {
+            isAccessible = true
+            setBoolean(viewModel, true)
+        }
+
+        SwingUtilities.invokeAndWait {
+            viewModel.onMessageAdded?.invoke(
+                com.aiassistant.ui.chat.ChatMessage(
+                    type = com.aiassistant.ui.chat.ChatMessage.Type.USER_TEXT,
+                    content = "hello"
+                )
+            )
+            viewModel.onReasoningContent?.invoke("thinking")
+            viewModel.onStreamingToken?.invoke("answer")
+        }
+
+        kotlin.test.assertEquals(5, messageContainer.componentCount)
+        listOf(1, 3).forEach { index ->
+            val gap = messageContainer.getComponent(index) as JComponent
+            kotlin.test.assertEquals(true, gap.getClientProperty("messageRowGap"))
+            kotlin.test.assertEquals(8, gap.preferredSize.height)
+        }
+    }
+
+    @Test
+    fun `reasoning updates keep the same component`() {
+        val page = ChatPage(
+            project = projectAt(createTempDirectory().toString()),
+            enableIdeServices = false
+        )
+        val viewModelField = ChatPage::class.java.getDeclaredField("viewModel").apply {
+            isAccessible = true
+        }
+        val viewModel = viewModelField.get(page) as ChatViewModel
+        val reasoningBubbleField = ChatPage::class.java.getDeclaredField("reasoningBubble").apply {
+            isAccessible = true
+        }
+
+        SwingUtilities.invokeAndWait {
+            viewModel.onReasoningContent?.invoke("first")
+        }
+        val firstComponent = reasoningBubbleField.get(page)
+
+        SwingUtilities.invokeAndWait {
+            viewModel.onReasoningContent?.invoke(" second")
+        }
+
+        val handle = reasoningBubbleField.get(page) as ChatBubbleRenderer.ThinkingHandle
+        assertSame(firstComponent, handle)
+        kotlin.test.assertEquals("first second", handle.body.text)
+        assertTrue(labelsIn(page).any { it.text == "💭 思考过程" })
     }
 
     @Test
@@ -210,10 +278,11 @@ class ChatPageTest {
 
         SwingUtilities.invokeAndWait {
             viewModel.onReasoningContent?.invoke("thinking")
+            viewModel.onReasoningContent?.invoke(" continues")
         }
 
-        val reasoningBubble = reasoningBubbleField.get(page) as JPanel
-        kotlin.test.assertEquals(584, reasoningBubble.preferredSize.width)
+        val reasoningBubble = reasoningBubbleField.get(page) as ChatBubbleRenderer.ThinkingHandle
+        kotlin.test.assertEquals(584, reasoningBubble.component.preferredSize.width)
     }
 
     @Test
@@ -270,6 +339,45 @@ class ChatPageTest {
     }
 
     @Test
+    fun `streaming completion keeps the same agent bubble component`() {
+        val page = ChatPage(
+            project = projectAt(createTempDirectory().toString()),
+            enableIdeServices = false
+        )
+        val viewModelField = ChatPage::class.java.getDeclaredField("viewModel").apply {
+            isAccessible = true
+        }
+        val viewModel = viewModelField.get(page) as ChatViewModel
+        ChatViewModel::class.java.getDeclaredField("turnInFlight").apply {
+            isAccessible = true
+            setBoolean(viewModel, true)
+        }
+        val streamingBubbleField = ChatPage::class.java.getDeclaredField("streamingBubble").apply {
+            isAccessible = true
+        }
+
+        SwingUtilities.invokeAndWait {
+            viewModel.onStreamingToken?.invoke("first")
+        }
+        val handle = streamingBubbleField.get(page) as com.aiassistant.ui.chat.ChatBubbleRenderer.AgentBubbleHandle
+        val component = handle.component
+
+        SwingUtilities.invokeAndWait {
+            viewModel.onStreamingToken?.invoke(" second")
+            viewModel.onMessageAdded?.invoke(
+                com.aiassistant.ui.chat.ChatMessage(
+                    type = com.aiassistant.ui.chat.ChatMessage.Type.AGENT_TEXT,
+                    content = "final"
+                )
+            )
+        }
+
+        assertSame(component, handle.component)
+        assertNull(streamingBubbleField.get(page))
+        assertTrue(labelsIn(component).any { it.text?.contains("final") == true })
+    }
+
+    @Test
     fun `width updates shrink oversized message and thinking blocks after sidebar resize`() {
         val page = ChatPage(
             project = projectAt(createTempDirectory().toString()),
@@ -310,7 +418,7 @@ class ChatPageTest {
 
             val usableWidth = 304
             assertTrue((user.getComponent(0) as JComponent).maximumSize.width <= usableWidth)
-            assertTrue((agent.getComponent(0) as JComponent).maximumSize.width <= usableWidth)
+            assertTrue(labelsIn(agent).any { it.text?.contains("body width=") == true })
             assertTrue(thinking.maximumSize.width <= usableWidth)
         }
     }

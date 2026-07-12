@@ -69,7 +69,7 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
      */
     fun execute(toolUse: BetaToolUseBlock): String {
         val toolUseId = toolUse.id()
-        val toolName = toolUse.name()
+        val toolName = ToolRegistry.canonicalName(toolUse.name())
         return try {
             val input = toolUse._input()
             val timeoutSec = ToolInput.int(input, "timeout") ?: 0
@@ -77,7 +77,7 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
                 ToolApprovalPolicy.ApprovalContext(session, toolName, toolUse, project)
             val (needsApproval, reason) = ToolApprovalPolicy.needsUserApproval(approvalCtx)
             if (needsApproval) {
-                when (val approvalResult = requestApproval(toolUse, reason)) {
+                when (val approvalResult = requestApproval(toolUse, toolName, reason)) {
                     ToolApprovalPolicy.ApprovalResult.REJECTED -> {
                         val result = "用户拒绝执行工具: $toolName"
                         onToolStateChanged?.invoke(toolUseId, ToolCallState.REJECTED, result, null)
@@ -180,10 +180,10 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
      */
     private fun requestApproval(
         toolUse: BetaToolUseBlock,
+        toolName: String,
         reason: ToolApprovalPolicy.ApprovalReason?
     ): ToolApprovalPolicy.ApprovalResult {
         val toolUseId = toolUse.id()
-        val toolName = toolUse.name()
         session.requireApproval()
         onToolStateChanged?.invoke(toolUseId, ToolCallState.AWAITING_APPROVAL, null, null)
         val input = toolUse._input()

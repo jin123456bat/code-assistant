@@ -15,6 +15,29 @@ import kotlin.test.assertTrue
 class ToolExecutorApprovalTest {
 
     @Test
+    fun `lowercase bash is canonicalized before approval and execution`() {
+        val session = AgentSession()
+        val executor = ToolExecutor(projectAt(createTempDirectory().toString()), session)
+        var requested: ToolApprovalRequest? = null
+        executor.onApprovalRequested = { request ->
+            requested = request
+            request.complete(ToolApprovalPolicy.ApprovalResult.REJECTED)
+        }
+
+        val result = executor.execute(
+            tool(
+                "bash",
+                mapOf("command" to "sudo rm -rf /", "dangerous" to false)
+            )
+        )
+
+        assertEquals("Bash", requested?.toolName)
+        assertEquals(true, requested?.dangerous)
+        assertEquals("用户拒绝执行工具: Bash", result)
+        assertTrue("bash" !in session.firstToolUseDone)
+    }
+
+    @Test
     fun `approval request callback can allow tool execution without dialog`() {
         val root = createTempDirectory()
         root.resolve("README.md").writeText("hello approval")

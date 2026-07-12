@@ -11,9 +11,9 @@
 | ChatToolWindow | `BorderLayout`                            | NORTH=TabBar, CENTER=pageContainer(CardLayout)                                             |
 | TabBar         | `JPanel(FlowLayout.LEFT, hgap=0, vgap=0)` | 纯图标按钮，`setPreferredSize(Dimension(44, 32))`。7 个 Tab × 44px = 308px                         |
 | ChatPage       | `BorderLayout`                            | NORTH=标题行, CENTER=JScrollPane, SOUTH=ChatInputArea                                         |
-| 消息容器           | `JPanel` → `BoxLayout.Y_AXIS`             | 消息气泡垂直排列，用 `Box.createVerticalStrut(8)` 间隔                                                 |
+| 消息容器           | `JPanel` → `BoxLayout.Y_AXIS`             | 完整 MessageRow 垂直排列，由唯一入口在相邻 Row 之间插入一个 8px gap，无尾部 spacer                         |
 | 用户气泡           | `JPanel(BorderLayout)` → 右对齐              | `setMaximumSize(Dimension(maxWidth, ...))` 限制宽度为面板的 70%                                    |
-| Agent 气泡       | `BubblePanel(BoxLayout.Y_AXIS)`           | 文本段+代码块+文本段垂直排列，用 `Box.createVerticalStrut(4)` 间隔                                          |
+| Agent 气泡       | `AgentBubbleHandle(BoxLayout.Y_AXIS)`     | 稳定 BlockView 原地更新；内容、宽度、流式状态分别更新，时间戳位于圆角卡片外                                  |
 | ToolCallCard   | `JPanel(BorderLayout)`                    | NORTH=头部(图标+名称+状态), CENTER=折叠面板(JPanel.BoxLayout_Y_AXIS)                                   |
 | PlanCard       | `JPanel(BorderLayout)`                    | NORTH=摘要行, CENTER=计划项列表(BoxLayout.Y_AXIS)                                                  |
 | ChatInputArea  | `JPanel(BorderLayout)`                    | NORTH=TagsRow(FlowLayout: 文件+图片), CENTER=JTextArea, SOUTH=底部栏(FlowLayout: [+]按钮+@提示+[→]发送) |

@@ -308,7 +308,7 @@ class AgentLoop(
                                 start.contentBlock().toolUse().ifPresent { toolUse ->
                                     onToolCall?.invoke(
                                         toolUse.id(),
-                                        toolUse.name(),
+                                        ToolRegistry.canonicalName(toolUse.name()),
                                         ToolInput.map(toolUse._input())
                                     )
                                 }
@@ -396,7 +396,9 @@ class AgentLoop(
 
                         // Skill 工具正文注入到 conversation 的消息列表中
                         // 对齐 docs/agent/skills.md §五：Skill 工具执行后正文应作为消息注入 conversation
-                        if (toolUse.name() == "Skill" && !rawResult.startsWith("错误:")) {
+                        if (ToolRegistry.canonicalName(toolUse.name()) == "Skill" &&
+                            !rawResult.startsWith("错误:")
+                        ) {
                             session.addMessage(
                                 com.aiassistant.agent.Message(
                                     role = com.aiassistant.agent.Role.SYSTEM,

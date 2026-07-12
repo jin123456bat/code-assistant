@@ -73,6 +73,10 @@ object GlobalExceptionHandler : Thread.UncaughtExceptionHandler {
         registered = false
     }
 
+    fun dispose() {
+        unregister()
+    }
+
     /**
      * 为后台线程池中的线程设置异常处理器。
      * 应在每次 submit/execute 到线程池时调用：

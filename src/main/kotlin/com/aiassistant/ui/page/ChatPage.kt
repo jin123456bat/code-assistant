@@ -11,6 +11,7 @@ import com.intellij.openapi.Disposable
 import com.intellij.openapi.project.Project
 import java.awt.AlphaComposite
 import java.awt.BorderLayout
+import java.awt.Component
 import java.awt.FlowLayout
 import java.awt.Graphics
 import java.awt.Graphics2D
@@ -79,11 +80,8 @@ class ChatPage(
             }
         }
     }
-    private var streamingBubble: JComponent? = null
-    private val streamingBuf = StringBuilder()
-    private var reasoningBubble: JPanel? = null
-    private var reasoningSpacer: java.awt.Component? = null
-    private val reasoningBuf = StringBuilder()
+    private var streamingBubble: ChatBubbleRenderer.AgentBubbleHandle? = null
+    private var reasoningBubble: ChatBubbleRenderer.ThinkingHandle? = null
     private var reasoningStartTime = 0L
     private var editorSelectionListener: EditorSelectionListener? = null
     private lateinit var inputArea: ChatInputArea
@@ -164,14 +162,14 @@ class ChatPage(
         inputArea = ChatInputArea(
             onSend = { text ->
                 viewModel.sendMessage(text)
-                streamingBuf.clear(); streamingBubble = null
-                reasoningBuf.clear(); reasoningBubble = null
+                streamingBubble = null
+                reasoningBubble = null
             },
             onSendWithImages = { text, images ->
                 viewModel.sendMessage(text, images)
                 viewModel.updateInputState(images = emptyList())
-                streamingBuf.clear(); streamingBubble = null
-                reasoningBuf.clear(); reasoningBubble = null
+                streamingBubble = null
+                reasoningBubble = null
             },
             onStop = { viewModel.cancel() },
             onNewSession = {
@@ -209,15 +207,24 @@ class ChatPage(
         add(inputArea, BorderLayout.SOUTH)
         registerMessageBusListener()
 
-        viewModel.onMessageAdded = { msg ->
+        viewModel.onMessageAdded = message@{ msg ->
+            val activeStreamingBubble = streamingBubble
+            if (msg.type == ChatMessage.Type.AGENT_TEXT && activeStreamingBubble != null) {
+                activeStreamingBubble.finish(msg)
+                streamingBubble = null
+                updateBubbleMaxWidths()
+                messageContainer.revalidate()
+                messageContainer.repaint()
+                scrollToBottom()
+                return@message
+            }
             removeStreamingBubble()
             if (msg.type == ChatMessage.Type.ERROR) {
                 // 错误顶部给出持续可见的 Banner，同时保留消息流气泡里的复制/重试操作。
                 inputArea.showError()
                 showErrorBanner(msg.content)
             }
-            animateBubbleAppear(renderMessage(msg))
-            messageContainer.add(Box.createVerticalStrut(8))
+            appendMessageRow(renderMessage(msg), animated = true)
             updateBubbleMaxWidths()
             messageContainer.revalidate(); scrollToBottom()
         }
@@ -226,8 +233,7 @@ class ChatPage(
             val paramsText = params.entries.joinToString(", ") { "${it.key}=${it.value}" }
             val card = ToolCallCard(toolName, paramsText, ToolCallCard.ToolCallState.PENDING)
             toolCards[toolUseId] = card
-            animateBubbleAppear(card)
-            messageContainer.add(Box.createVerticalStrut(8))
+            appendMessageRow(card, animated = true)
             updateBubbleMaxWidths()
             messageContainer.revalidate(); scrollToBottom()
         }
@@ -245,8 +251,7 @@ class ChatPage(
                 ToolCallCard.ToolCallState.AWAITING_APPROVAL
             ).also { newCard ->
                 toolCards[request.toolUseId] = newCard
-                animateBubbleAppear(newCard)
-                messageContainer.add(Box.createVerticalStrut(8))
+                appendMessageRow(newCard, animated = true)
             }
             card.setApprovalActions(
                 ToolCallCard.ApprovalActions(
@@ -271,32 +276,36 @@ class ChatPage(
         viewModel.onStreamingToken = streaming@{ token ->
             if (!viewModel.isRunning) {
                 removeStreamingBubble()
-                streamingBuf.clear()
                 return@streaming
             }
-            streamingBuf.append(token)
-            // ponytail: 从实际父容器移除，避免 animateBubbleAppear 包装后找不到
-            removeStreamingBubble()
-            streamingBubble = ChatBubbleRenderer.renderStreaming(streamingBuf.toString())
-            messageContainer.add(streamingBubble!!)
-            updateBubbleMaxWidths()
+            var created = false
+            val activeBubble = streamingBubble ?: ChatBubbleRenderer.createStreamingAgentBubble().also {
+                streamingBubble = it
+                appendMessageRow(it.component)
+                created = true
+            }
+            activeBubble.appendStreaming(token)
+            if (created) updateBubbleMaxWidths()
             messageContainer.revalidate(); scrollToBottom()
         }
         viewModel.onReasoningContent = { reasoning ->
             // 思考过程累积后渲染为折叠块，对齐 docs/ui/chat.md §三
-            if (reasoningBuf.isEmpty()) {
+            if (reasoningBubble == null) {
                 reasoningStartTime = System.currentTimeMillis()
             }
-            reasoningBuf.append(reasoning)
-            reasoningBubble?.let { messageContainer.remove(it) }
-            reasoningSpacer?.let { messageContainer.remove(it) }
             val durationMs = System.currentTimeMillis() - reasoningStartTime
-            reasoningBubble = ChatBubbleRenderer.renderThinking(reasoningBuf.toString(), durationMs)
-            reasoningSpacer = Box.createVerticalStrut(8)
-            // 思考过程块位于消息流末尾，没有 tool call 时在流式回复前，有 tool call 时在 tool call 前
-            messageContainer.add(reasoningBubble)
-            messageContainer.add(reasoningSpacer)
-            updateBubbleMaxWidths()
+            var created = false
+            val handle = reasoningBubble ?: ChatBubbleRenderer.createThinkingHandle(
+                reasoning,
+                durationMs
+            ).also {
+                reasoningBubble = it
+                // 思考过程块位于消息流末尾，没有 tool call 时在流式回复前，有 tool call 时在 tool call 前
+                appendMessageRow(it.component)
+                created = true
+            }
+            if (!created) handle.append(reasoning, durationMs)
+            if (created) updateBubbleMaxWidths()
             messageContainer.revalidate(); scrollToBottom()
         }
         viewModel.onStateChanged = {
@@ -326,8 +335,7 @@ class ChatPage(
             // 新会话不显示时间戳，保持空白
         } else {
             viewModel.messages.forEach { msg ->
-                messageContainer.add(renderMessage(msg))
-                messageContainer.add(Box.createVerticalStrut(8))
+                appendMessageRow(renderMessage(msg))
             }
             messageContainer.revalidate()
         }
@@ -339,11 +347,11 @@ class ChatPage(
      */
     private fun ensureMultiAgentBlockVisible() {
         if (multiAgentBlockIndex >= 0) return
-        streamingBubble?.let { messageContainer.remove(it) }
-        messageContainer.add(multiAgentBlock)
-        multiAgentBlockIndex = messageContainer.componentCount - 1
+        streamingBubble?.let { removeMessageRow(it.component) }
+        appendMessageRow(multiAgentBlock)
+        multiAgentBlockIndex = messageContainer.getComponentZOrder(multiAgentBlock)
         multiAgentBlock.isVisible = true
-        streamingBubble?.let { messageContainer.add(it) }
+        streamingBubble?.let { appendMessageRow(it.component) }
         messageContainer.revalidate()
         messageContainer.repaint()
     }
@@ -413,7 +421,7 @@ class ChatPage(
     /** 重置 MultiAgentBlock 状态（clear/new/restore 时调用） */
     private fun resetMultiAgentBlock() {
         if (multiAgentBlockIndex >= 0) {
-            messageContainer.remove(multiAgentBlock)
+            removeMessageRow(multiAgentBlock)
             multiAgentBlockIndex = -1
         }
         multiAgentBlock.clear()
@@ -458,6 +466,9 @@ class ChatPage(
                 bubbleType == "agent" || bubbleType == "error" -> agentMaxWidth
                 else -> continue
             }
+            if (ChatBubbleRenderer.constrainWidth(component, maxWidth)) {
+                continue
+            }
             // 如果 component 包含一个子面板且该子面板没有子组件，直接约束 component
             // 否则取第一个子组件为约束目标（跳过 FlowLayout 外层包装）
             val target = if (component.layout is FlowLayout && component.componentCount > 0) {
@@ -495,8 +506,7 @@ class ChatPage(
         viewModel.restoreSession(sessionId)
         titleLabel.text = viewModel.session.title
         viewModel.messages.forEach { msg ->
-            messageContainer.add(renderMessage(msg))
-            messageContainer.add(Box.createVerticalStrut(8))
+            appendMessageRow(renderMessage(msg))
         }
         messageContainer.revalidate()
         messageContainer.repaint()
@@ -540,17 +550,17 @@ class ChatPage(
         messageContainer.removeAll()
         toolCards.clear()
         resetMultiAgentBlock()
-        streamingBuf.clear()
+        streamingBubble?.dispose()
         streamingBubble = null
-        reasoningBuf.clear()
         reasoningBubble = null
-        reasoningSpacer = null
         reasoningStartTime = 0L
     }
 
     private fun removeStreamingBubble() {
-        val bubble = streamingBubble ?: return
-        (bubble.parent as? JComponent)?.remove(bubble) ?: messageContainer.remove(bubble)
+        val handle = streamingBubble ?: return
+        val bubble = handle.component
+        handle.dispose()
+        removeMessageRow(bubble)
         streamingBubble = null
         messageContainer.revalidate()
         messageContainer.repaint()
@@ -603,6 +613,38 @@ class ChatPage(
                 ("key" in normalized && ("无效" in message || "未配置" in message))
         return if (isAuthError) Banner.Type.ERROR_AUTH else Banner.Type.ERROR
     }
+
+    private fun appendMessageRow(component: JComponent, animated: Boolean = false) {
+        if (messageContainer.componentCount > 0) {
+            messageContainer.add(
+                (Box.createVerticalStrut(8) as JComponent).apply {
+                    putClientProperty("messageRowGap", true)
+                }
+            )
+        }
+        if (animated) animateBubbleAppear(component) else messageContainer.add(component)
+    }
+
+    private fun removeMessageRow(component: JComponent) {
+        var directChild: Component = component
+        while (directChild.parent != null && directChild.parent !== messageContainer) {
+            directChild = directChild.parent
+        }
+        if (directChild.parent !== messageContainer) return
+
+        val index = messageContainer.getComponentZOrder(directChild)
+        messageContainer.remove(directChild)
+        when {
+            index > 0 && isMessageRowGap(messageContainer.getComponent(index - 1)) ->
+                messageContainer.remove(index - 1)
+
+            index < messageContainer.componentCount && isMessageRowGap(messageContainer.getComponent(index)) ->
+                messageContainer.remove(index)
+        }
+    }
+
+    private fun isMessageRowGap(component: Component): Boolean =
+        component is JComponent && component.getClientProperty("messageRowGap") == true
 
     /**
      * 消息气泡出现动画：150ms ease-out，从下方 10px 滑入并淡入。

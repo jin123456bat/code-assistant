@@ -51,6 +51,7 @@ class TabBar(
     )
 
     init {
+        background = AppColors.headerBg
         tabs.forEach { tab ->
             enabledPages[tab.page] = tab.enabled
             val lbl = JLabel(tab.icon, SwingConstants.CENTER).apply {
@@ -71,11 +72,11 @@ class TabBar(
 
                     override fun mouseEntered(e: MouseEvent) {
                         if (isPageEnabled(tab.page) && tab.page != selected) background =
-                            Color(0xF3F4F6)
+                            AppColors.hoverBg
                     }
 
                     override fun mouseExited(e: MouseEvent) {
-                        if (tab.page != selected) background = AppColors.borderTransparent
+                        if (tab.page != selected) background = AppColors.headerBg
                     }
                 })
             }
@@ -164,7 +165,7 @@ class TabBar(
             if (tabs[i].page == selected) {
                 lbl.foreground =
                     if (isPageEnabled(tabs[i].page)) AppColors.primary else AppColors.textSecondary
-                lbl.background = AppColors.borderTransparent
+                lbl.background = AppColors.headerBg
                 lbl.border = BorderFactory.createCompoundBorder(
                     BorderFactory.createMatteBorder(0, 0, 2, 0, AppColors.primary),
                     BorderFactory.createEmptyBorder(6, 0, 6, 0)
@@ -172,7 +173,7 @@ class TabBar(
                 lbl.isOpaque = true
             } else {
                 lbl.foreground = AppColors.textSecondary
-                lbl.background = AppColors.borderTransparent
+                lbl.background = AppColors.headerBg
                 lbl.border = BorderFactory.createCompoundBorder(
                     BorderFactory.createMatteBorder(0, 0, 2, 0, AppColors.borderTransparent),
                     BorderFactory.createEmptyBorder(6, 0, 6, 0)

@@ -91,179 +91,500 @@ object ChatBubbleRenderer {
     private fun renderAgentBubble(
         msg: ChatMessage,
         panelWidth: Int = 0
-    ): JPanel {
-        // 外层 FlowLayout.LEFT 强制左对齐，不依赖 BoxLayout alignmentX
-        val outer = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
-            isOpaque = false
-            putClientProperty("bubbleType", "agent")
-        }
-        // ponytail: BoxLayout.Y_AXIS 避免 BorderLayout.CENTER 纵向拉伸
-        val wrapper = JPanel().apply {
-            layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            isOpaque = true
-            background = AppColors.cardBg
-            alignmentX = java.awt.Component.LEFT_ALIGNMENT
-        }
-        val body = JPanel().apply {
-            layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            isOpaque = false
-            alignmentX = java.awt.Component.LEFT_ALIGNMENT
+    ): JPanel = createAgentBubbleHandle(msg, streaming = false, panelWidth).component
+
+    class AgentBubbleHandle internal constructor(
+        val component: JPanel,
+        internal val card: JPanel,
+        internal val markdownBody: MarkdownBodyState,
+        internal val timestampHost: JPanel,
+        internal val timestampLabel: JLabel,
+        internal val cursor: JLabel,
+        internal val blinkTimer: Timer,
+        internal var message: ChatMessage,
+        internal var streaming: Boolean,
+        internal var widthBudget: Int
+    ) {
+        fun appendStreaming(delta: String) {
+            updateStreaming(message.content + delta)
         }
 
-        val blocks = parseMarkdown(msg.content)
-        var i = 0
-        while (i < blocks.size) {
-            val block = blocks[i]
-            when (block) {
-                is MarkdownBlock.Paragraph -> {
-                    val rendered = escapeHtml(block.text)
-                        .replace(Regex("`([^`]+)`")) {
-                            "<code>${it.groupValues[1]}</code>"
-                        }
-                    body.add(
-                        leftAlignedRow(
-                        wrappingLabel(
-                            rendered.replace("\n", "<br>"),
-                            0
-                        ).apply {
-                            font = font.deriveFont(12f)
-                            border = BorderFactory.createEmptyBorder(1, 0, 1, 0)
-                        }
-                    ))
-                    i++
+        fun updateStreaming(markdownText: String) {
+            message = message.copy(content = markdownText)
+            streaming = true
+            ChatBubbleRenderer.updateAgentContent(this)
+            ChatBubbleRenderer.updateAgentState(this)
+            ChatBubbleRenderer.applyAgentLayout(this)
+        }
+
+        fun finish(message: ChatMessage) {
+            require(message.type == ChatMessage.Type.AGENT_TEXT) {
+                "AgentBubbleHandle can only finish an AGENT_TEXT message"
+            }
+            this.message = message
+            streaming = false
+            ChatBubbleRenderer.updateAgentContent(this)
+            ChatBubbleRenderer.updateAgentState(this)
+            ChatBubbleRenderer.applyAgentLayout(this)
+        }
+
+        fun constrainWidth(maxWidth: Int) {
+            val normalized = maxWidth.coerceAtLeast(80)
+            if (widthBudget == normalized) return
+            widthBudget = normalized
+            markdownBody.applyWidth(normalized)
+            ChatBubbleRenderer.applyAgentLayout(this)
+        }
+
+        fun dispose() {
+            blinkTimer.stop()
+        }
+    }
+
+    internal class MarkdownBodyState internal constructor(
+        val component: JPanel
+    ) {
+        private val views = mutableListOf<MarkdownUnitView>()
+        private var widthBudget = 0
+
+        fun update(markdown: String, panelWidth: Int) {
+            val nextUnits = groupMarkdownBlocks(parseMarkdown(markdown))
+            val widthChanged = panelWidth > 0 && widthBudget != panelWidth
+            if (widthChanged) widthBudget = panelWidth
+            var stablePrefix = 0
+            while (stablePrefix < views.size && stablePrefix < nextUnits.size &&
+                views[stablePrefix].canUpdate(nextUnits[stablePrefix])
+            ) {
+                views[stablePrefix].update(nextUnits[stablePrefix])
+                stablePrefix++
+            }
+
+            if (stablePrefix < views.size) {
+                for (index in views.lastIndex downTo stablePrefix) {
+                    component.remove(views[index].component)
                 }
+                views.subList(stablePrefix, views.size).clear()
+            }
+            for (index in stablePrefix until nextUnits.size) {
+                val view = createMarkdownUnitView(nextUnits[index], contentWidth(), widthBudget)
+                views.add(view)
+                component.add(view.component)
+            }
 
-                is MarkdownBlock.CodeBlock -> {
-                    // 收集连续的代码块，支持并排显示（对齐 docs/ui/design-system.md §八）
-                    val consecutiveCodes = mutableListOf<MarkdownBlock.CodeBlock>()
-                    while (i < blocks.size && blocks[i] is MarkdownBlock.CodeBlock) {
-                        consecutiveCodes.add(blocks[i] as MarkdownBlock.CodeBlock)
-                        i++
+            if (widthChanged) {
+                views.take(stablePrefix).forEach { it.applyWidth(contentWidth(), widthBudget) }
+            }
+            component.revalidate()
+            component.repaint()
+        }
+
+        fun applyWidth(panelWidth: Int) {
+            if (widthBudget == panelWidth) return
+            widthBudget = panelWidth
+            views.forEach { it.applyWidth(contentWidth(), widthBudget) }
+            component.revalidate()
+        }
+
+        private fun contentWidth(): Int =
+            if (widthBudget > 0) (widthBudget - 30).coerceAtLeast(80) else 0
+    }
+
+    private sealed interface MarkdownRenderUnit {
+        data class Single(val block: MarkdownBlock) : MarkdownRenderUnit
+        data class CodeRun(val blocks: List<MarkdownBlock.CodeBlock>) : MarkdownRenderUnit
+    }
+
+    private fun groupMarkdownBlocks(blocks: List<MarkdownBlock>): List<MarkdownRenderUnit> =
+        buildList {
+            var index = 0
+            while (index < blocks.size) {
+                if (blocks[index] is MarkdownBlock.CodeBlock) {
+                    val codes = mutableListOf<MarkdownBlock.CodeBlock>()
+                    while (index < blocks.size && blocks[index] is MarkdownBlock.CodeBlock) {
+                        codes.add(blocks[index] as MarkdownBlock.CodeBlock)
+                        index++
                     }
-                    if (consecutiveCodes.size >= 2 && panelWidth > 500) {
-                        // 多个连续短代码块：面板宽度 > 500px 时并排显示（对齐 docs/ui/design-system.md §八）
-                        val row = JPanel().apply {
-                            layout = BoxLayout(this, BoxLayout.X_AXIS)
-                            isOpaque = false
-                            alignmentX = java.awt.Component.LEFT_ALIGNMENT
-                        }
-                        consecutiveCodes.forEachIndexed { idx, cb ->
-                            val code = createHighlightedCodePane(cb.code).apply {
-                                border = BorderFactory.createCompoundBorder(
-                                    RoundedBorder(8, AppColors.codeBorder),
-                                    BorderFactory.createEmptyBorder(6, 8, 6, 8)
-                                )
-                            }
-                            val scrollPane = JScrollPane(code).apply {
-                                horizontalScrollBarPolicy =
-                                    JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED
-                                verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_NEVER
-                                border = BorderFactory.createEmptyBorder()
-                                minimumSize = java.awt.Dimension(80, minimumSize.height)
-                            }
-                            row.add(scrollPane)
-                            if (idx < consecutiveCodes.size - 1) {
-                                row.add(Box.createHorizontalStrut(8))
-                            }
-                        }
-                        body.add(row)
-                    } else if (consecutiveCodes.size >= 2) {
-                        // 面板宽度 <= 500px：连续代码块垂直堆叠显示
-                        consecutiveCodes.forEach { cb ->
-                            val code = JTextArea(cb.code).apply {
-                                font = monoFont
-                                background = AppColors.codeBg; foreground = AppColors.textSecondary
-                                border = BorderFactory.createCompoundBorder(
-                                    RoundedBorder(8, AppColors.codeBorder),
-                                    BorderFactory.createEmptyBorder(6, 8, 6, 8)
-                                )
-                                isEditable = false; lineWrap = false
-                            }
-                            val scrollPane = JScrollPane(code).apply {
-                                horizontalScrollBarPolicy =
-                                    JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED
-                                verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_NEVER
-                                border = BorderFactory.createEmptyBorder()
-                            }
-                            body.add(scrollPane)
-                            body.add(Box.createVerticalStrut(8))
-                        }
-                    } else {
-                        val cb = consecutiveCodes.first()
-                        val code = createHighlightedCodePane(cb.code).apply {
-                            border = BorderFactory.createCompoundBorder(
-                                RoundedBorder(8, AppColors.codeBorder),
-                                BorderFactory.createEmptyBorder(8, 10, 8, 10)
-                            )
-                        }
-                        val scrollPane = JScrollPane(code).apply {
-                            horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED
-                            verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_NEVER
-                            border = BorderFactory.createEmptyBorder()
-                        }
-                        body.add(scrollPane)
-                    }
-                }
-
-                is MarkdownBlock.Header -> {
-                    body.add(
-                        leftAlignedRow(
-                            wrappingLabel(
-                                "<b style='font-size:14px'>${escapeHtml(block.text)}</b>",
-                                0
-                            )
-                        )
-                    )
-                    i++
-                }
-
-                is MarkdownBlock.ListItem -> {
-                    body.add(
-                        leftAlignedRow(
-                            wrappingLabel("&nbsp;&nbsp;• ${escapeHtml(block.text)}", 0)
-                        )
-                    )
-                    i++
-                }
-
-                is MarkdownBlock.QuoteBlock -> {
-                    body.add(JTextArea(block.text).apply {
-                        font = Font(Font.SANS_SERIF, Font.ITALIC, 12); foreground =
-                        AppColors.textSecondary
-                        background = AppColors.quoteBg; isEditable = false; lineWrap = true
-                        border = BorderFactory.createCompoundBorder(
-                            BorderFactory.createMatteBorder(0, 3, 0, 0, AppColors.quoteBorder),
-                            BorderFactory.createEmptyBorder(4, 8, 4, 8)
-                        )
-                    })
-                    i++
+                    add(MarkdownRenderUnit.CodeRun(codes))
+                } else {
+                    add(MarkdownRenderUnit.Single(blocks[index]))
+                    index++
                 }
             }
         }
 
-        wrapper.isOpaque = false
-        wrapper.accessibleContext.accessibleDescription = "Agent 消息: ${msg.content.take(100)}"
-        wrapper.add(body)
+    private sealed interface MarkdownUnitView {
+        val component: JComponent
+        fun canUpdate(unit: MarkdownRenderUnit): Boolean
+        fun update(unit: MarkdownRenderUnit)
+        fun applyWidth(contentWidth: Int, panelWidth: Int)
+    }
 
-        // 底部行：时间戳+token信息
-        val bottomRow = JPanel(BorderLayout()).apply { isOpaque = false }
-        val tokenInfo =
-            if (msg.tokenDelta != null) "↑${msg.tokenDelta.input / 1000}K ↓${msg.tokenDelta.output / 1000}K" else ""
-        bottomRow.add(renderTimestamp(msg, tokenInfo), BorderLayout.WEST)
+    private class SingleMarkdownUnitView(
+        private val view: MarkdownBlockView
+    ) : MarkdownUnitView {
+        override val component: JComponent get() = view.component
+        override fun canUpdate(unit: MarkdownRenderUnit): Boolean =
+            unit is MarkdownRenderUnit.Single && view.canUpdate(unit.block)
 
-        wrapper.add(bottomRow)
-        // 对齐 docs/ui/components.md：padding=12px + left accent bar 3px（accent bar 紧贴左边缘）
-        wrapper.border = BorderFactory.createCompoundBorder(
-            RoundedBorder(12, AppColors.border),
-            BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(0, 3, 0, 0, AppColors.primary),
-                BorderFactory.createEmptyBorder(12, 12, 12, 12)
-            )
+        override fun update(unit: MarkdownRenderUnit) {
+            view.update((unit as MarkdownRenderUnit.Single).block)
+        }
+
+        override fun applyWidth(contentWidth: Int, panelWidth: Int) {
+            view.applyWidth(contentWidth)
+        }
+    }
+
+    private class CodeRunMarkdownUnitView(
+        unit: MarkdownRenderUnit.CodeRun,
+        contentWidth: Int,
+        panelWidth: Int
+    ) : MarkdownUnitView {
+        override val component = JPanel().apply {
+            isOpaque = false
+            alignmentX = Component.LEFT_ALIGNMENT
+        }
+        private val codeViews = mutableListOf<MarkdownBlockView>()
+        private var wide = panelWidth > 500
+        private var currentContentWidth = contentWidth
+
+        init {
+            update(unit)
+            applyWidth(contentWidth, panelWidth)
+        }
+
+        override fun canUpdate(unit: MarkdownRenderUnit): Boolean =
+            unit is MarkdownRenderUnit.CodeRun
+
+        override fun update(unit: MarkdownRenderUnit) {
+            val codes = (unit as MarkdownRenderUnit.CodeRun).blocks
+            val common = minOf(codeViews.size, codes.size)
+            for (index in 0 until common) codeViews[index].update(codes[index])
+            if (codes.size < codeViews.size) {
+                for (index in codeViews.lastIndex downTo codes.size) {
+                    component.remove(codeViews[index].component)
+                }
+                codeViews.subList(codes.size, codeViews.size).clear()
+            }
+            for (index in common until codes.size) {
+                val view = createMarkdownBlockView(codes[index]).also {
+                    it.applyWidth(currentContentWidth)
+                }
+                codeViews.add(view)
+                component.add(view.component)
+            }
+            updateLayout()
+        }
+
+        override fun applyWidth(contentWidth: Int, panelWidth: Int) {
+            currentContentWidth = contentWidth
+            codeViews.forEach { it.applyWidth(contentWidth) }
+            val nextWide = panelWidth > 500
+            if (wide != nextWide) {
+                wide = nextWide
+                updateLayout()
+            }
+        }
+
+        private fun updateLayout() {
+            val count = codeViews.size.coerceAtLeast(1)
+            component.layout = if (wide && count >= 2) {
+                java.awt.GridLayout(1, count, 8, 0)
+            } else {
+                java.awt.GridLayout(count, 1, 0, if (count >= 2) 8 else 0)
+            }
+            component.revalidate()
+        }
+    }
+
+    private fun createMarkdownUnitView(
+        unit: MarkdownRenderUnit,
+        contentWidth: Int,
+        panelWidth: Int
+    ): MarkdownUnitView = when (unit) {
+        is MarkdownRenderUnit.Single ->
+            SingleMarkdownUnitView(createMarkdownBlockView(unit.block).also { it.applyWidth(contentWidth) })
+
+        is MarkdownRenderUnit.CodeRun ->
+            CodeRunMarkdownUnitView(unit, contentWidth, panelWidth)
+    }
+
+    private class MarkdownBlockView(
+        var block: MarkdownBlock,
+        val component: JComponent,
+        private val updateContent: (MarkdownBlock, Int) -> Unit,
+        private val updateWidth: (Int) -> Unit = {}
+    ) {
+        private var width = 0
+        private var initialized = false
+
+        fun canUpdate(next: MarkdownBlock): Boolean = block::class == next::class
+
+        fun update(next: MarkdownBlock) {
+            if (block == next && initialized) return
+            block = next
+            updateContent(next, width)
+            initialized = true
+        }
+
+        fun applyWidth(newWidth: Int) {
+            val contentNeedsRefresh = !initialized || block !is MarkdownBlock.CodeBlock
+            width = newWidth
+            updateWidth(newWidth)
+            if (contentNeedsRefresh) {
+                updateContent(block, newWidth)
+                initialized = true
+            }
+        }
+    }
+
+    fun createStreamingAgentBubble(markdownText: String = ""): AgentBubbleHandle =
+        createAgentBubbleHandle(
+            ChatMessage(type = ChatMessage.Type.AGENT_TEXT, content = markdownText),
+            streaming = true,
+            panelWidth = 0
         )
-        wrapper.isOpaque = true
-        wrapper.background = AppColors.cardBg
-        outer.add(wrapper)
-        return capRowHeight(outer)
+
+    fun constrainWidth(component: Component, maxWidth: Int): Boolean {
+        findAgentBubbleHandle(component)?.let {
+            it.constrainWidth(maxWidth)
+            return true
+        }
+        findThinkingHandle(component)?.let {
+            it.constrainWidth(maxWidth)
+            return true
+        }
+        return false
+    }
+
+    private fun findAgentBubbleHandle(component: Component): AgentBubbleHandle? {
+        if (component is JComponent) {
+            val handle = component.getClientProperty("agentBubbleHandle") as? AgentBubbleHandle
+            if (handle != null) return handle
+        }
+        if (component is java.awt.Container) {
+            component.components.forEach { child ->
+                findAgentBubbleHandle(child)?.let { return it }
+            }
+        }
+        return null
+    }
+
+    private fun findThinkingHandle(component: Component): ThinkingHandle? {
+        if (component is JComponent) {
+            val handle = component.getClientProperty("thinkingHandle") as? ThinkingHandle
+            if (handle != null) return handle
+        }
+        if (component is java.awt.Container) {
+            component.components.forEach { child ->
+                findThinkingHandle(child)?.let { return it }
+            }
+        }
+        return null
+    }
+
+    private fun createAgentBubbleHandle(
+        msg: ChatMessage,
+        streaming: Boolean,
+        panelWidth: Int
+    ): AgentBubbleHandle {
+        val outer = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
+            isOpaque = false
+            putClientProperty("bubbleType", "agent")
+        }
+        val content = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            isOpaque = false
+            alignmentX = Component.LEFT_ALIGNMENT
+        }
+        val card = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            isOpaque = true
+            background = AppColors.cardBg
+            alignmentX = Component.LEFT_ALIGNMENT
+            border = BorderFactory.createCompoundBorder(
+                RoundedBorder(12, AppColors.border),
+                BorderFactory.createCompoundBorder(
+                    BorderFactory.createMatteBorder(0, 3, 0, 0, AppColors.primary),
+                    BorderFactory.createEmptyBorder(12, 12, 12, 12)
+                )
+            )
+        }
+        val body = JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            isOpaque = false
+            alignmentX = Component.LEFT_ALIGNMENT
+        }
+        val timestampHost = JPanel(BorderLayout()).apply {
+            isOpaque = false
+            alignmentX = Component.LEFT_ALIGNMENT
+        }
+        val timestampLabel = JLabel().apply {
+            foreground = AppColors.textSecondary
+            font = font.deriveFont(10f)
+        }
+        val cursor = JLabel("▍").apply {
+            foreground = AppColors.primary
+            font = font.deriveFont(13f)
+            isOpaque = false
+            alignmentX = Component.LEFT_ALIGNMENT
+        }
+        val blinkTimer = Timer(500) { cursor.isVisible = !cursor.isVisible }.apply {
+            isRepeats = true
+        }
+        card.add(body)
+        card.add(cursor)
+        timestampHost.add(timestampLabel, BorderLayout.WEST)
+        content.add(card)
+        content.add(timestampHost)
+        outer.add(content)
+
+        val handle = AgentBubbleHandle(
+            component = outer,
+            card = card,
+            markdownBody = MarkdownBodyState(body),
+            timestampHost = timestampHost,
+            timestampLabel = timestampLabel,
+            cursor = cursor,
+            blinkTimer = blinkTimer,
+            message = msg,
+            streaming = streaming,
+            widthBudget = 0
+        )
+        outer.putClientProperty("agentBubbleHandle", handle)
+        outer.addHierarchyListener {
+            if (it.changeFlags and java.awt.event.HierarchyEvent.DISPLAYABILITY_CHANGED.toLong() != 0L &&
+                !outer.isDisplayable
+            ) {
+                handle.dispose()
+            }
+        }
+        updateAgentContent(handle)
+        updateAgentState(handle)
+        if (panelWidth > 0) handle.constrainWidth(panelWidth) else applyAgentLayout(handle)
+        return handle
+    }
+
+    private fun updateAgentContent(handle: AgentBubbleHandle) {
+        handle.markdownBody.update(handle.message.content, handle.widthBudget)
+        handle.card.accessibleContext.accessibleDescription =
+            "Agent 消息: ${handle.message.content.take(100)}"
+    }
+
+    private fun updateAgentState(handle: AgentBubbleHandle) {
+        if (handle.streaming) {
+            handle.cursor.isVisible = true
+            handle.timestampHost.isVisible = false
+            if (!handle.blinkTimer.isRunning) handle.blinkTimer.start()
+        } else {
+            handle.blinkTimer.stop()
+            handle.cursor.isVisible = false
+            val tokenInfo = handle.message.tokenDelta?.let {
+                "↑${it.input / 1000}K ↓${it.output / 1000}K"
+            }.orEmpty()
+            handle.timestampLabel.text = timestampText(handle.message, tokenInfo)
+            handle.timestampHost.isVisible = true
+        }
+    }
+
+    private fun applyAgentLayout(handle: AgentBubbleHandle) {
+        handle.card.preferredSize = null
+        if (handle.widthBudget > 0) {
+            val preferredHeight = handle.card.preferredSize.height
+            if (handle.card.preferredSize.width > handle.widthBudget) {
+                handle.card.preferredSize = Dimension(handle.widthBudget, preferredHeight)
+            }
+            handle.card.maximumSize =
+                Dimension(handle.card.preferredSize.width.coerceAtMost(handle.widthBudget), handle.card.preferredSize.height)
+        } else {
+            handle.card.maximumSize = handle.card.preferredSize
+        }
+        refreshCappedHeights(handle.component)
+        handle.component.maximumSize = Dimension(Int.MAX_VALUE, handle.component.preferredSize.height)
+        handle.markdownBody.component.revalidate()
+        handle.card.revalidate()
+        handle.component.revalidate()
+        handle.component.repaint()
+    }
+
+    private fun createMarkdownBlockView(block: MarkdownBlock): MarkdownBlockView =
+        when (block) {
+            is MarkdownBlock.Paragraph -> {
+                val label = wrappingLabel("", 0).apply {
+                    font = font.deriveFont(12f)
+                    border = BorderFactory.createEmptyBorder(1, 0, 1, 0)
+                }
+                MarkdownBlockView(block, leftAlignedRow(label), { next, width ->
+                    val paragraph = next as MarkdownBlock.Paragraph
+                    val html = escapeHtml(paragraph.text)
+                        .replace(Regex("`([^`]+)`")) { "<code>${it.groupValues[1]}</code>" }
+                        .replace("\n", "<br>")
+                    updateWrappingLabel(label, html, width)
+                })
+            }
+
+            is MarkdownBlock.Header -> {
+                val label = wrappingLabel("", 0)
+                MarkdownBlockView(block, leftAlignedRow(label), { next, width ->
+                    val header = next as MarkdownBlock.Header
+                    updateWrappingLabel(
+                        label,
+                        "<b style='font-size:14px'>${escapeHtml(header.text)}</b>",
+                        width
+                    )
+                })
+            }
+
+            is MarkdownBlock.ListItem -> {
+                val label = wrappingLabel("", 0)
+                MarkdownBlockView(block, leftAlignedRow(label), { next, width ->
+                    val item = next as MarkdownBlock.ListItem
+                    updateWrappingLabel(label, "&nbsp;&nbsp;• ${escapeHtml(item.text)}", width)
+                })
+            }
+
+            is MarkdownBlock.QuoteBlock -> {
+                val area = JTextArea().apply {
+                    font = Font(Font.SANS_SERIF, Font.ITALIC, 12)
+                    foreground = AppColors.textSecondary
+                    background = AppColors.quoteBg
+                    isEditable = false
+                    lineWrap = true
+                    wrapStyleWord = true
+                    border = BorderFactory.createCompoundBorder(
+                        BorderFactory.createMatteBorder(0, 3, 0, 0, AppColors.quoteBorder),
+                        BorderFactory.createEmptyBorder(4, 8, 4, 8)
+                    )
+                }
+                MarkdownBlockView(block, area, { next, width ->
+                    area.text = (next as MarkdownBlock.QuoteBlock).text
+                    if (width > 0) area.setSize(width, Int.MAX_VALUE)
+                })
+            }
+
+            is MarkdownBlock.CodeBlock -> {
+                val code = createHighlightedCodePane("").apply {
+                    border = BorderFactory.createCompoundBorder(
+                        RoundedBorder(8, AppColors.codeBorder),
+                        BorderFactory.createEmptyBorder(8, 10, 8, 10)
+                    )
+                }
+                val scrollPane = JScrollPane(code).apply {
+                    horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED
+                    verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_NEVER
+                    border = BorderFactory.createEmptyBorder()
+                    minimumSize = Dimension(80, minimumSize.height)
+                }
+                MarkdownBlockView(block, scrollPane, { next, _ ->
+                    updateHighlightedCodePane(code, (next as MarkdownBlock.CodeBlock).code)
+                })
+            }
+        }
+
+    private fun updateWrappingLabel(label: JLabel, html: String, width: Int) {
+        label.putClientProperty("wrapHtml", html)
+        label.text = htmlWithWidth(html, width)
+        label.maximumSize = Dimension(label.preferredSize.width, label.preferredSize.height)
     }
 
     fun updateWrappingLabels(container: Component, width: Int) {
@@ -294,6 +615,7 @@ object ChatBubbleRenderer {
             horizontalAlignment = SwingConstants.LEFT
             verticalAlignment = SwingConstants.TOP
             alignmentX = Component.LEFT_ALIGNMENT
+            maximumSize = Dimension(preferredSize.width, preferredSize.height)
         }
 
     private fun leftAlignedRow(component: JComponent): JPanel =
@@ -306,10 +628,11 @@ object ChatBubbleRenderer {
         }
 
     private fun htmlWithWidth(html: String, width: Int): String =
+        // Swing HTML 渲染器对 <body> 有默认 margin:8px，用 marginwidth=0 消除
         if (width > 0) {
-            "<html><body width='${width.coerceAtLeast(80)}'>$html</body></html>"
+            "<html><body width='${width.coerceAtLeast(80)}' align='left' marginwidth='0' marginheight='0'>$html</body></html>"
         } else {
-            "<html>$html</html>"
+            "<html><body align='left' marginwidth='0' marginheight='0'>$html</body></html>"
         }
 
     private fun renderErrorBubble(msg: ChatMessage, onRetry: (() -> Unit)?): JPanel {
@@ -389,16 +712,20 @@ object ChatBubbleRenderer {
         }
     }
 
-    private fun renderTimestamp(msg: ChatMessage, extra: String = ""): JPanel {
-        val ts = java.time.format.DateTimeFormatter.ofPattern("HH:mm")
+    private fun renderTimestamp(msg: ChatMessage, extra: String = "", leftAlign: Boolean = false): JPanel {
+        val constraint = if (leftAlign) BorderLayout.WEST else BorderLayout.EAST
+        return JPanel(BorderLayout()).apply {
+            add(JLabel(timestampText(msg, extra)).apply {
+                foreground = AppColors.textSecondary; font = font.deriveFont(10f)
+            }, constraint)
+        }
+    }
+
+    private fun timestampText(msg: ChatMessage, extra: String = ""): String {
+        val timestamp = java.time.format.DateTimeFormatter.ofPattern("HH:mm")
             .withZone(java.time.ZoneId.systemDefault())
             .format(msg.timestamp)
-        val label = if (extra.isNotEmpty()) "$ts | $extra" else ts
-        return JPanel(BorderLayout()).apply {
-            add(JLabel(label).apply {
-                foreground = AppColors.textSecondary; font = font.deriveFont(10f)
-            }, BorderLayout.EAST)
-        }
+        return if (extra.isNotEmpty()) "$timestamp | $extra" else timestamp
     }
 
     /**
@@ -406,44 +733,73 @@ object ChatBubbleRenderer {
      *
      * 对齐 docs/ui/chat.md §二 "流式气泡"：末尾闪烁光标 ▍ (#3B82F6, 500ms blink)。
      */
-    fun renderStreaming(markdownText: String): JComponent = buildStreamingPanel(markdownText)
-
-    /** 构建带闪烁光标的流式气泡面板（首次调用时创建） */
-    private fun buildStreamingPanel(markdownText: String): JPanel {
-        val bubble = JPanel().apply {
-            layout = BoxLayout(this, BoxLayout.Y_AXIS)
-            isOpaque = false
-            putClientProperty("bubbleType", "agent")
-        }
-        val rendered = render(
-            ChatMessage(
-                type = ChatMessage.Type.AGENT_TEXT,
-                content = markdownText,
-                timestamp = java.time.Instant.now()
-            )
-        )
-        bubble.add(rendered)
-        val cursor = JLabel("▍").apply {
-            foreground = AppColors.primary
-            font = font.deriveFont(13f)
-            isOpaque = false
-        }
-        bubble.add(cursor)
-        val blinkTimer = javax.swing.Timer(500) { cursor.isVisible = !cursor.isVisible }
-        blinkTimer.start()
-        bubble.addHierarchyListener {
-            if (it.changeFlags and java.awt.event.HierarchyEvent.DISPLAYABILITY_CHANGED.toLong() != 0L) {
-                if (!bubble.isDisplayable) blinkTimer.stop()
-            }
-        }
-        return capRowHeight(bubble)
-    }
+    fun renderStreaming(markdownText: String): JComponent =
+        createStreamingAgentBubble(markdownText).component
 
     /**
      * 渲染思考过程折叠块（对齐 docs/ui/chat.md §三）。
      * 默认折叠，">" 箭头可点击展开/折叠，显示完整思考内容。
      */
-    fun renderThinking(reasoning: String, durationMs: Long): JPanel {
+    fun renderThinking(reasoning: String, durationMs: Long): JPanel =
+        createThinkingHandle(reasoning, durationMs).component
+
+    class ThinkingHandle internal constructor(
+        val component: JPanel,
+        internal val block: JPanel,
+        internal val body: JTextArea,
+        internal val bodyScroll: JScrollPane,
+        internal val durationLabel: JLabel,
+        internal var widthBudget: Int = 0
+    ) {
+        fun update(reasoning: String, durationMs: Long) {
+            body.text = reasoning
+            refresh(durationMs)
+        }
+
+        fun append(delta: String, durationMs: Long) {
+            body.append(delta)
+            refresh(durationMs)
+        }
+
+        fun constrainWidth(maxWidth: Int) {
+            val normalized = maxWidth.coerceAtLeast(80)
+            if (widthBudget == normalized) return
+            widthBudget = normalized
+            refreshLayout()
+        }
+
+        private fun refresh(durationMs: Long) {
+            durationLabel.text = formatThinkingDuration(durationMs)
+            refreshLayout()
+        }
+
+        private fun refreshLayout() {
+            block.preferredSize = null
+            component.preferredSize = null
+            if (bodyScroll.isVisible) {
+                val currentWidth = listOf(widthBudget, component.width, block.width, component.preferredSize.width)
+                    .firstOrNull { it > 0 } ?: 0
+                if (currentWidth > 0) {
+                    updateThinkingBodySize(body, bodyScroll, currentWidth)
+                    block.preferredSize = Dimension(currentWidth, block.preferredSize.height)
+                }
+            }
+            val preferredHeight = component.preferredSize.height
+            if (widthBudget > 0) {
+                block.preferredSize = Dimension(widthBudget, block.preferredSize.height)
+                component.preferredSize = Dimension(widthBudget, preferredHeight)
+            }
+            component.maximumSize = Dimension(
+                if (widthBudget > 0) widthBudget else Int.MAX_VALUE,
+                component.preferredSize.height
+            )
+            block.revalidate()
+            component.revalidate()
+            component.repaint()
+        }
+    }
+
+    fun createThinkingHandle(reasoning: String, durationMs: Long): ThinkingHandle {
         val outer = JPanel(BorderLayout()).apply {
             isOpaque = false
             putClientProperty("bubbleType", "agent")  // 标记为 agent 类型，参与宽度约束
@@ -461,6 +817,10 @@ object ChatBubbleRenderer {
             font = font.deriveFont(12f)
             border = BorderFactory.createEmptyBorder(0, 0, 0, 4)
         }
+        val durationLabel = JLabel(formatThinkingDuration(durationMs)).apply {
+            foreground = AppColors.thinkingTimeFg
+            font = font.deriveFont(10f)
+        }
         val header = JPanel(BorderLayout()).apply {
             isOpaque = true
             // 对齐 ui-prototype: padding=6px 10px
@@ -473,9 +833,7 @@ object ChatBubbleRenderer {
                 })
             }
             add(leftPanel, BorderLayout.WEST)
-            add(JLabel("${durationMs / 1000}.${(durationMs % 1000) / 100}s").apply {
-                foreground = AppColors.thinkingTimeFg; font = font.deriveFont(10f)
-            }, BorderLayout.EAST)
+            add(durationLabel, BorderLayout.EAST)
         }
         val body = JTextArea(reasoning).apply {
             font = Font(Font.SANS_SERIF, Font.ITALIC, 11); foreground = AppColors.thinkingBodyFg
@@ -522,8 +880,14 @@ object ChatBubbleRenderer {
         addMouseListenerRecursively(header, toggleThinking)
         block.add(header, BorderLayout.NORTH); block.add(bodyScroll, BorderLayout.CENTER)
         outer.add(block, BorderLayout.CENTER)
-        return capRowHeight(outer)
+        capRowHeight(outer)
+        return ThinkingHandle(outer, block, body, bodyScroll, durationLabel).also {
+            outer.putClientProperty("thinkingHandle", it)
+        }
     }
+
+    private fun formatThinkingDuration(durationMs: Long): String =
+        "${durationMs / 1000}.${(durationMs % 1000) / 100}s"
 
     private fun updateThinkingBodySize(body: JTextArea, bodyScroll: JScrollPane, width: Int) {
         val textWidth = (width - 20).coerceAtLeast(80)
@@ -564,23 +928,28 @@ object ChatBubbleRenderer {
             background = AppColors.codeBg
             isEditable = false
         }
+        updateHighlightedCodePane(pane, code)
+        return pane
+    }
+
+    private fun updateHighlightedCodePane(pane: JTextPane, code: String) {
         val doc = pane.styledDocument
         val def = StyleContext.getDefaultStyleContext().getStyle(StyleContext.DEFAULT_STYLE)
-        val defaultStyle = doc.addStyle("code", def).apply {
+        val defaultStyle = (doc.getStyle("code") ?: doc.addStyle("code", def)).apply {
             StyleConstants.setForeground(this, AppColors.textSecondary)
         }
-        val kwStyle = doc.addStyle("kw", defaultStyle).apply {
+        val kwStyle = (doc.getStyle("kw") ?: doc.addStyle("kw", defaultStyle)).apply {
             StyleConstants.setForeground(this, Color(0xCF222E))
             StyleConstants.setBold(this, true)
         }
-        val strStyle = doc.addStyle("str", defaultStyle).apply {
+        val strStyle = (doc.getStyle("str") ?: doc.addStyle("str", defaultStyle)).apply {
             StyleConstants.setForeground(this, Color(0x0A3069))
         }
-        val cmStyle = doc.addStyle("cm", defaultStyle).apply {
+        val cmStyle = (doc.getStyle("cm") ?: doc.addStyle("cm", defaultStyle)).apply {
             StyleConstants.setForeground(this, Color(0x6E7781))
             StyleConstants.setItalic(this, true)
         }
-        val fnStyle = doc.addStyle("fn", defaultStyle).apply {
+        val fnStyle = (doc.getStyle("fn") ?: doc.addStyle("fn", defaultStyle)).apply {
             StyleConstants.setForeground(this, Color(0x8250DF))
         }
 
@@ -593,6 +962,7 @@ object ChatBubbleRenderer {
             "where", "by", "get", "set", "constructor", "init", "annotation", "enum"
         )
         try {
+            doc.remove(0, doc.length)
             doc.insertString(0, code, defaultStyle)
             Regex("\\b(${kotlinKw.joinToString("|")})\\b").findAll(code).forEach { m ->
                 doc.setCharacterAttributes(m.range.first, m.value.length, kwStyle, false)
@@ -608,7 +978,6 @@ object ChatBubbleRenderer {
             }
         } catch (_: Exception) { /* fallback to default style */
         }
-        return pane
     }
 
     private fun parseMarkdown(text: String): List<MarkdownBlock> {

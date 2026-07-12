@@ -13,6 +13,26 @@ import kotlin.test.assertTrue
 class ToolApprovalPolicyTest {
 
     @Test
+    fun `lowercase bash cannot bypass dangerous shell approval`() {
+        val session = AgentSession().apply {
+            firstToolUseDone.add("Bash")
+            approvedTools.add("Bash")
+        }
+
+        val (needsApproval, reason) = ToolApprovalPolicy.needsUserApproval(
+            ToolApprovalPolicy.ApprovalContext(
+                session = session,
+                toolName = "bash",
+                toolUse = tool("bash", mapOf("command" to "sudo rm -rf /")),
+                project = project()
+            )
+        )
+
+        assertTrue(needsApproval)
+        assertEquals(ToolApprovalPolicy.ApprovalReason.DANGEROUS_SHELL_COMMAND, reason)
+    }
+
+    @Test
     fun `describes command and file targets for approval dialog`() {
         val shellText = ToolApprovalPolicy.describe(
             "Bash",

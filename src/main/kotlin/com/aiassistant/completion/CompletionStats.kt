@@ -108,6 +108,10 @@ object CompletionStats {
         return if (snap.shown == 0) 0L else snap.totalLatencyMs / snap.shown
     }
 
+    fun dispose() {
+        reset()
+    }
+
     fun reset() {
         totalShown.set(0)
         totalAccepted.set(0)

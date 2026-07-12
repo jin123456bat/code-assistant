@@ -28,6 +28,10 @@ object MessageBus {
         listeners.remove(listener)
     }
 
+    fun dispose() {
+        listeners.clear()
+    }
+
     fun publishSessionChanged(sessionId: String, type: String) =
         listeners.forEach { it.onSessionChanged(sessionId, type) }
 

@@ -1,6 +1,7 @@
 package com.aiassistant.ui
 
 import com.aiassistant.AppSettingsService
+import com.aiassistant.agent.MultiAgentManager
 import com.aiassistant.session.SessionStore
 import com.aiassistant.ui.page.*
 import com.aiassistant.util.OkioWatchdogCleaner
@@ -178,5 +179,10 @@ class ChatToolWindow(private val project: Project) : JPanel(BorderLayout()), Dis
         chatPage.dispose()
         pages.components.filterIsInstance<Disposable>().forEach { it.dispose() }
         OkioWatchdogCleaner.shutdownForPluginUnload()
+
+        // 清理 object 单例，断开 PluginClassLoader 引用链
+        MessageBus.dispose()
+        Toast.dispose()
+        MultiAgentManager.disposeSharedState()
     }
 }

@@ -9,13 +9,15 @@ import javax.swing.JLabel
 import javax.swing.JScrollPane
 import javax.swing.JTextArea
 import javax.swing.JTextPane
+import javax.swing.event.DocumentEvent
+import javax.swing.event.DocumentListener
 import javax.swing.border.Border
 import javax.swing.border.CompoundBorder
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
-import kotlin.test.assertNotSame
+import kotlin.test.assertSame
 
 class ChatBubbleRendererTest {
 
@@ -379,11 +381,140 @@ class ChatBubbleRendererTest {
     }
 
     @Test
-    fun `streaming bubble does not reuse the previous component`() {
-        val first = ChatBubbleRenderer.renderStreaming("first")
-        val second = ChatBubbleRenderer.renderStreaming("second")
+    fun `streaming agent bubble keeps one component through updates and completion`() {
+        val handle = ChatBubbleRenderer.createStreamingAgentBubble()
+        val component = handle.component
 
-        assertNotSame(first, second)
+        handle.updateStreaming("first")
+        handle.updateStreaming("second")
+        handle.finish(
+            ChatMessage(
+                type = ChatMessage.Type.AGENT_TEXT,
+                content = "final",
+                tokenDelta = ChatMessage.TokenDelta(input = 1000, output = 2000)
+            )
+        )
+
+        assertSame(component, handle.component)
+        assertFalse(labelsIn(component).any { it.text == "▍" && it.isVisible })
+        assertTrue(labelsIn(component).any { it.text?.contains("final") == true })
+        val roundedCard = panelsIn(component).single { borderContainsRoundedBorder(it.border) }
+        assertFalse(labelsIn(roundedCard).any { it.text?.contains("↑1K ↓2K") == true })
+        assertTrue(labelsIn(component).any { it.text?.contains("↑1K ↓2K") == true })
+    }
+
+    @Test
+    fun `streaming paragraph component survives content width and completion updates`() {
+        val handle = ChatBubbleRenderer.createStreamingAgentBubble()
+        handle.updateStreaming("Hello")
+        val paragraph = labelsIn(handle.component).first { it.text?.contains("Hello") == true }
+
+        handle.updateStreaming("Hello world")
+        assertSame(paragraph, labelsIn(handle.component).first { it.text?.contains("Hello world") == true })
+
+        handle.constrainWidth(220)
+        assertSame(paragraph, labelsIn(handle.component).first { it.text?.contains("Hello world") == true })
+
+        handle.finish(
+            ChatMessage(
+                type = ChatMessage.Type.AGENT_TEXT,
+                content = "Hello world",
+                tokenDelta = ChatMessage.TokenDelta(input = 1000, output = 1000)
+            )
+        )
+        assertSame(paragraph, labelsIn(handle.component).first { it.text?.contains("Hello world") == true })
+    }
+
+    @Test
+    fun `completed markdown prefix component survives tail updates`() {
+        val handle = ChatBubbleRenderer.createStreamingAgentBubble()
+        handle.updateStreaming("First paragraph\n\nSecond")
+        val firstParagraph = labelsIn(handle.component).first {
+            it.text?.contains("First paragraph") == true
+        }
+
+        handle.updateStreaming("First paragraph\n\nSecond paragraph grows")
+
+        assertSame(
+            firstParagraph,
+            labelsIn(handle.component).first { it.text?.contains("First paragraph") == true }
+        )
+    }
+
+    @Test
+    fun `code component survives content and width updates`() {
+        val handle = ChatBubbleRenderer.createStreamingAgentBubble()
+        handle.updateStreaming("```kotlin\nval x = 1\n```")
+        val codePane = textPanesIn(handle.component).single()
+
+        handle.updateStreaming("```kotlin\nval x = 12\n```")
+        assertSame(codePane, textPanesIn(handle.component).single())
+        assertContains(codePane.text, "val x = 12")
+
+        handle.constrainWidth(640)
+        assertSame(codePane, textPanesIn(handle.component).single())
+    }
+
+    @Test
+    fun `closing code fence replaces only the draft tail`() {
+        val handle = ChatBubbleRenderer.createStreamingAgentBubble()
+        handle.updateStreaming("Intro\n\n```kotlin\nval x = 1")
+        val intro = labelsIn(handle.component).first { it.text?.contains("Intro") == true }
+
+        handle.updateStreaming("Intro\n\n```kotlin\nval x = 1\n```")
+
+        assertSame(intro, labelsIn(handle.component).first { it.text?.contains("Intro") == true })
+        assertEquals(1, textPanesIn(handle.component).size)
+    }
+
+    @Test
+    fun `tail tokens do not rewrite a completed code document`() {
+        val handle = ChatBubbleRenderer.createStreamingAgentBubble()
+        handle.updateStreaming("```kotlin\nval x = 1\n```\n\nTail")
+        val codeDocument = textPanesIn(handle.component).single().document
+        var documentChanges = 0
+        codeDocument.addDocumentListener(object : DocumentListener {
+            override fun insertUpdate(e: DocumentEvent?) { documentChanges++ }
+            override fun removeUpdate(e: DocumentEvent?) { documentChanges++ }
+            override fun changedUpdate(e: DocumentEvent?) { documentChanges++ }
+        })
+
+        handle.appendStreaming(" grows")
+
+        assertEquals(0, documentChanges)
+    }
+
+    @Test
+    fun `adding a markdown block does not detach the completed prefix from body`() {
+        val handle = ChatBubbleRenderer.createStreamingAgentBubble()
+        handle.updateStreaming("First paragraph")
+        val body = handle.markdownBody.component
+        var removedChildren = 0
+        body.addContainerListener(object : java.awt.event.ContainerAdapter() {
+            override fun componentRemoved(e: java.awt.event.ContainerEvent?) {
+                removedChildren++
+            }
+        })
+
+        handle.appendStreaming("\n\n# Header")
+
+        assertEquals(0, removedChildren)
+    }
+
+    @Test
+    fun `renderer owns agent bubble width constraint`() {
+        val component = ChatBubbleRenderer.render(
+            ChatMessage(
+                type = ChatMessage.Type.AGENT_TEXT,
+                content = "This is a long assistant response that must wrap inside the available width."
+            )
+        )
+
+        ChatBubbleRenderer.constrainWidth(component, 180)
+
+        val roundedCard = panelsIn(component).single { borderContainsRoundedBorder(it.border) }
+        assertTrue(roundedCard.maximumSize.width <= 180)
+        assertTrue(labelsIn(roundedCard).any { it.text?.contains("body width=") == true })
     }
 
     @Test

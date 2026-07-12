@@ -66,6 +66,12 @@ class MultiAgentManager(private val project: Project) {
         /** 将并发数设置转换为 Semaphore permits 数（0=不限→Int.MAX_VALUE） */
         fun semaphorePermitsForConcurrency(concurrency: Int): Int =
             if (concurrency <= 0) Int.MAX_VALUE else concurrency
+
+        /** 清理静态文件锁表，供插件卸载时调用 */
+        fun disposeSharedState() {
+            fileLocks.clear()
+            subAgentFileLocks.clear()
+        }
     }
 
     /**

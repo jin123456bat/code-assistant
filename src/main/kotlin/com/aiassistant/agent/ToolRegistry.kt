@@ -21,10 +21,14 @@ object ToolRegistry {
 
     private val tools = mutableMapOf<String, Class<*>>()
     private val infoMap = mutableMapOf<String, ToolInfo>()
+    private val legacyNames = mutableMapOf<String, String>()
 
     fun register(name: String, toolClass: Class<*>, info: ToolInfo) {
         tools[name] = toolClass
         infoMap[name] = info
+        if (info.betaTool == null) {
+            legacyNames.putIfAbsent(sdkDefaultName(toolClass), name)
+        }
     }
 
     /** 便捷重载：从 @JsonClassDescription 注解自动提取描述，usage 为空字符串 */
@@ -34,12 +38,23 @@ object ToolRegistry {
             .firstOrNull()?.value ?: ""
         tools[name] = toolClass
         infoMap[name] = ToolInfo(name, desc, "")
+        legacyNames.putIfAbsent(sdkDefaultName(toolClass), name)
     }
 
     fun unregister(name: String) {
         tools.remove(name)
         infoMap.remove(name)
+        legacyNames.entries.removeAll { it.value == name }
     }
+
+    /** 兼容未声明 @JsonTypeName 时 Anthropic SDK 生成的 snake_case 工具名。 */
+    fun canonicalName(name: String): String =
+        if (name in tools) name else legacyNames[name] ?: name
+
+    private fun sdkDefaultName(toolClass: Class<*>): String =
+        toolClass.simpleName
+            .replace(Regex("([a-z0-9])([A-Z])"), "$1_$2")
+            .lowercase()
 
     fun get(name: String): Class<*>? = tools[name]
     fun getToolInfo(name: String): ToolInfo? = infoMap[name]
