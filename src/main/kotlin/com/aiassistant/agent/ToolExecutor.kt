@@ -405,7 +405,13 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
 
     private fun resolveProjectFile(basePath: String, path: String): File? {
         val base = File(basePath).canonicalFile
-        val file = File(base, path).canonicalFile
+        // 绝对路径直接解析，避免 Java File(File, String) 将绝对路径拼接到 base 后
+        // 导致 /project + /absolute → /project/absolute 的路径错乱
+        val file = if (File(path).isAbsolute) {
+            File(path).canonicalFile
+        } else {
+            File(base, path).canonicalFile
+        }
         val inside = file == base || file.path.startsWith(base.path + File.separator)
         return file.takeIf { inside }
     }
@@ -466,6 +472,12 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
         val dir = resolveProjectFile(project.basePath ?: ".", workDir ?: ".")?.let { f ->
             if (f.isDirectory) f else f.parentFile
         } ?: return "错误: 工作目录 \"$workDir\" 超出项目根，已拒绝访问"
+
+        // 防御：检查解析后的目录是否真实存在，避免相对路径拼接出不存在目录后
+        // GeneralCommandLine 抛出 WorkingDirectoryNotFoundException
+        if (!dir.exists() || !dir.isDirectory) {
+            return "错误: 工作目录不存在: ${dir.canonicalPath}"
+        }
 
         val cmdLine = GeneralCommandLine("/bin/bash", "-c", command)
             .withWorkDirectory(dir)
