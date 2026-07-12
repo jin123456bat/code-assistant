@@ -13,6 +13,8 @@ import java.awt.Graphics2D
 import java.awt.RenderingHints
 import java.awt.Toolkit
 import java.awt.datatransfer.StringSelection
+import java.awt.event.MouseWheelEvent
+import java.awt.event.MouseWheelListener
 import javax.swing.JComponent
 import javax.swing.*
 import javax.swing.text.StyleConstants
@@ -854,6 +856,24 @@ object ChatBubbleRenderer {
             preferredSize = Dimension(0, minOf(body.preferredSize.height, 140))
             maximumSize = Dimension(Int.MAX_VALUE, 140)
             isVisible = false
+            // ponytail: 内层滚到头时转发给外层，避免嵌套滚动卡死
+            addMouseWheelListener { e ->
+                val bar = verticalScrollBar
+                val atBottom = e.wheelRotation > 0 && bar.value + bar.visibleAmount >= bar.maximum
+                val atTop = e.wheelRotation < 0 && bar.value <= bar.minimum
+                if (atBottom || atTop) {
+                    var parent: java.awt.Container? = this.parent
+                    while (parent != null) {
+                        if (parent is JScrollPane) {
+                            parent.dispatchEvent(
+                                javax.swing.SwingUtilities.convertMouseEvent(this, e, parent)
+                            )
+                            break
+                        }
+                        parent = parent.parent
+                    }
+                }
+            }
         }
         val toggleThinking = object : java.awt.event.MouseAdapter() {
             override fun mouseClicked(e: java.awt.event.MouseEvent) {

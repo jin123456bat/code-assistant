@@ -21,7 +21,8 @@ class SkillManager(private val project: Project) {
         val hasMissingTools: Boolean = false,
         val missingTools: List<String> = emptyList(),  // 具体缺失的工具名称，供 UI 展示
         val triggerWords: List<String> = emptyList(),  // 触发词列表，供 UI 展示
-        val conflictCommand: String? = null  // 冲突的 command 名称，非 null 表示该 Skill 的 command 与其他 Skill 冲突
+        val conflictCommand: String? = null,  // 冲突的 command 名称，非 null 表示该 Skill 的 command 与其他 Skill 冲突
+        val skillFile: String = ""  // SKILL.md 文件绝对路径，用于在 IDE 中打开
     )
 
     fun loadSkills(): List<Skill> {
@@ -137,7 +138,8 @@ class SkillManager(private val project: Project) {
                 command = command,
                 requiredTools = requiredTools,
                 content = body,
-                triggerWords = triggerWords
+                triggerWords = triggerWords,
+                skillFile = file.absolutePath
             )
         } catch (_: Exception) {
             return null

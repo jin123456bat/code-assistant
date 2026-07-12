@@ -18,6 +18,8 @@ import java.awt.event.ActionEvent
 import java.awt.event.ActionListener
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
+import java.awt.event.MouseWheelEvent
+import java.awt.event.MouseWheelListener
 import java.awt.geom.AffineTransform
 import javax.swing.*
 
@@ -87,14 +89,16 @@ class ToolCallCard(
     }
     private var approvalActions: ApprovalActions? = approvalActions
 
-    // 结果区域容器（JScrollPane），限制 max-height=240px，超出滚动
+    // 结果区域容器（JScrollPane），限制 max-height=400px，超出垂直滚动
     private val resultScrollPane = JScrollPane().apply {
         verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED
-        horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED
-        maximumSize = Dimension(Int.MAX_VALUE, 240)
+        horizontalScrollBarPolicy = JScrollPane.HORIZONTAL_SCROLLBAR_NEVER
+        maximumSize = Dimension(Int.MAX_VALUE, 400)
         border = BorderFactory.createEmptyBorder()
         isOpaque = true
         viewport.isOpaque = true
+        // ponytail: 内层滚到头时把事件转发给外层，避免嵌套滚动卡死
+        addMouseWheelListener(NestedScrollForwarder(this))
     }
 
     // 结果展示区域，可能为 JTextArea（纯文本结果）或 JLabel（HTML Diff 渲染）
@@ -102,6 +106,8 @@ class ToolCallCard(
         font = Font(Font.MONOSPACED, Font.PLAIN, 12)
         isEditable = false; background = AppColors.codeBg
         border = BorderFactory.createEmptyBorder(4, 8, 4, 8)
+        lineWrap = true
+        wrapStyleWord = true
     }
     private val footerLabel = JLabel()
 
@@ -335,6 +341,34 @@ class ToolCallCard(
 
     private fun disableApprovalButtons() {
         approvalPanel.components.filterIsInstance<JButton>().forEach { it.isEnabled = false }
+    }
+
+    /**
+     * 内层 JScrollPane 滚到头时，把 MouseWheelEvent 转发给父级 JScrollPane，
+     * 避免嵌套滚动被卡死。
+     */
+    private class NestedScrollForwarder(
+        private val self: JScrollPane
+    ) : MouseWheelListener {
+        override fun mouseWheelMoved(e: MouseWheelEvent) {
+            val bar = self.verticalScrollBar
+            // 向下滚且已到底，或向上滚且已到顶 → 转发给父级
+            val atBottom = e.wheelRotation > 0 && bar.value + bar.visibleAmount >= bar.maximum
+            val atTop = e.wheelRotation < 0 && bar.value <= bar.minimum
+            if (atBottom || atTop) {
+                // 找到父级 JScrollPane 并派发事件
+                var parent: java.awt.Container? = self.parent
+                while (parent != null) {
+                    if (parent is JScrollPane) {
+                        parent.dispatchEvent(
+                            javax.swing.SwingUtilities.convertMouseEvent(self, e, parent)
+                        )
+                        break
+                    }
+                    parent = parent.parent
+                }
+            }
+        }
     }
 
     /**

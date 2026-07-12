@@ -628,6 +628,20 @@ class AgentLoop(
                                 returnMessage = "API Key 无效"
                             )
                         }
+                        // 模型返回的工具调用 JSON 格式错误（如 DeepSeek 偶发生成不带引号的字符串值：
+                        // "workDir": /Users/... 而非 "workDir": "/Users/..."），
+                        // 导致 SDK Jackson 解析失败。重试通常能获得正确格式的 JSON。
+                        e.message?.contains("Unable to parse tool parameter JSON") == true -> {
+                            if (retryCount < 2) {
+                                retryCount++
+                                continue
+                            } else {
+                                return buildErrorResult(
+                                    logMessage = "模型返回了格式错误的工具调用 JSON，已重试 2 次仍失败: ${e.message}",
+                                    returnMessage = "模型响应格式错误，请重试或简化您的请求"
+                                )
+                            }
+                        }
                         // 其他异常
                         else -> {
                             return buildErrorResult(

@@ -11,7 +11,7 @@ import java.awt.FlowLayout
 import java.io.File
 import javax.swing.*
 
-class SkillsPage(project: Project) : JPanel(BorderLayout()) {
+class SkillsPage(private val project: Project) : JPanel(BorderLayout()) {
 
     private val manager = SkillManager(project)
     private val listContainer = JPanel().apply { layout = BoxLayout(this, BoxLayout.Y_AXIS) }
@@ -234,19 +234,8 @@ class SkillsPage(project: Project) : JPanel(BorderLayout()) {
     }
 
     private fun showSkillDetail(skill: SkillManager.Skill) {
-        val textArea = JTextArea(skill.content).apply {
-            font = java.awt.Font("JetBrains Mono", java.awt.Font.PLAIN, 12)
-            isEditable = false
-            lineWrap = true; wrapStyleWord = true
-            rows = 20; columns = 60
-        }
-        val scrollPane = JScrollPane(textArea)
-        scrollPane.preferredSize = Dimension(520, 320)
-        JOptionPane.showMessageDialog(
-            this,
-            scrollPane,
-            "Skill 详情: ${skill.name}",
-            JOptionPane.PLAIN_MESSAGE
-        )
+        val vf = com.intellij.openapi.vfs.LocalFileSystem.getInstance().findFileByPath(skill.skillFile)
+            ?: return
+        com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project).openFile(vf, true)
     }
 }
