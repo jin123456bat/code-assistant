@@ -65,7 +65,8 @@ padding=12px
 
 **代码块渲染：** 不真正 inline 嵌入。Markdown 文本拆分为"文本段 + 代码块 + 文本段"序列，每段独立组件，包裹在
 BoxLayout.Y_AXIS 的 BubblePanel 中。普通代码块使用 `JTextPane + StyledDocument` 做 Kotlin 语法高亮，
-窄面板连续代码块使用只读 `JTextArea` 纵向堆叠，外层包裹在 `JScrollPane` 中。
+窄面板连续代码块纵向堆叠，外层包裹在 `JScrollPane` 中。代码块保留 Shift + 滚轮的横向滚动；普通垂直滚轮事件
+由最近的外层消息 `JScrollPane` 处理，避免鼠标位于代码块上时消息列表无法继续上下滚动。
 
 ```
 ┌─────────────────────────────────────────┐
