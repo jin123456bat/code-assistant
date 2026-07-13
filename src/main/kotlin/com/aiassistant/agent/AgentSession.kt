@@ -72,14 +72,12 @@ class AgentSession(
     /** 当前 turn 中 ToolExecutor 产生的图片引用，AgentLoop 处理 tool 结果时取出并清空 */
     val pendingImages: MutableList<ImageRef> = mutableListOf()
 
-    /** 取出并清空 pendingImages，每次 tool 结果处理后调用。synchronized 保证 toList()+clear() 原子性 */
+    /** 取出并清空 pendingImages，每次 tool 结果处理后调用 */
     fun drainPendingImages(): List<ImageRef> {
-        synchronized(pendingImages) {
-            if (pendingImages.isEmpty()) return emptyList()
-            val imgs = pendingImages.toList()
-            pendingImages.clear()
-            return imgs
-        }
+        if (pendingImages.isEmpty()) return emptyList()
+        val imgs = pendingImages.toList()
+        pendingImages.clear()
+        return imgs
     }
 
     fun addMessage(msg: Message) {

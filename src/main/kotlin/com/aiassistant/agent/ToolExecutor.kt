@@ -285,7 +285,7 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
                 height = 0,
                 sizeBytes = bytes.size.toLong()
             )
-            synchronized(session.pendingImages) { session.pendingImages.add(imageRef) }
+            session.pendingImages.add(imageRef)
             return "[图片: $path (${bytes.size} 字节, ${imageMime})]"
         }
 
@@ -1730,5 +1730,4 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
                 "\n... (共 ${lines.size} 行，已截断到 $maxLines 行)"
     }
 
-    companion object
 }
