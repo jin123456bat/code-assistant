@@ -478,17 +478,11 @@ class ChatInputArea(
         val fileMatch = Regex("""(?:^|\s)@(\S*)$""").find(before)
         if (fileMatch != null) {
             val filter = fileMatch.groupValues[1]
-            val files = cachedFiles
-            if (files == null) {
-                // 缓存未就绪：触发同步加载（首次 @ 触发时异步任务可能未完成）
-                val project = projectRef
-                cachedFiles = if (project != null) try {
-                    com.intellij.openapi.application.ReadAction.compute<List<ProjectFileEntry>, Throwable> {
-                        getProjectFiles("")
-                    }
-                } catch (_: Exception) {
-                    emptyList()
-                } else emptyList()
+            if (cachedFiles == null) {
+                // 缓存未就绪：异步加载，避免 EDT 上 ReadAction.compute 死锁
+                preloadProjectFiles()
+                hidePopup()
+                return
             }
             showPopup(filter, cachedFiles ?: emptyList())
             return
@@ -503,6 +497,33 @@ class ChatInputArea(
             return
         }
         hidePopup()
+    }
+
+    @Volatile
+    private var projectFilesLoading = false
+
+    /** 异步预加载项目文件列表，避免 EDT 上 ReadAction.compute 死锁 */
+    private fun preloadProjectFiles() {
+        val project = projectRef ?: return
+        if (projectFilesLoading) return
+        projectFilesLoading = true
+        com.intellij.openapi.application.ApplicationManager.getApplication().executeOnPooledThread {
+            val files = try {
+                com.intellij.openapi.application.ReadAction.compute<List<ProjectFileEntry>, Throwable> {
+                    getProjectFiles("")
+                }
+            } catch (_: Exception) {
+                emptyList()
+            }
+            SwingUtilities.invokeLater {
+                projectFilesLoading = false
+                if (projectRef === project) {
+                    cachedFiles = files
+                    // 加载完成后重新检查，若用户仍在输入 @ 则弹出
+                    checkTriggers()
+                }
+            }
+        }
     }
 
     private fun commandSuggestions(): List<String> {
@@ -570,6 +591,7 @@ class ChatInputArea(
                 popupHeight
             )
         }
+        selectFirstPopupItem()
         hidePopup()  // 关闭旧弹窗
         scrollPane.border = BorderFactory.createLineBorder(AppColors.border)
         // 弹窗显示在输入框上方，紧贴文本框
@@ -637,6 +659,7 @@ class ChatInputArea(
             ),
             popupHeight
         )
+        selectFirstPopupItem()
         hidePopup()  // 关闭旧弹窗
         val anchor = runCatching { inputScrollPane.locationOnScreen }.getOrNull() ?: return
         val y = anchor.y - scrollPane.preferredSize.height
@@ -648,6 +671,7 @@ class ChatInputArea(
     private fun hidePopup() {
         activePopup?.hide()
         activePopup = null
+        popupIndex = -1
     }
 
     private var popupIndex = -1
@@ -657,7 +681,29 @@ class ChatInputArea(
         // 对齐 docs/ui/chat.md §八：↑↓ 移动高亮（循环）
         popupIndex = ((popupIndex + direction) % count + count) % count
         for (i in 0 until count) {
-            popupMenuItems[i].isArmed = (i == popupIndex)
+            val selected = i == popupIndex
+            popupMenuItems[i].apply {
+                isArmed = selected
+                // JMenuItem 在普通 JPanel 中 isArmed 无视觉反馈，需显式设背景色
+                background = if (selected) AppColors.primaryLight else AppColors.cardBg
+                isOpaque = true
+            }
+        }
+    }
+
+    private fun selectFirstPopupItem() {
+        if (popupMenuItems.isEmpty()) {
+            popupIndex = -1
+            return
+        }
+        popupIndex = 0
+        for (i in popupMenuItems.indices) {
+            val selected = i == 0
+            popupMenuItems[i].apply {
+                isArmed = selected
+                background = if (selected) AppColors.primaryLight else AppColors.cardBg
+                isOpaque = true
+            }
         }
     }
 
