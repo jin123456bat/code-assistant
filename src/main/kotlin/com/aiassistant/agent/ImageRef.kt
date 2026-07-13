@@ -8,8 +8,8 @@ import java.util.UUID
 
 /**
  * 图片引用，对齐文档 docs/agent/images.md §五 ImageRef 数据结构。
- * 粘贴图片经缩放（长边 ≤2048px）、PNG 编码、Base64 编码后封装为此结构，
- * 存入 ChatViewModel.images[]，发送时组装为独立的 image content block。
+ * 粘贴图片经缩放（长边 ≤2048px）、受支持格式编码、Base64 编码后封装为此结构，
+ * 存入输入区域的图片引用列表，经 ChatViewModel 传递，发送时组装为独立的 image content block。
  *
  * 图片 → API ImageBlock 的转换收敛到此方法，所有路径（粘贴、Read 工具等）
  * 统一通过 [toBetaImageBlockParam] 构建 API 参数，消除分散的 MIME 映射。
@@ -23,7 +23,7 @@ data class ImageRef(
     val base64Data: String,
     /** MIME 类型，"image/png" / "image/jpeg" / "image/gif" / "image/webp" */
     val mimeType: String = "image/png",
-    /** 缩略图（48x48，TagsRow 展示用） */
+    /** 可选缩略图（保留给非紧凑型展示；当前输入框芯片不使用） */
     val thumbnail: BufferedImage? = null,
     /** 缩放后宽度（px） */
     val width: Int = 0,

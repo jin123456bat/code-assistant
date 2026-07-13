@@ -277,11 +277,13 @@ ChatInputArea
 ├── addFileButton: JButton
 ├── sendButton: JButton
 ├── hintLabel: JLabel
-├── onSlashTrigger(): Unit
-├── onAtTrigger(): Unit
-├── handlePopupKeyDown(event: KeyEvent): Boolean
-├── onPasteImage(image: BufferedImage)
-└── 剪贴板监听
+├── checkTriggers(): Unit
+├── preloadProjectFiles(): Unit
+├── IntelliJ 组件级 Action（Popup 导航、Ctrl/Cmd+V）
+├── InputMap / ActionMap（Swing 导航、发送、粘贴回退）
+├── TransferHandler（图片文件、浏览器图片、菜单粘贴与拖放）
+├── pasteImagesFromTransferable(transferable): Boolean
+└── 图片与文件引用芯片
 ```
 
 ### 审批内嵌卡片（ToolCallCard AWAITING_APPROVAL）

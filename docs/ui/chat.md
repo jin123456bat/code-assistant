@@ -225,16 +225,24 @@ PlanCard 渲染在 Chat 消息流顶部，展示当前执行计划。详细规�
 ### 剪贴板图片粘贴
 
 ```
-剪贴板检测到图片 → Clipboard.getSystemClipboard().getData(DataFlavor.imageFlavor)
+读取一次剪贴板 Transferable 快照
+  → 本地图片文件列表（优先，可多张并保留文件名）
+  → 或 imageFlavor（截图/浏览器通用 Image）
+  → 或 image/* MIME 数据流
   → BufferedImage → 缩放限制（长边 max 2048px，保持比例）
-  → PNG 编码 → Base64 → data:image/png;base64,...
+  → 本地文件尽量保留 JPEG/PNG/GIF/WebP，其他来源回退 PNG → Base64
   → 注入到 LLM 消息的 content 数组中（image block 类型）
-  → 输入区域显示缩略图 tag [🖼 filename ✕]，可点击删除
+  → 输入区域显示与文件引用一致的单行芯片 [📎 filename ×]
 ```
 
 - 支持格式：PNG、JPEG、GIF、WebP（BMP 自动转为 PNG）
 - 单张上限 5MB（Anthropic API 硬限制），单次粘贴最多 20 张（对齐 Anthropic API 上限）
-- UI 展示：48×48 缩略图 tag，带文件名和大小
+- UI 展示：图片和文件引用共用单行紧凑芯片、颜色、边框和移除按钮；图片格式、大小、尺寸放在 tooltip
+- 芯片打开：点击文件芯片由 IDEA 打开项目文件；点击图片芯片按需生成临时预览文件并由 IDEA Image Editor 打开；移除、发送或销毁输入区域时立即清理临时文件
+- 本地图片文件：文件列表优先于 imageFlavor，避免同一图片重复添加，并支持一次粘贴多张
+- 浏览器图片：支持浏览器提供的通用 `java.awt.Image` 或 `image/*` 字节数据；“复制图片地址”不会触发远程下载
+- 快捷键：`Ctrl+V` / `Cmd+V` 同时注册为聊天文本框的 IntelliJ 组件级 Action，并由 `TransferHandler`
+  覆盖菜单粘贴与拖放入口；剪贴板没有图片时回退为普通文本粘贴
 - 图片不注入文本上下文——作为独立的 `image` content block 与文本 `text` block 并列在 API 请求的 user
   message `content` 数组中
 
@@ -269,7 +277,12 @@ PlanCard 渲染在 Chat 消息流顶部，展示当前执行计划。详细规�
    最大 8 行可见 + 滚动条
 ```
 
-**键盘导航：** ↑↓ 移动高亮（循环），Enter 确认选择，Esc 关闭，继续输入实时过滤匹配项。
+**键盘导航：** ↑↓ 移动高亮（循环），选中项始终自动滚动到可视区域；Enter 确认选择，Esc 关闭，继续输入实时过滤匹配项。
+
+- `@` 文件索引在项目注入时异步预热；索引暂时不可读时不会缓存失败结果，后续输入可重试
+- `@` 和 `/` 在文本插入完成、光标更新后再判断触发位置，避免首次输入不响应
+- ↑↓ 注册为聊天文本框的 IntelliJ 组件级 Action，同时保留 Swing `InputMap` / `ActionMap` 回退；FIM
+  候选方向键只绑定当前编辑器的补全会话，不再通过全局快捷键抢占聊天输入
 
 `/` 指令列表内容：内置指令（`/plan`, `/clear`）+ 已启用 Skills 的 command（如 `/review`, `/refactor`）。
 

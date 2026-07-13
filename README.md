@@ -91,7 +91,7 @@ Platform Plugin 2.2.1
 |--------------------|---------------|------------------------------------|
 | `Ctrl+Shift+K`     | `Cmd+Shift+K` | 打开/关闭 Agent 面板                     |
 | `Alt+P`            | `Cmd+P`       | 手动触发代码补全                           |
-| `↑` / `↓`          | `↑` / `↓`     | 补全候选切换                             |
+| `↑` / `↓`          | `↑` / `↓`     | 当前编辑器 FIM 多候选切换                    |
 | `Enter`            | `Enter`       | 发送消息                               |
 | `Shift+Enter`      | `Shift+Enter` | 输入框换行                              |
 | `Escape`           | `Escape`      | 关闭 Popup（详见 agent.mdagent.md#快捷键)） |

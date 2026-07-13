@@ -29,7 +29,8 @@ class EditorSelectionListener(
             val startLine = editor.document.getLineNumber(selection.selectionStart) + 1
             val endLine = editor.document.getLineNumber(selection.selectionEnd) + 1
             val content = selection.selectedText ?: return
-            val path = VfsUtil.getRelativePath(file, project.baseDir) ?: file.presentableName
+            // 项目外文件无法生成相对路径时必须保留绝对路径，否则芯片点击会错误拼到项目根目录。
+            val path = VfsUtil.getRelativePath(file, project.baseDir) ?: file.path
             val key = Triple(path, startLine..endLine, content)
             if (key != lastSelection) {
                 lastSelection = key

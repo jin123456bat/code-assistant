@@ -82,8 +82,8 @@ getSuggestion() [suspend 协程]
 | `PsiCompletionStrategy`      | `completion/PsiCompletionStrategy.kt`      | PHP PSI 上下文：函数签名 + use 语句（反射，可选依赖）                       |
 | `CharBudgetManager`          | `completion/CharBudgetManager.kt`          | 字符预算常量：MAX_CHARS=16384, PREFIX_RATIO=2/3                 |
 | `ManualCompletionAction`     | `completion/ManualCompletionAction.kt`     | 手动触发补全：`Cmd+P`(Mac) / `Alt+P`(Win)                       |
-| `NextCandidateAction`        | `completion/NextCandidateAction.kt`        | 下一个候选：`↓` 键切换                                            |
-| `PrevCandidateAction`        | `completion/PrevCandidateAction.kt`        | 上一个候选：`↑` 键切换                                            |
+| `NextCandidateAction`        | `completion/NextCandidateAction.kt`        | 下一个候选：当前 FIM 会话内用 `↓` 切换                                  |
+| `PrevCandidateAction`        | `completion/PrevCandidateAction.kt`        | 上一个候选：当前 FIM 会话内用 `↑` 切换                                  |
 
 ## 三、FIM API 调用
 
@@ -301,7 +301,10 @@ PHP PSI 为可选依赖——如果 PHP 插件未安装，反射失败时静默�
 | `↓` | 下一个候选（有候选时） |
 | `↑` | 上一个候选（有候选时） |
 
-当有补全候选显示时，`↓`/`↑` 切换候选；无候选时正常移动光标。
+每个 API 候选会构建为独立的 `InlineCompletionVariant`。`↓`/`↑` 不在 `plugin.xml` 中注册为全局快捷键，
+而是通过 `registerCustomShortcutSet()` 绑定到当前编辑器的 AI Assistant FIM 会话，并以该
+`InlineCompletionSession` 作为父 `Disposable`。只有本插件会话处于活动状态且候选数大于 1 时动作才启用；
+单候选、无候选、其他 Provider 会话或会话结束后，按键由 IntelliJ 原生编辑器动作处理。
 
 ### 接受补全
 

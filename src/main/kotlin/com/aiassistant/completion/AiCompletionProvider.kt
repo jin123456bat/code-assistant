@@ -11,13 +11,15 @@ import com.intellij.codeInsight.inline.completion.InlineCompletionInsertHandler
 import com.intellij.codeInsight.inline.completion.InlineCompletionProvider
 import com.intellij.codeInsight.inline.completion.InlineCompletionProviderID
 import com.intellij.codeInsight.inline.completion.InlineCompletionRequest
-import com.intellij.codeInsight.inline.completion.InlineCompletionSuggestion
 import com.intellij.codeInsight.inline.completion.elements.InlineCompletionElement
 import com.intellij.codeInsight.inline.completion.elements.InlineCompletionGrayTextElement
+import com.intellij.codeInsight.inline.completion.suggestion.InlineCompletionSuggestion
+import com.intellij.codeInsight.inline.completion.suggestion.InlineCompletionVariant
 import com.intellij.openapi.components.service
 import com.intellij.openapi.application.ApplicationManager
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
+import com.intellij.openapi.application.EDT
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * AI 补全 Provider，实现 IntelliJ Inline Completion API。
@@ -175,21 +177,18 @@ class AiCompletionProvider : InlineCompletionProvider {
             return emptySuggestion()
         }
 
-        // 构建补全 Flow：将每个候选文本包装为 InlineCompletionGrayTextElement
-        val elementsFlow: Flow<InlineCompletionElement> = flow {
-            for (candidate in candidates) {
-                emit(InlineCompletionGrayTextElement(candidate))
-            }
-        }
-
         // 记录本次返回的候选位置，用于下次 getSuggestion 时检测用户是否拒绝
         lastSuggestionPrefix = context.prefix
         lastSuggestionSuffix = context.suffix
         lastSuggestionAccepted = false
 
-        return buildSuggestion {
-            elementsFlow.collect { element -> emit(element) }
+        // 单候选不安装方向键动作，避免无意义地介入 IntelliJ 原生光标移动。
+        if (candidates.size > 1) {
+            withContext(Dispatchers.EDT) {
+                FimCandidateShortcutBinding.ensureRegistered(editor)
+            }
         }
+        return buildInlineCompletionSuggestion(candidates)
     }
 
     /**
@@ -212,41 +211,23 @@ class AiCompletionProvider : InlineCompletionProvider {
         fimClient.cancel()
     }
 
-    // ponytail: 反射兼容 2025.1+（empty/withFlow 已移除），升级到 2025.1 为最低版本后简化为单路径
     private fun emptySuggestion(): InlineCompletionSuggestion {
-        try {
-            @Suppress("DEPRECATION")
-            return InlineCompletionSuggestion.Companion.empty()
-        } catch (_: NoSuchMethodError) {
-            try {
-                val companion = InlineCompletionSuggestion::class.java
-                    .getDeclaredField("Companion").apply { isAccessible = true }.get(null)
-                val method = companion.javaClass.getMethod("empty")
-                @Suppress("UNCHECKED_CAST")
-                return method.invoke(companion) as InlineCompletionSuggestion
-            } catch (e: Exception) {
-                return buildSuggestion { }
-            }
-        }
+        return InlineCompletionSuggestion.Empty
     }
+}
 
-    private fun buildSuggestion(block: suspend kotlinx.coroutines.flow.FlowCollector<InlineCompletionElement>.() -> Unit): InlineCompletionSuggestion {
-        try {
-            @Suppress("DEPRECATION")
-            return InlineCompletionSuggestion.Companion.withFlow(block)
-        } catch (_: NoSuchMethodError) {
-            try {
-                val cls =
-                    Class.forName("com.intellij.codeInsight.inline.completion.InlineCompletionSingleSuggestion")
-                val companionField = cls.getDeclaredField("Companion").apply { isAccessible = true }
-                val companion = companionField.get(null)
-                val buildMethod =
-                    companion.javaClass.methods.first { it.name == "build" && it.parameterCount == 1 }
-                @Suppress("UNCHECKED_CAST")
-                return buildMethod.invoke(companion, block) as InlineCompletionSuggestion
-            } catch (e: Exception) {
-                throw RuntimeException("Cannot create InlineCompletionSuggestion", e)
+/**
+ * 每个候选必须对应一个独立 variant，方向键切换的是 variant，而不是同一 variant 中的元素。
+ */
+internal fun buildInlineCompletionSuggestion(candidates: List<String>): InlineCompletionSuggestion {
+    val variants = candidates
+        .take(InlineCompletionSuggestion.MAX_VARIANTS_NUMBER)
+        .map { candidate ->
+            InlineCompletionVariant.build {
+                emit(InlineCompletionGrayTextElement(candidate))
             }
         }
+    return object : InlineCompletionSuggestion {
+        override suspend fun getVariants(): List<InlineCompletionVariant> = variants
     }
 }

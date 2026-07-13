@@ -11,6 +11,7 @@ import kotlin.test.assertContains
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertTrue
 
 class AgentLoopHistoryTest {
 
@@ -79,6 +80,37 @@ class AgentLoopHistoryTest {
             )
 
         assertContains(params.toString(), "REVIEW_SKILL_BODY_FOR_TEST")
+    }
+
+    @Test
+    fun `images serialize as Anthropic SDK image content blocks`() {
+        val image = ImageRef(
+            fileName = "browser-shot.png",
+            base64Data = "iVBORw0KGgo=",
+            mimeType = "image/png",
+            width = 12,
+            height = 8,
+            sizeBytes = 8
+        )
+
+        val params = AgentLoop(
+            project = projectAt(createTempDirectory().toString()),
+            session = AgentSession(),
+            modelProvider = { "deepseek-v4-pro" }
+        ).buildRequestParamsForTest(
+            userMessage = "分析这张图片",
+            images = listOf(image),
+            mode = AgentLoop.AgentMode.CHAT
+        )
+
+        val blocks = params.messages().last().content().asBetaContentBlockParams()
+        assertEquals(2, blocks.size)
+        assertTrue(blocks[0].isText())
+        assertContains(blocks[0].asText().text(), "[Image: browser-shot.png]")
+        assertTrue(blocks[1].isImage())
+        val source = blocks[1].asImage().source().asBase64()
+        assertEquals("iVBORw0KGgo=", source.data())
+        assertEquals("image/png", source.mediaType().toString())
     }
 
     @Test
