@@ -475,7 +475,7 @@ class DocConsistencyTest {
         // doc: tools.md FileRef 显示为 "📄 path:lines" 或 "📄 path"
         // 代码使用 "📎" 而非 "📄" — 轻微差异
         val ref = FileRef(path = "src/main/User.kt")
-        assertTrue(ref.displayName.contains("src/main/User.kt"))
+        assertTrue(ref.displayName.contains("User.kt"))
     }
 
     @Test

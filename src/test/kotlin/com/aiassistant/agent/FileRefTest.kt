@@ -11,13 +11,13 @@ class FileRefTest {
     @Test
     fun `简单路径 displayName 格式正确`() {
         val ref = FileRef(path = "src/main/kotlin/User.kt")
-        assertEquals("📎 src/main/kotlin/User.kt", ref.displayName)
+        assertEquals("📎 User.kt", ref.displayName)
     }
 
     @Test
     fun `带行号的 displayName 格式正确`() {
         val ref = FileRef(path = "src/main/kotlin/Service.kt", lines = "40-60")
-        assertEquals("📎 src/main/kotlin/Service.kt:40-60", ref.displayName)
+        assertEquals("📎 Service.kt:40-60", ref.displayName)
     }
 
     @Test

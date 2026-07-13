@@ -16,5 +16,8 @@ data class FileRef(
 ) {
     /** TagsRow 展示标签，如 "📄 UserService.kt:40-60" 或 "📄 UserService.kt" */
     val displayName: String
-        get() = if (lines != null) "📎 $path:$lines" else "📎 $path"
+        get() {
+            val name = path.substringAfterLast("/").substringAfterLast("\\")
+            return if (lines != null) "📎 $name:$lines" else "📎 $name"
+        }
 }

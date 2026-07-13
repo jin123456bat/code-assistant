@@ -41,8 +41,29 @@ class ChatInputArea(
     private val popupMenuItems = mutableListOf<JMenuItem>()
 
     /** Tags 行（FlowLayout，文件+图片混合排列，位于输入框上方），对齐 docs/ui/chat.md §七 + §十四 tagsRow */
-    private val tagsPanel = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0)).apply {
-        isOpaque = true; background = AppColors.pageBg
+    private val tagsPanel = object : JPanel(FlowLayout(FlowLayout.LEFT, 4, 0)) {
+        init { isOpaque = true; background = AppColors.pageBg }
+
+        override fun getPreferredSize(): Dimension {
+            val singleRow = super.getPreferredSize()
+            val containerWidth = (parent?.width ?: width).takeIf { it > 0 } ?: return singleRow
+            if (componentCount == 0) return singleRow
+            val hgap = (layout as FlowLayout).hgap
+            val vgap = (layout as FlowLayout).vgap
+            var x = 0; var rowH = 0; var totalH = 0
+            for (i in 0 until componentCount) {
+                val c = getComponent(i)
+                val cw = c.preferredSize.width
+                val ch = c.preferredSize.height
+                if (x + cw > containerWidth && x > 0) {
+                    totalH += rowH + vgap; x = 0; rowH = 0
+                }
+                x += cw + hgap
+                rowH = maxOf(rowH, ch)
+            }
+            totalH += rowH
+            return Dimension(singleRow.width, totalH.coerceAtLeast(singleRow.height))
+        }
     }
 
     /** 项目文件缓存，后台预加载，避免 EDT 访问 PSI index */
@@ -301,6 +322,50 @@ class ChatInputArea(
         // 初始状态显示 placeholder
         showPlaceholder()
 
+        // 通过 InputMap/ActionMap 覆盖 UP/DOWN/ENTER，确保在 JTextArea 默认 Keymap 之前拦截
+        val inputMap = textArea.getInputMap(JComponent.WHEN_FOCUSED)
+        val actionMap = textArea.actionMap
+        val originalCaretUp = actionMap.get("caret-up")
+        val originalCaretDown = actionMap.get("caret-down")
+
+        actionMap.put("caret-up", object : AbstractAction() {
+            override fun actionPerformed(e: java.awt.event.ActionEvent) {
+                if (activePopup != null) {
+                    selectPopupItem(-1)
+                } else if (isTextAreaEmpty()) {
+                    onFillPreviousMessage?.invoke()?.let { prevMsg ->
+                        textArea.text = prevMsg
+                        textArea.caretPosition = prevMsg.length
+                        if (textArea.foreground == placeholderFg) {
+                            textArea.foreground = defaultFg
+                        }
+                    }
+                } else {
+                    originalCaretUp?.actionPerformed(e)
+                }
+            }
+        })
+        actionMap.put("caret-down", object : AbstractAction() {
+            override fun actionPerformed(e: java.awt.event.ActionEvent) {
+                if (activePopup != null) {
+                    selectPopupItem(1)
+                } else {
+                    originalCaretDown?.actionPerformed(e)
+                }
+            }
+        })
+        // 仅覆盖纯 Enter 键，Shift+Enter 保持默认插入换行行为
+        inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0), "chatSend")
+        actionMap.put("chatSend", object : AbstractAction() {
+            override fun actionPerformed(e: java.awt.event.ActionEvent) {
+                if (activePopup != null) {
+                    clickSelectedPopupItem()
+                } else {
+                    doSend()
+                }
+            }
+        })
+
         // 对齐 docs/ui/components.md §3.2 Focus 状态：边框加粗到 2px，颜色 #3B82F6
         textArea.addFocusListener(object : FocusAdapter() {
             override fun focusGained(e: FocusEvent?) {
@@ -337,49 +402,11 @@ class ChatInputArea(
                 notifyInputChanged()
             }
         })
+        // UP/DOWN/ENTER 已通过 InputMap/ActionMap 处理，KeyListener 只保留 Escape/Ctrl+Shift+N/Ctrl+V
         textArea.addKeyListener(object : KeyAdapter() {
             override fun keyPressed(e: KeyEvent) {
-                // Popup navigation (handled before Enter/Escape for popup mode)
-                if (activePopup != null) {
-                    when (e.keyCode) {
-                        KeyEvent.VK_DOWN -> {
-                            selectPopupItem(1); e.consume(); return
-                        }
-
-                        KeyEvent.VK_UP -> {
-                            selectPopupItem(-1); e.consume(); return
-                        }
-
-                        KeyEvent.VK_ENTER -> {
-                            clickSelectedPopupItem(); e.consume(); return
-                        }
-                    }
-                }
                 when (e.keyCode) {
-                    KeyEvent.VK_ENTER -> {
-                        if (!e.isShiftDown) {
-                            e.consume(); doSend()
-                        }
-                    }
-
-                    KeyEvent.VK_UP -> {
-                        // 对齐 docs/ui/pages.md §十 快捷键：↑（在空输入框）→ 填充上一条消息
-                        if (isTextAreaEmpty()) {
-                            onFillPreviousMessage?.invoke()?.let { prevMsg ->
-                                textArea.text = prevMsg
-                                textArea.caretPosition = prevMsg.length
-                                // 移除 placeholder 状态，恢复为正常文本颜色
-                                if (textArea.foreground == AppColors.textSecondary) {
-                                    textArea.foreground = defaultFg
-                                }
-                            }
-                            e.consume()
-                        }
-                    }
-
                     KeyEvent.VK_ESCAPE -> {
-                        // 对齐 docs/ui/pages.md §十 快捷键 + docs/ui/chat.md §八：Escape 仅关闭 Popup
-                        // 不中断 Agent、LLM、流式生成或工具执行
                         hidePopup()
                     }
                 }
