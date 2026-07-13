@@ -18,6 +18,8 @@ import java.awt.event.ActionEvent
 import java.awt.event.ActionListener
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
+import java.awt.event.MouseWheelEvent
+import java.awt.event.MouseWheelListener
 import java.awt.geom.AffineTransform
 import javax.swing.*
 
@@ -96,7 +98,7 @@ class ToolCallCard(
         isOpaque = true
         viewport.isOpaque = true
         // ponytail: 内层滚到头时把事件转发给外层，避免嵌套滚动卡死
-        addMouseWheelListener(NestedVerticalScrollForwarder(this))
+        addMouseWheelListener(NestedScrollForwarder(this))
     }
 
     // 结果展示区域，可能为 JTextArea（纯文本结果）或 JLabel（HTML Diff 渲染）
@@ -209,9 +211,13 @@ class ToolCallCard(
     }
 
     fun setState(newState: ToolCallState, result: String? = null, durationMs: Long? = null) {
-        val previousState = state
         state = newState
         headerLabel.foreground = newState.color
+        // ponytail: 执行完成/出错/超时时自动展开，确保用户能看到结果
+        if (newState == ToolCallState.DONE || newState == ToolCallState.ERROR || newState == ToolCallState.TIMEOUT) {
+            isCollapsed = false
+            applyCollapseState()
+        }
         headerLabel.icon = if (newState == ToolCallState.EXECUTING && newState.icon != null) {
             RotatingIcon(newState.icon!!, rotationAngle)
         } else {
@@ -247,12 +253,9 @@ class ToolCallCard(
         }
         footerLabel.text = if (durationMs != null) "${durationMs}ms" else ""
 
-        // 审批和执行中必须展示交互/进度；首次进入其他状态时回到默认折叠态。
-        // 同一终态的重复刷新保留用户手动展开状态，避免异步结果更新抢占交互。
+        // AWAITING_APPROVAL 和 EXECUTING 始终展开不可折叠
         if (!canCollapse) {
             isCollapsed = false
-        } else if (previousState != newState) {
-            isCollapsed = true
         }
         applyCollapseState()
     }
@@ -262,7 +265,12 @@ class ToolCallCard(
         resultComponent.isVisible = true
         resultScrollPane.isVisible = true
         footerLabel.text = "${durationMs}ms"
-        // 结果晚于状态到达时保留用户当前的折叠选择，避免异步更新抢占交互状态。
+        // 如果已经处于 DONE/ERROR/TIMEOUT 终态，保持展开（避免 setState(DONE) 展开后 setResult() 又折叠的闪烁）
+        if (state != ToolCallState.DONE && state != ToolCallState.ERROR && state != ToolCallState.TIMEOUT) {
+            if (canCollapse) {
+                isCollapsed = true
+            }
+        }
         applyCollapseState()
     }
 
@@ -333,6 +341,34 @@ class ToolCallCard(
 
     private fun disableApprovalButtons() {
         approvalPanel.components.filterIsInstance<JButton>().forEach { it.isEnabled = false }
+    }
+
+    /**
+     * 内层 JScrollPane 滚到头时，把 MouseWheelEvent 转发给父级 JScrollPane，
+     * 避免嵌套滚动被卡死。
+     */
+    private class NestedScrollForwarder(
+        private val self: JScrollPane
+    ) : MouseWheelListener {
+        override fun mouseWheelMoved(e: MouseWheelEvent) {
+            val bar = self.verticalScrollBar
+            // 向下滚且已到底，或向上滚且已到顶 → 转发给父级
+            val atBottom = e.wheelRotation > 0 && bar.value + bar.visibleAmount >= bar.maximum
+            val atTop = e.wheelRotation < 0 && bar.value <= bar.minimum
+            if (atBottom || atTop) {
+                // 找到父级 JScrollPane 并派发事件
+                var parent: java.awt.Container? = self.parent
+                while (parent != null) {
+                    if (parent is JScrollPane) {
+                        parent.dispatchEvent(
+                            javax.swing.SwingUtilities.convertMouseEvent(self, e, parent)
+                        )
+                        break
+                    }
+                    parent = parent.parent
+                }
+            }
+        }
     }
 
     /**

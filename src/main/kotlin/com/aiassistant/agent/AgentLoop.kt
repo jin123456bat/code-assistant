@@ -437,20 +437,12 @@ class AgentLoop(
 
                         // 检查 ToolExecutor 是否产出了图片（通过 session.pendingImages 侧通道）
                         // 对齐 docs/agent/images.md §三：Read 工具读图片时返回 image content block
-                        // 同时包含 text block 兜底：DeepSeek 的 Anthropic 兼容端点不支持 tool_result
-                        // 中的纯 image block，缺少 text block 会导致 API 返回 "tool_use without tool_result"
                         val pendingImages = session.drainPendingImages()
                         if (pendingImages.isNotEmpty()) {
-                            val blocks = mutableListOf<BetaToolResultBlockParam.Content.Block>()
-                            // text block 在前，确保 tool_result 被 API 识别
-                            blocks.add(BetaToolResultBlockParam.Content.Block.ofText(
-                                BetaTextBlockParam.builder().text(finalResult).build()
-                            ))
-                            // image blocks 在后，提供实际图片数据
-                            for (img in pendingImages) {
-                                blocks.add(BetaToolResultBlockParam.Content.Block.ofImage(img.toBetaImageBlockParam()))
+                            val imageBlocks = pendingImages.map { img ->
+                                BetaToolResultBlockParam.Content.Block.ofImage(img.toBetaImageBlockParam())
                             }
-                            val imageContent = BetaToolResultBlockParam.Content.ofBlocks(blocks)
+                            val imageContent = BetaToolResultBlockParam.Content.ofBlocks(imageBlocks)
                             builder.addUserMessageOfBetaContentBlockParams(
                                 listOf(
                                     BetaContentBlockParam.ofToolResult(
