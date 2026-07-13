@@ -82,7 +82,7 @@ text.replace(Regex("`([^`]+)`")) {
 
 ## 四、代码块渲染
 
-使用 `JTextArea`（只读模式）而非 `EditorTextField`：
+使用 `JTextPane + StyledDocument`（只读模式）而非 `EditorTextField`，支持轻量语法高亮：
 
 | 属性  | 值                                         |
 |-----|-------------------------------------------|
@@ -90,7 +90,7 @@ text.replace(Regex("`([^`]+)`")) {
 | 背景色 | `AppColors.codeBg`                        |
 | 前景色 | `AppColors.textSecondary`                 |
 | 边框  | 8px 圆角 + 8px 内边距                          |
-| 滚动  | 水平滚动条随需显示，垂直永不过卷                          |
+| 滚动  | 水平滚动条随需显示，垂直永不过卷；普通滚轮交给外层消息列表，Shift + 滚轮横向滚动 |
 
 ### 等宽字体回退策略
 

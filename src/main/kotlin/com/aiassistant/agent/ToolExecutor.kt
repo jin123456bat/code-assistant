@@ -691,12 +691,22 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
             Regex(Regex.escape(query), setOf(RegexOption.IGNORE_CASE))
         }
 
+        // filePattern 支持简单 glob：* → .* , ? → . ，其余字符按字面量匹配
+        val filePatternRegex = filePattern?.let { pattern ->
+            Regex(
+                Regex.escape(pattern)
+                    .replace("\\*", ".*")
+                    .replace("\\?", "."),
+                RegexOption.IGNORE_CASE
+            )
+        }
+
         File(basePath).walkTopDown()
             .filter {
                 it.isFile && !it.path.contains("/build/") && !it.path.contains("/.git/") && !it.path.contains(
                     "/.idea/"
-                ) && !it.path.contains("/node_modules/") && it.extension in sourceExtensions && (filePattern == null || it.name.contains(
-                    java.io.File(filePattern).name
+                ) && !it.path.contains("/node_modules/") && it.extension in sourceExtensions && (filePatternRegex == null || filePatternRegex.matches(
+                    it.name
                 ))
             }
             .take(800)
