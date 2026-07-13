@@ -32,7 +32,7 @@ Agent 支持用户在文本输入框中粘贴图片，图片经编码后作为�
 | 限制项    | 值                  | 说明                    |
 |--------|--------------------|-----------------------|
 | 单张大小上限 | 5MB（原始像素数据）        | 超过拒绝粘贴，toast 提示       |
-| 单次粘贴张数 | ≤ 5 张              | 超过 5 张时仅取前 5 张        |
+| 单次粘贴张数 | ≤ 20 张              | 超过 20 张时拒绝粘贴，提示移除部分图片        |
 | 缩放策略   | 长边 max 2048px，等比缩放 | 保持宽高比，不拉伸             |
 | 编码格式   | PNG（Base64）        | 无损编码，确保 LLM 看到的图片质量   |
 | 内存占用   | 缩放后通常 ≤ 2MB/张      | 2048px 长边 PNG 约 1-3MB |
@@ -50,7 +50,7 @@ val scaled = if (img.width > maxDim || img.height > maxDim) {
     BufferedImage(
         (img.width * ratio).toInt(),
         (img.height * ratio).toInt(),
-        BufferedImage.TYPE_INT_RGB  // 丢弃 alpha 通道（PNG 透明 → 白底）
+        BufferedImage.TYPE_INT_ARGB  // 保留 Alpha 通道，避免透明区域变黑
     ).apply {
         graphics.drawImage(
             img.getScaledInstance(width, height, Image.SCALE_SMOOTH),
@@ -82,7 +82,7 @@ val base64Data = Base64.getEncoder().encodeToString(baos.toByteArray())
 | 来源     | 格式                    | 说明                     |
 |--------|-----------------------|------------------------|
 | 截图工具   | PNG                   | macOS 截图、Win+Shift+S 等 |
-| 复制图片文件 | JPEG/PNG/GIF/WebP/BMP | 从文件管理器复制               |
+| 复制图片文件 | JPEG/PNG/GIF/WebP（BMP 自动转 PNG） | 从文件管理器复制               |
 | 浏览器复制  | PNG/JPEG              | 右键复制图片                 |
 | 其他应用   | 任何 AWT 支持的格式          | ImageIO 自动解码           |
 
@@ -147,7 +147,8 @@ ImageSource:
 
 ## 三、Read 工具读图片
 
-`Read` 工具在读取图片文件时，返回图片内容而非文本：
+`Read` 工具在读取图片文件时，构建 `ImageRef` 对象并通过 `session.pendingImages` 侧通道传递给 `AgentLoop`，
+由 `AgentLoop` 在组装 API 请求时统一转换为 image content block。
 
 | 特性       | 说明                                              |
 |----------|-------------------------------------------------|
@@ -156,9 +157,13 @@ ImageSource:
 | **返回格式** | ContentBlock 数组，含 `image` block（非 `text` block） |
 | **大小限制** | 与粘贴图片相同：原始 ≤ 5MB                                |
 | **多图片**  | Read 不返回多张图片——一个文件一个 image block                |
+| **实现**   | ToolExecutor 将 ImageRef 存入 session.pendingImages，AgentLoop 取出后调用 `ImageRef.toBetaImageBlockParam()` 构建 API 参数 |
 
 **与文本文件的区别：** Read 文本文件时返回 `ContentBlock.text(fileContent)`，Read 图片文件时返回
 `ContentBlock.image(ImageSource)`。LLM 通过 block 类型区分。
+
+**设计原则：** 图片数据走对象引用（`ImageRef`），不走字符串协议。所有图片 → API ImageBlock 的转换
+统一通过 `ImageRef.toBetaImageBlockParam()` 完成，消除分散的 MIME 映射和魔术字符串解析。
 
 ---
 
@@ -185,7 +190,7 @@ ImageRef:
 ├── fileName: String        // 文件名，粘贴图片生成时间戳名如 "paste_20260628_143000.png"
 ├── base64Data: String      // Base64 编码数据
 ├── mimeType: String        // MIME 类型，"image/png" / "image/jpeg" / "image/gif" / "image/webp"
-├── thumbnail: BufferedImage // 缩略图（64×64，TagsRow 展示用）
+├── thumbnail: BufferedImage // 缩略图（48×48，TagsRow 展示用）
 ├── width: Int              // 缩放后宽度（px）
 ├── height: Int             // 缩放后高度（px）
 └── sizeBytes: Long         // Base64 编码前字节数

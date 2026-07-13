@@ -232,8 +232,8 @@ PlanCard 渲染在 Chat 消息流顶部，展示当前执行计划。详细规�
   → 输入区域显示缩略图 tag [🖼 filename ✕]，可点击删除
 ```
 
-- 支持格式：PNG、JPEG、GIF、WebP、BMP
-- 单张上限 5MB，单次粘贴最多 5 张
+- 支持格式：PNG、JPEG、GIF、WebP（BMP 自动转为 PNG）
+- 单张上限 5MB（Anthropic API 硬限制），单次粘贴最多 20 张（对齐 Anthropic API 上限）
 - UI 展示：48×48 缩略图 tag，带文件名和大小
 - 图片不注入文本上下文——作为独立的 `image` content block 与文本 `text` block 并列在 API 请求的 user
   message `content` 数组中

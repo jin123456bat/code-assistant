@@ -448,27 +448,6 @@ class ChatViewModel(
     }
 
     /**
-     * 添加粘贴图片引用，对齐 docs/ui/chat.md §十二 addImage()。
-     * 单次最多 5 张，委托 updateInputState 统一更新 InputState。
-     */
-    fun addImage(image: ImageRef) {
-        val updated = inputState.images.toMutableList()
-        if (updated.size < 5) {
-            updated.add(image)
-        }
-        updateInputState(images = updated)
-    }
-
-    /**
-     * 移除图片引用，对齐 docs/ui/chat.md §十二 removeImage()。
-     * 委托 updateInputState 统一更新 InputState。
-     */
-    fun removeImage(imageId: String) {
-        val updated = inputState.images.filter { it.id != imageId }
-        updateInputState(images = updated)
-    }
-
-    /**
      * 发送用户消息到 Agent 循环。
      *
      * @param text 用户输入的文本内容。附件（attachments）和图片（images）不在此参数传入，
@@ -922,7 +901,7 @@ data class InputState(
     val manualRefs: List<FileRef> = emptyList(),
     /** 选中代码引用（仅一个），对齐 docs/ui/chat.md §十二 InputState.selectionRef */
     val selectionRef: FileRef? = null,
-    /** 粘贴的图片（可多个，单次 ≤ 5 张），对齐 docs/ui/chat.md §十二 InputState.images */
+    /** 粘贴的图片（可多个，单次 ≤ 20 张，对齐 Anthropic API），对齐 docs/ui/chat.md §十二 InputState.images */
     val images: List<ImageRef> = emptyList(),
     /** 当前输入文本估算 token 数（不含图片），对齐 docs/ui/chat.md §十二 InputState.tokenCount */
     val tokenCount: Int = 0

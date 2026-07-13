@@ -1,5 +1,6 @@
 package com.aiassistant.ui.chat
 
+import com.aiassistant.AppLogger
 import com.aiassistant.agent.FileRef
 import com.aiassistant.agent.ImageRef
 import com.aiassistant.ui.AppColors
@@ -416,7 +417,9 @@ class ChatInputArea(
                 }
                 // Ctrl/Cmd+V with image in clipboard → paste as image
                 if (e.keyCode == KeyEvent.VK_V && (e.isMetaDown || e.isControlDown)) {
-                    pasteImage()
+                    if (pasteImage()) {
+                        e.consume()  // 阻止默认文本粘贴，避免文件名等文本残留
+                    }
                 }
             }
         })
@@ -723,115 +726,171 @@ class ChatInputArea(
     }
 
     // ponytail: clipboard image paste — 构建 ImageRef 模型对象，对齐 docs/ui/chat.md §七剪贴板图片粘贴 + §十二 ImageRef
-    private fun pasteImage() {
+    private fun pasteImage(): Boolean {
         try {
             val clipboard = Toolkit.getDefaultToolkit().systemClipboard
-            if (!clipboard.isDataFlavorAvailable(DataFlavor.imageFlavor)) return
-            // 单次粘贴最多 5 张，对齐 docs/ui/chat.md §七
-            if (imageRefs.size >= 5) {
-                JOptionPane.showMessageDialog(
-                    this,
-                    "单次粘贴最多 5 张图片，请先移除部分已粘贴的图片后再试。",
-                    "图片数量超限",
-                    JOptionPane.WARNING_MESSAGE
-                )
-                return
+            // 优先处理 imageFlavor（截图 Cmd+Shift+Ctrl+4、Preview 复制等）
+            if (clipboard.isDataFlavorAvailable(DataFlavor.imageFlavor)) {
+                val img = clipboard.getData(DataFlavor.imageFlavor) as? BufferedImage ?: return false
+                // 先获取文件列表（如可用），传入 detectImageFormat 避免重复读剪贴板（TOCTOU）
+                @Suppress("UNCHECKED_CAST")
+                val files = try {
+                    if (clipboard.isDataFlavorAvailable(DataFlavor.javaFileListFlavor))
+                        clipboard.getData(DataFlavor.javaFileListFlavor) as? List<java.io.File>
+                    else null
+                } catch (_: Exception) { null }
+                if (!checkImageLimit()) return false
+                val (formatName, extension, mimeType) = detectImageFormat(files?.firstOrNull())
+                processClipboardImage(img, formatName, extension, mimeType)
+                refreshTags()
+                return true
             }
-            val img = clipboard.getData(DataFlavor.imageFlavor) as BufferedImage
-            // Scale down（长边 max 2048px，保持比例），对齐 docs/ui/chat.md §七
-            val maxDim = 2048
-            val scaled = if (img.width > maxDim || img.height > maxDim) {
-                val ratio = maxDim.toDouble() / maxOf(img.width, img.height)
-                BufferedImage(
-                    (img.width * ratio).toInt(),
-                    (img.height * ratio).toInt(),
-                    BufferedImage.TYPE_INT_RGB
-                ).apply {
-                    graphics.drawImage(
-                        img.getScaledInstance(width, height, Image.SCALE_SMOOTH),
-                        0,
-                        0,
+            // Fallback: javaFileListFlavor（Finder 复制、部分截图工具、浏览器右键复制图片）
+            if (clipboard.isDataFlavorAvailable(DataFlavor.javaFileListFlavor)) {
+                @Suppress("UNCHECKED_CAST")
+                val files = clipboard.getData(DataFlavor.javaFileListFlavor) as? List<java.io.File> ?: return false
+                var pasted = false
+                for (file in files) {
+                    if (!checkImageLimit()) return pasted
+                    val img = try {
+                        ImageIO.read(file)
+                    } catch (_: Exception) {
                         null
-                    )
+                    } ?: continue
+                    val (formatName, extension, mimeType) = detectImageFormat(file)
+                    processClipboardImage(img, formatName, extension, mimeType)
+                    pasted = true
                 }
-            } else img
-            // 检测剪贴板中图片的原始格式，默认 PNG，对齐 docs/ui/chat.md §七 支持格式：PNG、JPEG、GIF、WebP、BMP
-            val (formatName, extension, mimeType) = detectImageFormat(clipboard)
-            // Encode to base64
-            val baos = ByteArrayOutputStream()
-            ImageIO.write(scaled, formatName, baos)
-            // 单张上限 5MB，对齐 docs/ui/chat.md §七
-            if (baos.size() > 5 * 1024 * 1024) {
-                val sizeMB = String.format("%.1f", baos.size() / (1024.0 * 1024.0))
-                JOptionPane.showMessageDialog(
-                    this,
-                    "图片大小为 ${sizeMB}MB，超过单张上限 5MB，请压缩后再试。",
-                    "图片大小超限",
-                    JOptionPane.WARNING_MESSAGE
-                )
-                return
+                if (pasted) refreshTags()
+                return pasted
             }
-            val timestamp =
-                LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
-            val fileName = "paste_$timestamp.$extension"
-            // 生成 48x48 缩略图，对齐 docs/ui/chat.md §七「48x48 缩略图 tag」
-            val thumbnail = BufferedImage(48, 48, BufferedImage.TYPE_INT_ARGB).apply {
-                val g = graphics as Graphics2D
-                g.setRenderingHint(
-                    RenderingHints.KEY_INTERPOLATION,
-                    RenderingHints.VALUE_INTERPOLATION_BILINEAR
-                )
-                g.drawImage(scaled.getScaledInstance(48, 48, Image.SCALE_SMOOTH), 0, 0, null)
-                g.dispose()
-            }
-            val imageRef = ImageRef(
-                id = UUID.randomUUID().toString(),
-                fileName = fileName,
-                base64Data = Base64.getEncoder().encodeToString(baos.toByteArray()),
-                mimeType = mimeType,
-                thumbnail = thumbnail,
-                width = scaled.width,
-                height = scaled.height,
-                sizeBytes = baos.size().toLong()
-            )
-            imageRefs.add(imageRef)
-            refreshTags()
-        } catch (_: Exception) { /* clipboard access error */
+            return false
+        } catch (e: Exception) {
+            AppLogger.warn("Clipboard image paste failed: ${e.message}")
+            return false
         }
     }
 
-    /** 检测剪贴板中图片的原始格式（PNG/JPEG/GIF/WebP/BMP），默认 PNG */
-    private fun detectImageFormat(clipboard: java.awt.datatransfer.Clipboard): Triple<String, String, String> {
+    /** 检查图片数量是否已达上限（20 张，对齐 Anthropic API 限制），超限时弹出提示 */
+    private fun checkImageLimit(): Boolean {
+        if (imageRefs.size >= 20) {
+            JOptionPane.showMessageDialog(
+                this,
+                "单次粘贴最多 20 张图片，请先移除部分已粘贴的图片后再试。",
+                "图片数量超限",
+                JOptionPane.WARNING_MESSAGE
+            )
+            return false
+        }
+        return true
+    }
+
+    /** 处理单张图片：缩放、编码、构建 ImageRef 并添加到 imageRefs */
+    private fun processClipboardImage(
+        img: BufferedImage,
+        formatName: String,
+        extension: String,
+        mimeType: String
+    ) {
+        // Scale down（长边 max 2048px，保持比例），对齐 docs/ui/chat.md §七
+        val maxDim = 2048
+        val scaled = if (img.width > maxDim || img.height > maxDim) {
+            val ratio = maxDim.toDouble() / maxOf(img.width, img.height)
+            BufferedImage(
+                (img.width * ratio).toInt(),
+                (img.height * ratio).toInt(),
+                BufferedImage.TYPE_INT_ARGB  // 保留 Alpha 通道，避免透明区域变黑
+            ).apply {
+                val g = graphics
+                g.drawImage(
+                    img.getScaledInstance(width, height, Image.SCALE_SMOOTH),
+                    0,
+                    0,
+                    null
+                )
+                g.dispose()
+            }
+        } else img
+        // Encode to base64
+        val baos = ByteArrayOutputStream()
+        val writeOk = ImageIO.write(scaled, formatName, baos)
+        // ImageIO.write() 失败时回退到 PNG 重试
+        if (!writeOk || baos.size() == 0) {
+            baos.reset()
+            val pngOk = ImageIO.write(scaled, "png", baos)
+            if (!pngOk || baos.size() == 0) {
+                JOptionPane.showMessageDialog(
+                    this,
+                    "图片编码失败，不支持的图片格式。",
+                    "编码失败",
+                    JOptionPane.WARNING_MESSAGE
+                )
+                return
+            }
+        }
+        // 单张上限 5MB，对齐 docs/ui/chat.md §七
+        if (baos.size() > 5 * 1024 * 1024) {
+            val sizeMB = String.format("%.1f", baos.size() / (1024.0 * 1024.0))
+            JOptionPane.showMessageDialog(
+                this,
+                "图片大小为 ${sizeMB}MB，超过单张上限 5MB，请压缩后再试。",
+                "图片大小超限",
+                JOptionPane.WARNING_MESSAGE
+            )
+            return
+        }
+        val timestamp =
+            LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
+        val fileName = "paste_$timestamp.$extension"
+        // 生成 48x48 缩略图，对齐 docs/ui/chat.md §七「48x48 缩略图 tag」
+        val thumbnail = BufferedImage(48, 48, BufferedImage.TYPE_INT_ARGB).apply {
+            val g = graphics as Graphics2D
+            g.setRenderingHint(
+                RenderingHints.KEY_INTERPOLATION,
+                RenderingHints.VALUE_INTERPOLATION_BILINEAR
+            )
+            g.drawImage(scaled.getScaledInstance(48, 48, Image.SCALE_SMOOTH), 0, 0, null)
+            g.dispose()
+        }
+        // 如果因格式不支持回退到了 PNG，fileName 和 mimeType 也同步修正
+        val actualMimeType = if (!writeOk && formatName != "png") "image/png" else mimeType
+        val actualExtension = if (!writeOk && formatName != "png") "png" else extension
+        val actualFileName = "paste_$timestamp.$actualExtension"
+        val imageRef = ImageRef(
+            id = UUID.randomUUID().toString(),
+            fileName = actualFileName,
+            base64Data = Base64.getEncoder().encodeToString(baos.toByteArray()),
+            mimeType = actualMimeType,
+            thumbnail = thumbnail,
+            width = scaled.width,
+            height = scaled.height,
+            sizeBytes = baos.size().toLong()
+        )
+        imageRefs.add(imageRef)
+    }
+
+    /** 检测图片的原始格式（PNG/JPEG/GIF/WebP/BMP），默认 PNG */
+    private fun detectImageFormat(file: java.io.File?): Triple<String, String, String> {
+        // BMP 不在 Anthropic API 支持列表中，不列入 supportedFormats，自动回退为 PNG
         val supportedFormats = listOf(
             Triple("png", "png", "image/png"),
             Triple("jpeg", "jpg", "image/jpeg"),
             Triple("jpg", "jpg", "image/jpeg"),
             Triple("gif", "gif", "image/gif"),
             Triple("webp", "webp", "image/webp"),
-            Triple("bmp", "bmp", "image/bmp"),
         )
-        // 尝试从 DataFlavor.javaFileListFlavor 获取文件名推断格式
-        try {
-            if (clipboard.isDataFlavorAvailable(DataFlavor.javaFileListFlavor)) {
-                @Suppress("UNCHECKED_CAST")
-                val files = clipboard.getData(DataFlavor.javaFileListFlavor) as? List<java.io.File>
-                val fileName = files?.firstOrNull()?.name?.lowercase() ?: ""
-                for ((fmt, ext, mime) in supportedFormats) {
-                    if (fileName.endsWith(".$fmt")) {
-                        // 验证 ImageIO 是否能写出该格式，否则回退到 PNG
-                        val writerNames = ImageIO.getWriterFormatNames()
-                        return if (writerNames.any { it.equals(fmt, ignoreCase = true) }) {
-                            Triple(fmt, ext, mime)
-                        } else {
-                            // 格式不受 ImageIO 支持（如无 WebP 插件），编码为 PNG 但保留原始 MIME 扩展名标识
-                            Triple("png", ext, mime)
-                        }
-                    }
+        val fileName = file?.name?.lowercase() ?: ""
+        for ((fmt, ext, mime) in supportedFormats) {
+            if (fileName.endsWith(".$fmt")) {
+                val writerNames = ImageIO.getWriterFormatNames()
+                return if (writerNames.any { it.equals(fmt, ignoreCase = true) }) {
+                    Triple(fmt, ext, mime)
+                } else {
+                    // ImageIO 不支持该格式写入（如无 WebP 插件），统一回退为 PNG
+                    Triple("png", "png", "image/png")
                 }
             }
-        } catch (_: Exception) { /* fall through to default */
         }
-        // 默认回退到 PNG
         return Triple("png", "png", "image/png")
     }
 

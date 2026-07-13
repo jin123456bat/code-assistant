@@ -435,47 +435,25 @@ class AgentLoop(
                                 rawResult
                             }
 
-                        // 检测图片结果标记 __IMAGE_RESULT__: 前缀
+                        // 检查 ToolExecutor 是否产出了图片（通过 session.pendingImages 侧通道）
                         // 对齐 docs/agent/images.md §三：Read 工具读图片时返回 image content block
-                        if (finalResult.startsWith(ToolExecutor.IMAGE_RESULT_PREFIX)) {
-                            val imageData =
-                                finalResult.removePrefix(ToolExecutor.IMAGE_RESULT_PREFIX)
-                            val colonIdx = imageData.indexOf(':')
-                            if (colonIdx > 0) {
-                                val mimeType = imageData.substring(0, colonIdx)
-                                val base64Data = imageData.substring(colonIdx + 1)
-                                val mediaType = when (mimeType) {
-                                    "image/jpeg" -> BetaBase64ImageSource.MediaType.IMAGE_JPEG
-                                    "image/gif" -> BetaBase64ImageSource.MediaType.IMAGE_GIF
-                                    "image/webp" -> BetaBase64ImageSource.MediaType.IMAGE_WEBP
-                                    else -> BetaBase64ImageSource.MediaType.IMAGE_PNG
-                                }
-                                val imageSource = BetaBase64ImageSource.builder()
-                                    .data(base64Data)
-                                    .mediaType(mediaType)
-                                    .build()
-                                val imageBlock = BetaImageBlockParam.builder()
-                                    .source(BetaImageBlockParam.Source.ofBase64(imageSource))
-                                    .build()
-                                val imageContentBlock =
-                                    BetaToolResultBlockParam.Content.Block.ofImage(imageBlock)
-                                val imageContent = BetaToolResultBlockParam.Content.ofBlocks(
-                                    listOf(imageContentBlock)
-                                )
-                                // 立即追加当前工具结果到 params.messages，后续工具可看到前面的结果
-                                // 对齐 docs/agent/loop.md §一
-                                builder.addUserMessageOfBetaContentBlockParams(
-                                    listOf(
-                                        BetaContentBlockParam.ofToolResult(
-                                            BetaToolResultBlockParam.builder()
-                                                .toolUseId(toolUse.id())
-                                                .content(imageContent)
-                                                .build()
-                                        )
+                        val pendingImages = session.drainPendingImages()
+                        if (pendingImages.isNotEmpty()) {
+                            val imageBlocks = pendingImages.map { img ->
+                                BetaToolResultBlockParam.Content.Block.ofImage(img.toBetaImageBlockParam())
+                            }
+                            val imageContent = BetaToolResultBlockParam.Content.ofBlocks(imageBlocks)
+                            builder.addUserMessageOfBetaContentBlockParams(
+                                listOf(
+                                    BetaContentBlockParam.ofToolResult(
+                                        BetaToolResultBlockParam.builder()
+                                            .toolUseId(toolUse.id())
+                                            .content(imageContent)
+                                            .build()
                                     )
                                 )
-                                continue
-                            }
+                            )
+                            continue
                         }
 
                         // 立即追加当前工具结果到 params.messages，后续工具可看到前面的结果
@@ -1050,22 +1028,9 @@ $historyText
             )
         )
 
-        // 图片 blocks：每个 ImageRef 转为独立的 image content block
+        // 图片 blocks：每个 ImageRef 转为独立的 image content block，统一通过 ImageRef.toBetaContentBlockParam()
         for (img in images) {
-            val mediaType = when (img.mimeType) {
-                "image/jpeg" -> BetaBase64ImageSource.MediaType.IMAGE_JPEG
-                "image/gif" -> BetaBase64ImageSource.MediaType.IMAGE_GIF
-                "image/webp" -> BetaBase64ImageSource.MediaType.IMAGE_WEBP
-                else -> BetaBase64ImageSource.MediaType.IMAGE_PNG
-            }
-            val source = BetaBase64ImageSource.builder()
-                .mediaType(mediaType)
-                .data(img.base64Data)
-                .build()
-            val imageBlock = BetaImageBlockParam.builder()
-                .source(source)
-                .build()
-            blocks.add(BetaContentBlockParam.ofImage(imageBlock))
+            blocks.add(img.toBetaContentBlockParam())
         }
 
         return blocks

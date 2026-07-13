@@ -268,7 +268,7 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
         val file = resolveProjectFile(basePath, path) ?: return pathEscapedError(path)
         if (!file.exists()) return "错误: 文件 \"$path\" 不存在"
 
-        // 图片文件：返回 base64 编码（对齐 docs/agent/images.md §三 Read 工具图片支持）
+        // 图片文件：构建 ImageRef 存入 session.pendingImages，AgentLoop 取出后转为 image content block
         val imageMime = imageMimeType(file)
         if (imageMime != null) {
             val bytes = file.readBytes()
@@ -277,7 +277,16 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
             val base64 = java.util.Base64.getEncoder().encodeToString(bytes)
             session.fileStamps[path] = file.lastModified()
             session.filesReadThisTurn.add(path)
-            return "${IMAGE_RESULT_PREFIX}$imageMime\n[图片: $path (${bytes.size} 字节, ${imageMime})]\n$base64\n[图片结束: $path]"
+            val imageRef = ImageRef(
+                fileName = file.name,
+                base64Data = base64,
+                mimeType = imageMime,
+                width = 0,
+                height = 0,
+                sizeBytes = bytes.size.toLong()
+            )
+            synchronized(session.pendingImages) { session.pendingImages.add(imageRef) }
+            return "[图片: $path (${bytes.size} 字节, ${imageMime})]"
         }
 
         val lines = file.readLines()
@@ -1711,8 +1720,5 @@ class ToolExecutor(private val project: Project, private val session: AgentSessi
                 "\n... (共 ${lines.size} 行，已截断到 $maxLines 行)"
     }
 
-    companion object {
-        /** 图片结果前缀，用于 Read 工具返回图片时标记 content block（对齐 docs/agent/images.md §三） */
-        const val IMAGE_RESULT_PREFIX = "__IMAGE_RESULT__:"
-    }
+    companion object
 }
