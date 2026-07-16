@@ -204,6 +204,9 @@ class McpPage(project: Project) : JPanel(BorderLayout()), Disposable {
             toolTipText = buildString {
                 append("<html>command: ${server.config.command.escapeHtml()}")
                 append("<br>tools: ${server.registeredToolNames.joinToString(", ").ifEmpty { "(none)" }.escapeHtml()}")
+                if (server.schemaValidationFailures.isNotEmpty()) {
+                    append("<br>Schema 校验失败: ${server.schemaValidationFailures.joinToString("; ").escapeHtml()}")
+                }
                 server.lastErrorMessage?.let { append("<br>错误: ${it.escapeHtml()}") }
                 append("</html>")
             }
