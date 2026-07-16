@@ -117,33 +117,35 @@ class McpPage(project: Project) : JPanel(BorderLayout()), Disposable {
             isOpaque = true
             background = AppColors.cardBg
         }
-        val greenHex = AppColors.success.toHtmlColor()
-        val amberHex = AppColors.warning.toHtmlColor()
-        val redHex = AppColors.error.toHtmlColor()
-        val dimHex = AppColors.textSecondary.toHtmlColor()
-
         // 状态指示灯 + 名称 + 状态
         // 文档 §六 定义: 🟢 RUNNING / 🟡 INITIALIZING / 🔴 CRASHED / ERROR
-        val (dotColor, stateLabel) = when (server.state) {
-            McpManager.State.RUNNING -> greenHex to "RUNNING"
-            McpManager.State.INITIALIZING -> amberHex to "INITIALIZING"
-            McpManager.State.CONFIGURED -> dimHex to "CONFIGURED"
-            McpManager.State.CRASHED -> redHex to "CRASHED"
-            McpManager.State.ERROR -> redHex to "ERROR"
-            McpManager.State.INIT_ERROR -> redHex to "ERROR"
-            else -> dimHex to "${server.state}"
+        val (stateColor, stateLabel) = when (server.state) {
+            McpManager.State.RUNNING -> AppColors.success to "RUNNING"
+            McpManager.State.INITIALIZING -> AppColors.warning to "INITIALIZING"
+            McpManager.State.CONFIGURED -> AppColors.textSecondary to "CONFIGURED"
+            McpManager.State.CRASHED -> AppColors.error to "CRASHED"
+            McpManager.State.ERROR -> AppColors.error to "ERROR"
+            McpManager.State.INIT_ERROR -> AppColors.error to "ERROR"
+            else -> AppColors.textSecondary to "${server.state}"
         }
 
         // 标题和主操作独占一行，避免窄 ToolWindow 中按钮栏挤压详情内容。
         val titleRow = JPanel(BorderLayout(8, 0)).apply { isOpaque = false }
-        titleRow.add(
-            JLabel(
-                "<html><span style='color:$dotColor'>●</span> " +
-                        "<b>${server.config.id.cardText()}</b> " +
-                        "<span style='color:$dotColor;font-size:11px'>$stateLabel</span></html>"
-            ).apply { toolTipText = server.config.id },
-            BorderLayout.CENTER
-        )
+        val titleContent = JPanel(BorderLayout(4, 0)).apply {
+            isOpaque = false
+            add(JLabel("●").apply { foreground = stateColor }, BorderLayout.WEST)
+            add(
+                ElidingLabel(value = server.config.id).apply {
+                    font = font.deriveFont(java.awt.Font.BOLD)
+                },
+                BorderLayout.CENTER
+            )
+            add(JLabel(stateLabel).apply {
+                foreground = stateColor
+                font = font.deriveFont(11f)
+            }, BorderLayout.EAST)
+        }
+        titleRow.add(titleContent, BorderLayout.CENTER)
         titleRow.add(JButton(server.primaryActionLabel()).compactAction("启动、停止或重连此 MCP Server").apply {
             addActionListener {
                 val ok = if (server.state == McpManager.State.RUNNING) {
@@ -167,51 +169,40 @@ class McpPage(project: Project) : JPanel(BorderLayout()), Disposable {
         card.add(titleRow, BorderLayout.NORTH)
 
         // 详情单独占据卡片主体，状态变化时增加的错误信息不会改变操作区的水平布局。
-        val htmlBuilder = StringBuilder().apply {
-            append("<html>")
-            append("<span style='color:$dimHex;font-size:11px'>command: ${server.config.command.cardText()}</span>")
-            append(
-                "<br><span style='color:$dimHex;font-size:11px'>tools: ${
-                server.registeredToolNames.joinToString(
-                    ", "
-                ).ifEmpty { "(none)" }.cardText()
-            } (${server.registeredToolNames.size})</span>")
-
-            // Schema 校验失败警告
-            if (server.schemaValidationFailures.isNotEmpty()) {
-                append("<br><span style='color:$amberHex;font-size:11px'>⚠ Schema 校验失败: ${
-                    server.schemaValidationFailures.joinToString("; ").cardText()
-                }</span>")
-            }
-
-            // 初始化中：显示"最多等待 3 分钟"提示
-            if (server.state == McpManager.State.INITIALIZING) {
-                append("<br><span style='color:$dimHex;font-size:11px'>正在安装依赖 (npm install)...</span>")
-                append("<br><span style='color:$dimHex;font-size:11px'>最多等待 3 分钟</span>")
-            }
-
-            // 崩溃/错误状态：显示错误详情
-            val showErrorDetail = server.state == McpManager.State.CRASHED
-                    || server.state == McpManager.State.ERROR
-                    || server.state == McpManager.State.INIT_ERROR
-            if (showErrorDetail && server.lastErrorMessage != null) {
-                append("<br><span style='color:$redHex;font-size:11px'>错误: ${server.lastErrorMessage.orEmpty().cardText()}</span>")
-            }
-
-            append("</html>")
+        val details = JPanel().apply {
+            isOpaque = false
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
         }
-        val info = JLabel(htmlBuilder.toString()).apply {
-            toolTipText = buildString {
-                append("<html>command: ${server.config.command.escapeHtml()}")
-                append("<br>tools: ${server.registeredToolNames.joinToString(", ").ifEmpty { "(none)" }.escapeHtml()}")
-                if (server.schemaValidationFailures.isNotEmpty()) {
-                    append("<br>Schema 校验失败: ${server.schemaValidationFailures.joinToString("; ").escapeHtml()}")
-                }
-                server.lastErrorMessage?.let { append("<br>错误: ${it.escapeHtml()}") }
-                append("</html>")
-            }
+        fun addDetail(label: JLabel) {
+            label.alignmentX = LEFT_ALIGNMENT
+            label.maximumSize = Dimension(Int.MAX_VALUE, label.preferredSize.height)
+            details.add(label)
         }
-        card.add(info, BorderLayout.CENTER)
+        addDetail(ElidingLabel("command: ", server.config.command).detailStyle(AppColors.textSecondary))
+        addDetail(
+            ElidingLabel(
+                prefix = "tools: ",
+                value = server.registeredToolNames.joinToString(", ").ifEmpty { "(none)" },
+                suffix = " (${server.registeredToolNames.size})"
+            ).detailStyle(AppColors.textSecondary)
+        )
+        if (server.schemaValidationFailures.isNotEmpty()) {
+            addDetail(
+                ElidingLabel("⚠ Schema 校验失败: ", server.schemaValidationFailures.joinToString("; "))
+                    .detailStyle(AppColors.warning)
+            )
+        }
+        if (server.state == McpManager.State.INITIALIZING) {
+            addDetail(JLabel("正在安装依赖 (npm install)...").detailStyle(AppColors.textSecondary))
+            addDetail(JLabel("最多等待 3 分钟").detailStyle(AppColors.textSecondary))
+        }
+        val showErrorDetail = server.state == McpManager.State.CRASHED
+                || server.state == McpManager.State.ERROR
+                || server.state == McpManager.State.INIT_ERROR
+        if (showErrorDetail && server.lastErrorMessage != null) {
+            addDetail(ElidingLabel("错误: ", server.lastErrorMessage.orEmpty()).detailStyle(AppColors.error))
+        }
+        card.add(details, BorderLayout.CENTER)
 
         // 次要操作放到底部并使用紧凑边距；错误态多一个“查看日志”也不会抢占详情宽度。
         val actionGrid = JPanel(GridLayout(0, 2, 4, 4)).apply { isOpaque = false }
@@ -282,9 +273,20 @@ class McpPage(project: Project) : JPanel(BorderLayout()), Disposable {
     }
 
     private fun renderEmpty(): JPanel {
-        val dimHex = AppColors.textSecondary.toHtmlColor()
-        return JPanel().apply {
-            add(JLabel("<html><div style='text-align:center;padding:40px;color:$dimHex'>还没有 MCP Server<br><span style='font-size:11px'>添加 MCP Server 连接外部工具</span></div></html>"))
+        return JPanel(BorderLayout()).apply {
+            border = BorderFactory.createEmptyBorder(40, 12, 40, 12)
+            val content = JPanel().apply {
+                isOpaque = false
+                layout = BoxLayout(this, BoxLayout.Y_AXIS)
+                add(JLabel("还没有 MCP Server").apply { alignmentX = CENTER_ALIGNMENT })
+                add(Box.createVerticalStrut(4))
+                add(JLabel("添加 MCP Server 连接外部工具").apply {
+                    alignmentX = CENTER_ALIGNMENT
+                    foreground = AppColors.textSecondary
+                    font = font.deriveFont(11f)
+                })
+            }
+            add(content, BorderLayout.CENTER)
             maximumSize = Dimension(Int.MAX_VALUE, preferredSize.height)
         }
     }
@@ -302,16 +304,9 @@ class McpPage(project: Project) : JPanel(BorderLayout()), Disposable {
         accessibleContext.accessibleDescription = accessibleDescription
     }
 
-    private fun String.escapeHtml(): String =
-        replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
-            .replace("\"", "&quot;")
-            .replace("'", "&#39;")
-
-    private fun String.cardText(): String {
-        val displayText = if (length <= CARD_TEXT_LIMIT) this else take(CARD_TEXT_LIMIT - 1) + "…"
-        return displayText.escapeHtml()
+    private fun <T : JLabel> T.detailStyle(color: java.awt.Color): T = apply {
+        foreground = color
+        font = font.deriveFont(11f)
     }
 
     override fun dispose() {
@@ -341,7 +336,63 @@ class McpPage(project: Project) : JPanel(BorderLayout()), Disposable {
         override fun getScrollableTracksViewportHeight(): Boolean = false
     }
 
+    /** 根据组件的实际像素宽度省略文本，避免按字符数估算导致窄侧栏继续溢出。 */
+    private class ElidingLabel(
+        private val prefix: String = "",
+        private val value: String,
+        private val suffix: String = ""
+    ) : JLabel() {
+        private val fullText = prefix + value + suffix
+
+        init {
+            toolTipText = fullText
+            updateDisplayedText(DETAIL_FALLBACK_WIDTH)
+            minimumSize = Dimension(0, preferredSize.height)
+        }
+
+        override fun setBounds(x: Int, y: Int, width: Int, height: Int) {
+            super.setBounds(x, y, width, height)
+            updateDisplayedText(width)
+        }
+
+        private fun updateDisplayedText(maxWidth: Int) {
+            if (maxWidth <= 0) return
+            val metrics = getFontMetrics(font)
+            if (metrics.stringWidth(fullText) <= maxWidth) {
+                text = fullText
+                return
+            }
+
+            val fixedText = prefix + ELLIPSIS + suffix
+            if (metrics.stringWidth(fixedText) > maxWidth) {
+                text = elide(fullText, maxWidth, metrics)
+                return
+            }
+
+            var low = 0
+            var high = value.length
+            while (low < high) {
+                val middle = (low + high + 1) / 2
+                val candidate = prefix + value.take(middle) + ELLIPSIS + suffix
+                if (metrics.stringWidth(candidate) <= maxWidth) low = middle else high = middle - 1
+            }
+            text = prefix + value.take(low) + ELLIPSIS + suffix
+        }
+
+        private fun elide(source: String, maxWidth: Int, metrics: java.awt.FontMetrics): String {
+            var low = 0
+            var high = source.length
+            while (low < high) {
+                val middle = (low + high + 1) / 2
+                val candidate = source.take(middle) + ELLIPSIS
+                if (metrics.stringWidth(candidate) <= maxWidth) low = middle else high = middle - 1
+            }
+            return source.take(low) + ELLIPSIS
+        }
+    }
+
     private companion object {
-        const val CARD_TEXT_LIMIT = 48
+        const val DETAIL_FALLBACK_WIDTH = 200
+        const val ELLIPSIS = "…"
     }
 }
