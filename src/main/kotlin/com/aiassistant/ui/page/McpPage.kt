@@ -6,13 +6,17 @@ import com.aiassistant.ui.toHtmlColor
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.project.Project
 import java.awt.BorderLayout
+import java.awt.Dimension
 import java.awt.FlowLayout
+import java.awt.GridLayout
+import java.awt.Insets
+import java.awt.Rectangle
 import javax.swing.*
 
 class McpPage(project: Project) : JPanel(BorderLayout()), Disposable {
 
     private val manager = McpManager(project)
-    private val listContainer = JPanel().apply { layout = BoxLayout(this, BoxLayout.Y_AXIS) }
+    private val listContainer = ViewportWidthPanel().apply { layout = BoxLayout(this, BoxLayout.Y_AXIS) }
     private val addForm = JPanel().apply { layout = BoxLayout(this, BoxLayout.Y_AXIS) }
     private val nameField = JTextField(15)
     private val cmdField = JTextField(25)
@@ -105,7 +109,7 @@ class McpPage(project: Project) : JPanel(BorderLayout()), Disposable {
     }
 
     private fun renderCard(server: McpManager.McpServer): JPanel {
-        val card = JPanel(BorderLayout()).apply {
+        val card = JPanel(BorderLayout(0, 6)).apply {
             border = BorderFactory.createCompoundBorder(
                 BorderFactory.createMatteBorder(0, 0, 1, 0, AppColors.border),
                 BorderFactory.createEmptyBorder(8, 12, 8, 12)
@@ -130,67 +134,17 @@ class McpPage(project: Project) : JPanel(BorderLayout()), Disposable {
             else -> dimHex to "${server.state}"
         }
 
-        // 构建卡片 HTML，包含状态指示灯、名称、状态、命令、工具列表等
-        val htmlBuilder = StringBuilder().apply {
-            append("<html>")
-            append("<span style='display:inline-block;width:8px;height:8px;border-radius:50%;background:$dotColor;margin-right:6px'>&nbsp;</span>")
-            append("<b>${server.config.id}</b>")
-            append(" <span style='color:$dotColor;font-size:11px'>$stateLabel</span>")
-            append("<br><span style='color:$dimHex;font-size:11px'>command: ${server.config.command}</span>")
-            append(
-                "<br><span style='color:$dimHex;font-size:11px'>tools: ${
-                server.registeredToolNames.joinToString(
-                    ", "
-                ).ifEmpty { "(none)" }
-            } (${server.registeredToolNames.size})</span>")
-
-            // Schema 校验失败警告
-            if (server.schemaValidationFailures.isNotEmpty()) {
-                append("<br><span style='color:$amberHex;font-size:11px'>⚠ Schema 校验失败: ${
-                    server.schemaValidationFailures.joinToString("; ")
-                }</span>")
-            }
-
-            // 初始化中：显示"最多等待 3 分钟"提示
-            if (server.state == McpManager.State.INITIALIZING) {
-                append("<br><span style='color:$dimHex;font-size:11px'>正在安装依赖 (npm install)...</span>")
-                append("<br><span style='color:$dimHex;font-size:11px'>最多等待 3 分钟</span>")
-            }
-
-            // 崩溃/错误状态：显示错误详情
-            val showErrorDetail = server.state == McpManager.State.CRASHED
-                    || server.state == McpManager.State.ERROR
-                    || server.state == McpManager.State.INIT_ERROR
-            if (showErrorDetail && server.lastErrorMessage != null) {
-                append("<br><span style='color:$redHex;font-size:11px'>错误: ${server.lastErrorMessage}</span>")
-            }
-
-            append("</html>")
-        }
-        val info = JLabel(htmlBuilder.toString())
-        card.add(info, BorderLayout.CENTER)
-
-        // 操作按钮
-        val actions = JPanel(FlowLayout(FlowLayout.RIGHT, 4, 0)).apply { isOpaque = false }
-        actions.add(JButton("▶ 测试连接").apply {
-            font = font.deriveFont(11f)
-            addActionListener {
-                val result = manager.testConnection(server.config.id)
-                val message = if (result.success) {
-                    "🟢 连接正常，发现 ${result.toolCount ?: 0} 个工具 (${result.latencyMs}ms)"
-                } else {
-                    "🔴 连接失败: ${result.errorMessage ?: "未知错误"}"
-                }
-                JOptionPane.showMessageDialog(
-                    this@McpPage,
-                    message,
-                    "MCP 测试连接",
-                    if (result.success) JOptionPane.INFORMATION_MESSAGE else JOptionPane.WARNING_MESSAGE
-                )
-            }
-        })
-        actions.add(JButton(server.primaryActionLabel()).apply {
-            font = font.deriveFont(11f)
+        // 标题和主操作独占一行，避免窄 ToolWindow 中按钮栏挤压详情内容。
+        val titleRow = JPanel(BorderLayout(8, 0)).apply { isOpaque = false }
+        titleRow.add(
+            JLabel(
+                "<html><span style='color:$dotColor'>●</span> " +
+                        "<b>${server.config.id.cardText()}</b> " +
+                        "<span style='color:$dotColor;font-size:11px'>$stateLabel</span></html>"
+            ).apply { toolTipText = server.config.id },
+            BorderLayout.CENTER
+        )
+        titleRow.add(JButton(server.primaryActionLabel()).compactAction("启动、停止或重连此 MCP Server").apply {
             addActionListener {
                 val ok = if (server.state == McpManager.State.RUNNING) {
                     manager.disconnect(server.config.id)
@@ -209,14 +163,81 @@ class McpPage(project: Project) : JPanel(BorderLayout()), Disposable {
                     )
                 }
             }
+        }, BorderLayout.EAST)
+        card.add(titleRow, BorderLayout.NORTH)
+
+        // 详情单独占据卡片主体，状态变化时增加的错误信息不会改变操作区的水平布局。
+        val htmlBuilder = StringBuilder().apply {
+            append("<html>")
+            append("<span style='color:$dimHex;font-size:11px'>command: ${server.config.command.cardText()}</span>")
+            append(
+                "<br><span style='color:$dimHex;font-size:11px'>tools: ${
+                server.registeredToolNames.joinToString(
+                    ", "
+                ).ifEmpty { "(none)" }.cardText()
+            } (${server.registeredToolNames.size})</span>")
+
+            // Schema 校验失败警告
+            if (server.schemaValidationFailures.isNotEmpty()) {
+                append("<br><span style='color:$amberHex;font-size:11px'>⚠ Schema 校验失败: ${
+                    server.schemaValidationFailures.joinToString("; ").cardText()
+                }</span>")
+            }
+
+            // 初始化中：显示"最多等待 3 分钟"提示
+            if (server.state == McpManager.State.INITIALIZING) {
+                append("<br><span style='color:$dimHex;font-size:11px'>正在安装依赖 (npm install)...</span>")
+                append("<br><span style='color:$dimHex;font-size:11px'>最多等待 3 分钟</span>")
+            }
+
+            // 崩溃/错误状态：显示错误详情
+            val showErrorDetail = server.state == McpManager.State.CRASHED
+                    || server.state == McpManager.State.ERROR
+                    || server.state == McpManager.State.INIT_ERROR
+            if (showErrorDetail && server.lastErrorMessage != null) {
+                append("<br><span style='color:$redHex;font-size:11px'>错误: ${server.lastErrorMessage.orEmpty().cardText()}</span>")
+            }
+
+            append("</html>")
+        }
+        val info = JLabel(htmlBuilder.toString()).apply {
+            toolTipText = buildString {
+                append("<html>command: ${server.config.command.escapeHtml()}")
+                append("<br>tools: ${server.registeredToolNames.joinToString(", ").ifEmpty { "(none)" }.escapeHtml()}")
+                server.lastErrorMessage?.let { append("<br>错误: ${it.escapeHtml()}") }
+                append("</html>")
+            }
+        }
+        card.add(info, BorderLayout.CENTER)
+
+        // 次要操作放到底部并使用紧凑边距；错误态多一个“查看日志”也不会抢占详情宽度。
+        val actionGrid = JPanel(GridLayout(0, 2, 4, 4)).apply { isOpaque = false }
+        val actions = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
+            isOpaque = false
+            add(actionGrid)
+        }
+        actionGrid.add(JButton("测试连接").compactAction("测试此 MCP Server 的连接").apply {
+            addActionListener {
+                val result = manager.testConnection(server.config.id)
+                val message = if (result.success) {
+                    "🟢 连接正常，发现 ${result.toolCount ?: 0} 个工具 (${result.latencyMs}ms)"
+                } else {
+                    "🔴 连接失败: ${result.errorMessage ?: "未知错误"}"
+                }
+                JOptionPane.showMessageDialog(
+                    this@McpPage,
+                    message,
+                    "MCP 测试连接",
+                    if (result.success) JOptionPane.INFORMATION_MESSAGE else JOptionPane.WARNING_MESSAGE
+                )
+            }
         })
         // CRASHED/ERROR/INIT_ERROR 状态显示"查看日志"按钮
         val showLogBtn = server.state == McpManager.State.CRASHED
                 || server.state == McpManager.State.ERROR
                 || server.state == McpManager.State.INIT_ERROR
         if (showLogBtn) {
-            actions.add(JButton("📋 查看日志").apply {
-                font = font.deriveFont(11f)
+            actionGrid.add(JButton("查看日志").compactAction("查看此 MCP Server 的最近日志").apply {
                 addActionListener {
                     val logs = manager.getServerLogs(server.config.id)
                     val textArea = JTextArea().apply {
@@ -239,8 +260,7 @@ class McpPage(project: Project) : JPanel(BorderLayout()), Disposable {
                 }
             })
         }
-        actions.add(JButton("✏ 编辑").apply {
-            font = font.deriveFont(11f)
+        actionGrid.add(JButton("编辑").compactAction("编辑此 MCP Server 配置").apply {
             addActionListener {
                 editingServerId = server.config.id
                 nameField.text = server.config.id
@@ -249,12 +269,12 @@ class McpPage(project: Project) : JPanel(BorderLayout()), Disposable {
                 nameField.requestFocusInWindow()
             }
         })
-        actions.add(JButton("🗑 删除").apply {
-            font = font.deriveFont(11f)
+        actionGrid.add(JButton("删除").compactAction("删除此 MCP Server 配置").apply {
             foreground = AppColors.error
             addActionListener { manager.removeServer(server.config.id); refreshList() }
         })
-        card.add(actions, BorderLayout.EAST)
+        card.add(actions, BorderLayout.SOUTH)
+        card.maximumSize = Dimension(Int.MAX_VALUE, card.preferredSize.height)
         return card
     }
 
@@ -262,19 +282,63 @@ class McpPage(project: Project) : JPanel(BorderLayout()), Disposable {
         val dimHex = AppColors.textSecondary.toHtmlColor()
         return JPanel().apply {
             add(JLabel("<html><div style='text-align:center;padding:40px;color:$dimHex'>还没有 MCP Server<br><span style='font-size:11px'>添加 MCP Server 连接外部工具</span></div></html>"))
+            maximumSize = Dimension(Int.MAX_VALUE, preferredSize.height)
         }
     }
 
     private fun McpManager.McpServer.primaryActionLabel(): String =
         when (state) {
-            McpManager.State.RUNNING, McpManager.State.INITIALIZING -> "⏹ 停止"
-            McpManager.State.ERROR, McpManager.State.CRASHED, McpManager.State.INIT_ERROR -> "🔄 重连"
-            else -> "▶ 启动"
+            McpManager.State.RUNNING, McpManager.State.INITIALIZING -> "停止"
+            McpManager.State.ERROR, McpManager.State.CRASHED, McpManager.State.INIT_ERROR -> "重连"
+            else -> "启动"
         }
+
+    private fun JButton.compactAction(accessibleDescription: String): JButton = apply {
+        font = font.deriveFont(11f)
+        margin = Insets(2, 6, 2, 6)
+        accessibleContext.accessibleDescription = accessibleDescription
+    }
+
+    private fun String.escapeHtml(): String =
+        replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace("\"", "&quot;")
+            .replace("'", "&#39;")
+
+    private fun String.cardText(): String {
+        val displayText = if (length <= CARD_TEXT_LIMIT) this else take(CARD_TEXT_LIMIT - 1) + "…"
+        return displayText.escapeHtml()
+    }
 
     override fun dispose() {
         if (disposed) return
         disposed = true
         manager.dispose()
+    }
+
+    /** JScrollPane 禁用横向滚动时，列表必须始终采用 viewport 宽度，否则长命令会把整页撑出可视区。 */
+    private class ViewportWidthPanel : JPanel(), Scrollable {
+        override fun getPreferredScrollableViewportSize(): Dimension = preferredSize
+
+        override fun getScrollableUnitIncrement(
+            visibleRect: Rectangle,
+            orientation: Int,
+            direction: Int
+        ): Int = 16
+
+        override fun getScrollableBlockIncrement(
+            visibleRect: Rectangle,
+            orientation: Int,
+            direction: Int
+        ): Int = maxOf(visibleRect.height - 16, 16)
+
+        override fun getScrollableTracksViewportWidth(): Boolean = true
+
+        override fun getScrollableTracksViewportHeight(): Boolean = false
+    }
+
+    private companion object {
+        const val CARD_TEXT_LIMIT = 48
     }
 }
