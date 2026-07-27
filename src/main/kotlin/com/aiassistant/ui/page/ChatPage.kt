@@ -91,6 +91,12 @@ class ChatPage(
             if (sessionId != viewModel.sessionId) return
             SwingUtilities.invokeLater {
                 clearTransientUi()
+                // 从数据层重新渲染消息，防止 clearTransientUi 后消息丢失
+                // restoreSession() 中 publishSessionChanged 会触发此监听器，
+                // invokeLater 在消息渲染之后执行，必须重新渲染
+                viewModel.messages.forEach { msg ->
+                    appendMessageRow(renderMessage(msg))
+                }
                 titleLabel.text = viewModel.session.title
                 messageContainer.revalidate()
                 messageContainer.repaint()

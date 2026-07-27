@@ -639,9 +639,8 @@ class GenerateCommitAction : AnAction() {
             ) {
                 try {
                     for (methodName in listOf(
-                        "getSelectedChanges",
                         "getIncludedChanges",
-                        "getDisplayedChanges"
+                        "getSelectedChanges"
                     )) {
                         try {
                             val method = parent.javaClass.getMethod(methodName)
